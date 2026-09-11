@@ -11,7 +11,7 @@ alembic revision --autogenerate -m "description"
 alembic upgrade head
 ```
 
-`env.py` must import every model under `backend/models/` so they're registered on `Base.metadata`, so that autogenerate works correctly (TODO).
+`env.py` imports `backend/models/__init__.py`, which in turn imports every model module so they're registered on `Base.metadata` before autogenerate runs.
 
 ## e2-micro -> Cloud SQL migration (10.5.4)
 

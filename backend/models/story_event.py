@@ -8,7 +8,7 @@ event_links.branch_reason: the character/location that caused the branch
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -42,6 +42,10 @@ class EventLocation(Base, NovelScopedMixin, TimestampMixin):
 
 class EventLink(Base, NovelScopedMixin, TimestampMixin):
     __tablename__ = "event_links"
+    __table_args__ = (
+        Index("ix_event_links_novel_from_event", "novel_id", "from_event_id"),
+        Index("ix_event_links_novel_to_event", "novel_id", "to_event_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     from_event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("story_events.id"), nullable=False)

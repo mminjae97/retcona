@@ -13,11 +13,10 @@ from sqlalchemy import engine_from_config, pool
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
-# TODO: import every model module under backend/models/ so they register on Base.metadata
-# from models.base import Base
-# from models import user, novel, character, location, world_setting, episode, claim, relation, story_event
-# target_metadata = Base.metadata
-target_metadata = None
+import models  # noqa: E402  (registers every model on Base.metadata as a side effect)
+from models import Base  # noqa: E402
+
+target_metadata = Base.metadata
 
 config = context.config
 if config.config_file_name is not None:
