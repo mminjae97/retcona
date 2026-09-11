@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: retcona
+      POSTGRES_PASSWORD: retcona
+      POSTGRES_DB: retcona
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  # 10.2: 작업 큐 — 로컬 개발용 Redis 구현체 (운영은 GCP Pub/Sub)
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  db_data:
