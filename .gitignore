@@ -18,6 +18,7 @@ node_modules/
 dist/
 .vite/
 frontend/.env
+*.tsbuildinfo
 
 # --- DB / local migration data ---
 db/data/

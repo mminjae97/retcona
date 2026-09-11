@@ -1,0 +1,63 @@
+:root {
+  /* Brand colors */
+  --color-bg: #f1f0ec;
+  --color-primary: #decdbe;
+  --color-primary-hover: #d0bba8;
+  --color-primary-active: #c2a892;
+
+  /* Derived neutrals for contrast against the two brand colors */
+  --color-surface: #ffffff;
+  --color-border: #e2d9cc;
+  --color-text: #2f2a25;
+  --color-text-muted: #6f6559;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+a {
+  color: var(--color-text);
+}
+
+button {
+  background: var(--color-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 8px 16px;
+}
+
+button:hover {
+  background: var(--color-primary-hover);
+}
+
+button:active {
+  background: var(--color-primary-active);
+}
+
+input,
+textarea,
+select {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text);
+  font-size: 14px;
+  padding: 8px 12px;
+}
