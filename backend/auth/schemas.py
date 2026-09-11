@@ -5,15 +5,19 @@ import uuid
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
+def _normalize_email(value: str) -> str:
+    return value.lower()
+
+
 class SignupRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
-    nickname: str = Field(min_length=2, max_length=20)  # pen name constraint (3.6)
+    nickname: str = Field(min_length=2)  # pen name constraint (3.6): 2-20 chars after stripping
 
     @field_validator("email")
     @classmethod
-    def normalize_email(cls, value: str) -> str:
-        return value.lower()
+    def validate_email(cls, value: str) -> str:
+        return _normalize_email(value)
 
     @field_validator("password")
     @classmethod
@@ -26,9 +30,11 @@ class SignupRequest(BaseModel):
     @field_validator("nickname")
     @classmethod
     def strip_nickname(cls, value: str) -> str:
+        # Strip before length-checking, so surrounding whitespace can't push a
+        # nickname over the 20-char limit or hide an all-whitespace value.
         value = value.strip()
-        if len(value) < 2:
-            raise ValueError("Nickname must be at least 2 characters")
+        if not 2 <= len(value) <= 20:
+            raise ValueError("Nickname must be 2-20 characters")
         return value
 
 
@@ -38,8 +44,8 @@ class LoginRequest(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def normalize_email(cls, value: str) -> str:
-        return value.lower()
+    def validate_email(cls, value: str) -> str:
+        return _normalize_email(value)
 
 
 class UserPublic(BaseModel):
