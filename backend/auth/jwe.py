@@ -4,10 +4,48 @@ Structure (Nested JWT):
   1. Sign the claims (user_id, novel permissions, etc.) as a JWT (JWS) -> guarantees integrity
   2. Encrypt the whole signed token as JWE -> guarantees confidentiality
 
-Algorithm example: signing RS256 / key management RSA-OAEP-256 / content encryption A256GCM
-Only the server holds the decryption key; the client only stores/sends the encrypted token.
+The design doc's example algorithms (RS256 / RSA-OAEP-256) are asymmetric and would need a
+key pair; this solo-deployment implementation uses symmetric HS256 (signing) + direct A256GCM
+(encryption) instead, driven by the two single-secret env vars already scaffolded
+(JWT_SIGNING_KEY, JWT_ENCRYPTION_KEY). Only the server holds both keys; the client only
+stores/sends the encrypted token.
 """
 
-# TODO: implement the two functions below using python-jose or authlib's jwe module
-# - issue_token(user_id: str, claims: dict) -> str
-# - decode_token(token: str) -> dict
+import os
+import time
+
+from jose import jwe, jwt
+
+ACCESS_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 days
+
+
+def _signing_key() -> str:
+    key = os.environ.get("JWT_SIGNING_KEY")
+    if not key:
+        raise RuntimeError("JWT_SIGNING_KEY is not set")
+    return key
+
+
+def _encryption_key() -> bytes:
+    hex_key = os.environ.get("JWT_ENCRYPTION_KEY")
+    if not hex_key:
+        raise RuntimeError("JWT_ENCRYPTION_KEY is not set")
+    key = bytes.fromhex(hex_key)
+    if len(key) != 32:
+        raise RuntimeError("JWT_ENCRYPTION_KEY must decode to exactly 32 bytes (256 bits) for A256GCM")
+    return key
+
+
+def issue_token(user_id: str, claims: dict | None = None) -> str:
+    now = int(time.time())
+    payload = {"sub": user_id, "iat": now, "exp": now + ACCESS_TOKEN_TTL_SECONDS, **(claims or {})}
+    signed = jwt.encode(payload, _signing_key(), algorithm="HS256")
+    encrypted = jwe.encrypt(signed, _encryption_key(), algorithm="dir", encryption="A256GCM")
+    return encrypted.decode("utf-8") if isinstance(encrypted, bytes) else encrypted
+
+
+def decode_token(token: str) -> dict:
+    signed = jwe.decrypt(token, _encryption_key())
+    if isinstance(signed, bytes):
+        signed = signed.decode("utf-8")
+    return jwt.decode(signed, _signing_key(), algorithms=["HS256"])
