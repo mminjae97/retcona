@@ -10,14 +10,17 @@ import "./LoginPage.css";
 
 type Mode = "login" | "signup";
 
-const ERROR_MESSAGES: Record<string, string> = {
-  "Invalid email or password": "이메일 또는 비밀번호가 올바르지 않습니다.",
-  "Email is already registered": "이미 가입된 이메일입니다.",
+// Keyed by HTTP status rather than the backend's exact message text, so a
+// wording change in the API's error detail can't silently break this mapping.
+const ERROR_MESSAGES_BY_STATUS: Record<number, string> = {
+  401: "이메일 또는 비밀번호가 올바르지 않습니다.",
+  409: "이미 가입된 이메일입니다.",
+  422: "입력값을 다시 확인해주세요.",
 };
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
-    return ERROR_MESSAGES[err.message] ?? err.message;
+    return ERROR_MESSAGES_BY_STATUS[err.status] ?? err.message;
   }
   return "네트워크 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
 }
