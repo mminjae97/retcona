@@ -1,7 +1,7 @@
-"""novels 테이블 (설계서 4.1, 4.3).
+"""novels table (design doc 4.1, 4.3).
 
-한 계정(user)이 여러 작품(novel)을 소유할 수 있다.
-deleted_at: 소프트 삭제 시각 (2.6) — 30일 보관 후 배치로 영구 삭제.
+A single account (user) can own multiple novels.
+deleted_at: soft-delete timestamp (2.6) — permanently deleted by a batch job after 30 days.
 """
 
 import uuid

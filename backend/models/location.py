@@ -1,6 +1,6 @@
-"""locations, location_state_history 테이블 (설계서 4.3).
+"""locations, location_state_history tables (design doc 4.3).
 
-지리적 특징, 다른 장소와의 거리·연결 관계를 저장한다.
+Stores geographic features and distance/connection relationships to other locations.
 source: manual | auto_detected (7.4)
 """
 
@@ -20,7 +20,7 @@ class Location(Base, NovelScopedMixin, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String, nullable=False)
     source: Mapped[str] = mapped_column(String, default="manual")
-    geo_attrs: Mapped[dict] = mapped_column(JSON, default=dict)  # 지리적 특징, 타 장소와의 거리/연결
+    geo_attrs: Mapped[dict] = mapped_column(JSON, default=dict)  # geographic features, distance/connections to other locations
 
 
 class LocationStateHistory(Base, NovelScopedMixin, TimestampMixin):

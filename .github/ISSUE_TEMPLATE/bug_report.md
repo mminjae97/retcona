@@ -1,20 +1,20 @@
 ---
-name: 버그 리포트
-about: 정상 동작하지 않는 부분을 보고합니다
+name: Bug report
+about: Report something that isn't working correctly
 title: "[Bug] "
 labels: bug
 ---
 
-## 무엇이 잘못됐나요?
+## What went wrong?
 
-## 재현 방법
+## Steps to reproduce
 
 1.
 2.
 
-## 기대 동작
+## Expected behavior
 
-## 관련 모듈
+## Related modules
 
 - [ ] frontend
 - [ ] backend/api

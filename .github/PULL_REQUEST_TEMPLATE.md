@@ -1,11 +1,11 @@
-## 변경 내용
+## Changes
 
-## 관련 이슈
+## Related issue
 
 Closes #
 
-## 체크리스트
+## Checklist
 
-- [ ] 로컬에서 동작 확인
-- [ ] 관련 문서(README/설계서) 업데이트 필요 여부 확인
-- [ ] `novel_id` 격리가 필요한 조회/쓰기라면 필터링 확인 (설계서 10.1)
+- [ ] Verified locally
+- [ ] Checked whether related docs (README/design doc) need updates
+- [ ] For any read/write that needs `novel_id` isolation, confirmed the filtering is in place (design doc 10.1)

@@ -1,6 +1,6 @@
-"""claims, contradiction_flags 테이블 (설계서 4.3, 7장).
+"""claims, contradiction_flags tables (design doc 4.3, chapter 7).
 
-claims: 원고에서 extract_claims 단계로 추출한 검증 대상 주장 단위
+claims: verification-target claim units extracted from the manuscript by the extract_claims step
 contradiction_flags:
   - status: open | resolved_by_revalidation | accepted | dismissed (2.4, 7.5)
 """
@@ -20,7 +20,7 @@ class Claim(Base, NovelScopedMixin, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     episode_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("episodes.id"), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
-    claim_type: Mapped[str] = mapped_column(String)  # 외형 | 행동(OOC) | 장소 | 시공간
+    claim_type: Mapped[str] = mapped_column(String)  # appearance | behavior (OOC) | location | spacetime
 
 
 class ContradictionFlag(Base, NovelScopedMixin, TimestampMixin):
@@ -28,7 +28,7 @@ class ContradictionFlag(Base, NovelScopedMixin, TimestampMixin):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     claim_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("claims.id"), nullable=False)
-    error_type: Mapped[str] = mapped_column(String, nullable=False)  # 외형 불일치 | OOC | 장소 오류 | 시공간 모순
+    error_type: Mapped[str] = mapped_column(String, nullable=False)  # appearance mismatch | OOC | location error | spacetime contradiction
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     evidence_text: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String, default="open")

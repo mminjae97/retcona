@@ -7,9 +7,9 @@ import ValidationResultPage from "./pages/ValidationResultPage";
 import MyPage from "./pages/MyPage";
 import GraphPage from "./pages/GraphPage";
 
-// 화면 흐름은 설계서 2.1을 따른다:
-// 로그인 -> 대시보드 -> {설정 카드 관리 / 원고 작성 에디터} -> 검증 실행 -> 검증 결과
-//                    -> 마이페이지 -> 작품별 관계도·타임라인
+// Screen flow follows design doc 2.1:
+// Login -> Dashboard -> {settings management / manuscript editor} -> run validation -> validation results
+//                     -> My Page -> per-novel relationship graph · timeline
 export default function App() {
   return (
     <BrowserRouter>

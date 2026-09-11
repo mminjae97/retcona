@@ -1,6 +1,7 @@
-"""DB 엔진/세션.
+"""DB engine/session.
 
-DATABASE_URL 하나만 바꾸면 로컬(e2-micro) <-> Cloud SQL 전환이 가능하도록 한다 (10.5.4).
+Changing only DATABASE_URL should be enough to switch between local (e2-micro)
+and Cloud SQL (10.5.4).
 """
 
 import os

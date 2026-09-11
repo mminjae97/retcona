@@ -13,7 +13,7 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
 
-  # 10.2: 작업 큐 — 로컬 개발용 Redis 구현체 (운영은 GCP Pub/Sub)
+  # 10.2: job queue — local dev Redis implementation (production uses GCP Pub/Sub)
   redis:
     image: redis:7-alpine
     restart: unless-stopped

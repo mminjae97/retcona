@@ -1,9 +1,9 @@
-"""GPU 워커 (설계서 10.4.1).
+"""GPU worker (design doc 10.4.1).
 
-역할: 임베딩, 리랭커, NLI 추론.
-배치로 묶어야 효율이 나오므로 배치 서빙(vLLM 등) + 제한적 확장.
-큐 깊이 + GPU 사용률 복합 지표로 오토스케일링, 콜드스타트 비용이 커서
-최소 인스턴스(warm pool) 유지를 고려한다 (10.4.5).
+Role: embedding, reranker, NLI inference.
+Needs batching for efficiency, so batch serving (e.g. vLLM) + limited scaling.
+Autoscaled on a combined queue-depth + GPU-utilization metric; cold-start cost
+is high, so keeping a minimum instance count (warm pool) should be considered (10.4.5).
 """
 
 from infra.queue_client import get_queue_client
@@ -15,7 +15,7 @@ def run() -> None:
         job = queue.dequeue()
         if job is None:
             break
-        # TODO: 배치로 묶어 임베딩/리랭커/NLI 추론 실행 -> ack
+        # TODO: batch and run embedding/reranker/NLI inference -> ack
         queue.ack(job["job_id"])
 
 

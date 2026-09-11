@@ -1,11 +1,11 @@
-"""임베딩 래퍼 (설계서 5장).
+"""Embedding wrapper (design doc chapter 5).
 
-KURE-v1(의미 기반) + BM25(키워드 매칭) 하이브리드.
-과거 화 원고/설정 중 관련 있는 것을 pgvector 유사도 검색으로 추린 뒤,
-ai/reranker.py의 cross-encoder로 최종 Top-K를 정렬한다.
+Hybrid of KURE-v1 (semantic) + BM25 (keyword matching).
+Narrows down relevant past episode manuscripts/settings via pgvector similarity
+search, then reranks the final Top-K with the cross-encoder in ai/reranker.py.
 """
 
-# TODO: sentence-transformers로 KURE-v1 로드, rank_bm25.BM25Okapi 로 BM25 인덱스 구성
+# TODO: load KURE-v1 via sentence-transformers, build a BM25 index with rank_bm25.BM25Okapi
 
 
 def embed(text: str) -> list[float]:

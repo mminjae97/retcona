@@ -1,5 +1,5 @@
-// backend/api (FastAPI)와 통신하는 얇은 클라이언트.
-// 인증 토큰(JWE, 3.3)은 Authorization 헤더로 전달한다.
+// Thin client for talking to backend/api (FastAPI).
+// The auth token (JWE, 3.3) is sent via the Authorization header.
 
 const BASE_URL = "/api";
 

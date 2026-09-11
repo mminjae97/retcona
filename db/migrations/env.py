@@ -1,6 +1,7 @@
-"""Alembic 환경 설정.
+"""Alembic environment configuration.
 
-DATABASE_URL 환경변수를 그대로 사용해 로컬/Cloud SQL 전환이 코드 변경 없이 되도록 한다 (10.5.4).
+Uses the DATABASE_URL environment variable as-is so local/Cloud SQL can be
+switched without code changes (10.5.4).
 """
 
 import os
@@ -12,7 +13,7 @@ from sqlalchemy import engine_from_config, pool
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
-# TODO: backend/models/의 모든 모델 모듈을 임포트해 Base.metadata에 등록되게 할 것
+# TODO: import every model module under backend/models/ so they register on Base.metadata
 # from models.base import Base
 # from models import user, novel, character, location, world_setting, episode, claim, relation, story_event
 # target_metadata = Base.metadata

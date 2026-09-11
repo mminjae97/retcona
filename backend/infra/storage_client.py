@@ -1,7 +1,7 @@
-"""StorageClient 인터페이스 (설계서 10.4.3).
+"""StorageClient interface (design doc 10.4.3).
 
-캐릭터 일러스트(9장) 등 바이너리 파일 저장에 사용한다.
-운영(GCP): GCSStorageClient / 로컬 개발: LocalStorageClient
+Used for storing binary files such as character illustrations (chapter 9).
+Production (GCP): GCSStorageClient / Local dev: LocalStorageClient
 """
 
 from abc import ABC, abstractmethod
@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 class StorageClient(ABC):
     @abstractmethod
     def upload(self, key: str, data: bytes) -> str:
-        """저장하고 접근 가능한 URL/경로를 반환한다."""
+        """Store the data and return an accessible URL/path."""
 
     @abstractmethod
     def download(self, key: str) -> bytes:
@@ -31,7 +31,7 @@ class LocalStorageClient(StorageClient):
 class GCSStorageClient(StorageClient):
     def __init__(self, bucket: str):
         self.bucket = bucket
-        # TODO: google-cloud-storage 클라이언트 초기화
+        # TODO: initialize the google-cloud-storage client
 
     def upload(self, key: str, data: bytes) -> str:
         raise NotImplementedError

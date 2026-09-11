@@ -1,8 +1,8 @@
-"""episodes 테이블 (설계서 4.3, 2.2).
+"""episodes table (design doc 4.3, 2.2).
 
 status: draft | submitted
-  - submitted 화를 수정해 저장하면 status가 다시 draft로 전환된다 (2.2)
-embedding: pgvector 컬럼 (5장, 유사 과거 설정 문장 검색용)
+  - Editing and saving a submitted episode flips status back to draft (2.2)
+embedding: pgvector column (chapter 5, for searching similar past setting sentences)
 """
 
 import uuid
@@ -14,8 +14,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, NovelScopedMixin, TimestampMixin
 
-EMBEDDING_DIM = 1024  # TODO: 실제 사용하는 임베딩 모델(KURE-v1)의 차원에 맞춰 조정
-
+EMBEDDING_DIM = 1024  # TODO: adjust to match the actual embedding model's (KURE-v1) dimension
 
 class Episode(Base, NovelScopedMixin, TimestampMixin):
     __tablename__ = "episodes"

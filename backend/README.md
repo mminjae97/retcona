@@ -1,19 +1,19 @@
 # backend
 
-설계서 6.2절 코드 구조를 그대로 따릅니다. 각 모듈의 책임은 다음과 같습니다.
+Follows the code structure from design doc section 6.2 as-is. Each module's responsibility:
 
-| 모듈 | 책임 | 관련 설계서 섹션 |
+| Module | Responsibility | Related design doc section |
 |---|---|---|
-| `api/` | REST 엔드포인트 | 전체 |
-| `auth/` | 로그인 · 소셜 로그인(OAuth) · 토큰(JWE) 발급 | 3장 |
-| `pipeline/` | extract_claims, context_bundle, 판단 모듈 3종, merge | 7장 |
-| `models/` | DB 모델 (users, novels, characters, locations ...) | 4장 |
-| `ai/` | 임베딩 · 리랭커 · NLI · LLM 클라이언트 래퍼 | 5장 |
-| `workers/` | cpu_worker / gpu_worker 진입점 (`WORKER_TYPE`으로 분기) | 10.4절 |
-| `infra/` | QueueClient · StorageClient · InferenceClient · LLMClient 등 클라우드 추상화 계층 | 10.4.3절 |
+| `api/` | REST endpoints | All |
+| `auth/` | Login · social login (OAuth) · token (JWE) issuance | Chapter 3 |
+| `pipeline/` | extract_claims, context_bundle, 3 judgment modules, merge | Chapter 7 |
+| `models/` | DB models (users, novels, characters, locations ...) | Chapter 4 |
+| `ai/` | Embedding · reranker · NLI · LLM client wrappers | Chapter 5 |
+| `workers/` | cpu_worker / gpu_worker entry points (branch via `WORKER_TYPE`) | Section 10.4 |
+| `infra/` | QueueClient · StorageClient · InferenceClient · LLMClient etc. cloud abstraction layer | Section 10.4.3 |
 
-## 설계 원칙 (지켜야 할 것)
+## Design principles (must follow)
 
-- 모든 `models/`, `pipeline/` 함수는 `novel_id`를 필수 인자로 받는다 (10.1) — 격리 누락을 코드 레벨에서 차단
-- `pipeline/`과 `ai/`는 비즈니스 로직만 담고, 큐·스토리지·추론·LLM 접근은 항상 `infra/`의 인터페이스를 거친다 (10.4.3)
-- `pipeline/` 내 3개 판단 모듈은 동일 인터페이스(`claims + context_bundle` 입력 → `flags` 출력)를 공유한다 (6.2)
+- Every `models/`, `pipeline/` function takes `novel_id` as a required argument (10.1) — blocks isolation gaps at the code level
+- `pipeline/` and `ai/` hold only business logic; queue/storage/inference/LLM access always goes through `infra/` interfaces (10.4.3)
+- The 3 judgment modules inside `pipeline/` share the same interface (`claims + context_bundle` in → `flags` out) (6.2)

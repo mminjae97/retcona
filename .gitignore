@@ -1,4 +1,4 @@
-# --- 환경변수 / 시크릿 ---
+# --- Environment variables / secrets ---
 .env
 .env.*
 !.env.example
@@ -19,17 +19,17 @@ dist/
 .vite/
 frontend/.env
 
-# --- DB / 마이그레이션 로컬 데이터 ---
+# --- DB / local migration data ---
 db/data/
 *.sqlite3
 
-# --- 모델 캐시 (임베딩/리랭커/NLI 로컬 다운로드) ---
+# --- Model cache (local downloads for embedding/reranker/NLI) ---
 .cache/
 *.pt
 *.bin
 !**/tests/**/*.bin
 
-# --- OS / 에디터 ---
+# --- OS / editor ---
 .DS_Store
 Thumbs.db
 .idea/

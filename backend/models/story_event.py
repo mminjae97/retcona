@@ -1,8 +1,8 @@
-"""story_events, event_participants, event_locations, event_links (설계서 4.3, 8.3).
+"""story_events, event_participants, event_locations, event_links (design doc 4.3, 8.3).
 
-스토리 타임라인 그래프의 노드/엣지.
-event_links.link_type: 순차 | 분기 | 합류
-event_links.branch_reason: 분기를 일으킨 캐릭터·장소
+Nodes/edges of the story timeline graph.
+event_links.link_type: sequential | branch | merge
+event_links.branch_reason: the character/location that caused the branch
 """
 
 import uuid
@@ -46,5 +46,5 @@ class EventLink(Base, NovelScopedMixin, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     from_event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("story_events.id"), nullable=False)
     to_event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("story_events.id"), nullable=False)
-    link_type: Mapped[str] = mapped_column(String, nullable=False)  # 순차 | 분기 | 합류
+    link_type: Mapped[str] = mapped_column(String, nullable=False)  # sequential | branch | merge
     branch_reason: Mapped[str | None] = mapped_column(Text)

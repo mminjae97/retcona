@@ -1,8 +1,8 @@
-"""relations 테이블 (설계서 4.3, 8.2).
+"""relations table (design doc 4.3, 8.2).
 
-인물 간 관계, 장소 간 거리/연결 정보.
-relation_type: 가족 | 연인 | 원수 | 사제 등 (8.1)
-direction: 방향성 있는 관계 표시용 (8.1)
+Relationships between characters, and distance/connection information between locations.
+relation_type: family | romantic | rival | mentor, etc. (8.1)
+direction: indicates directional relationships (8.1)
 """
 
 import uuid
@@ -22,4 +22,4 @@ class Relation(Base, NovelScopedMixin, TimestampMixin):
     to_entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     entity_kind: Mapped[str] = mapped_column(String, nullable=False)  # character | location
     relation_type: Mapped[str] = mapped_column(String, nullable=False)
-    direction: Mapped[str | None] = mapped_column(String)  # None(무방향) | "from_to" | "to_from"
+    direction: Mapped[str | None] = mapped_column(String)  # None (undirected) | "from_to" | "to_from"

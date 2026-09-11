@@ -1,6 +1,6 @@
-"""world_settings 테이블 (설계서 4.3, 2.3).
+"""world_settings table (design doc 4.3, 2.3).
 
-category: 시대적 배경 | 마법·무공 체계 | 세력·조직 | 역사 | 기타 규칙
+category: era/setting | magic·martial arts system | faction/organization | history | other rules
 """
 
 import uuid

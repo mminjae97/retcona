@@ -1,8 +1,8 @@
-"""공통 Base 및 멀티테넌시(작품 단위 격리) 믹스인.
+"""Common Base and the multi-tenancy (per-novel isolation) mixin.
 
-설계서 10.1: 모든 조회·쓰기는 novel_id 필터를 강제한다.
-아래 NovelScopedMixin을 상속하는 모델은 novel_id 컬럼을 갖는다.
-리포지토리 함수를 작성할 때도 novel_id를 필수 인자로 받도록 한다 (6.2).
+Design doc 10.1: every read/write must be filtered by novel_id.
+Models that inherit NovelScopedMixin below get a novel_id column.
+Repository functions should likewise take novel_id as a required argument (6.2).
 """
 
 import uuid
@@ -22,7 +22,7 @@ class TimestampMixin:
 
 
 class NovelScopedMixin:
-    """이 믹스인을 상속하는 모든 테이블은 novel_id FK를 필수로 갖는다 (4.1, 10.1)."""
+    """Every table inheriting this mixin has a required novel_id FK (4.1, 10.1)."""
 
     novel_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("novels.id"), nullable=False, index=True

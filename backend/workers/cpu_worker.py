@@ -1,13 +1,13 @@
-"""CPU 워커 (설계서 10.4.1).
+"""CPU worker (design doc 10.4.1).
 
-역할: 클레임 추출 오케스트레이션, 규칙 기반 검증, LLM API 호출.
-네트워크 대기 위주라 가볍게 늘릴수록 처리량이 비례 증가한다.
-큐 길이 기반 수평 오토스케일링 대상 (Cloud Run).
+Role: claim extraction orchestration, rule-based verification, LLM API calls.
+Mostly network-wait bound, so throughput scales roughly linearly with more instances.
+Target for queue-length-based horizontal autoscaling (Cloud Run).
 
-요구사항 (10.4.4):
-- 무상태: job payload와 DB 조회만으로 작업을 완결한다
-- 멱등성: job_id로 처리 완료 여부를 DB에 기록해 중복 실행에 안전하게 한다
-- Graceful shutdown: SIGTERM 수신 시 처리 중인 job을 마치거나 큐에 반환 후 종료
+Requirements (10.4.4):
+- Stateless: completes a job using only the job payload and DB queries
+- Idempotent: records completion per job_id in the DB so duplicate runs are safe
+- Graceful shutdown: on SIGTERM, finish the current job or return it to the queue before exiting
 """
 
 from infra.queue_client import get_queue_client
@@ -19,7 +19,7 @@ def run() -> None:
         job = queue.dequeue()
         if job is None:
             break
-        # TODO: job["job_id"] 처리 완료 여부 확인(멱등성) -> pipeline 실행 -> ack
+        # TODO: check whether job["job_id"] already completed (idempotency) -> run pipeline -> ack
         queue.ack(job["job_id"])
 
 
