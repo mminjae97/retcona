@@ -4,12 +4,22 @@ Design doc 6.1 architecture: frontend -> API server -> {auth, pipeline, models(D
 Run: uvicorn api.main:app --reload
 """
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from api.novels import router as novels_router
+from auth.jwe import validate_keys
 from auth.router import router as auth_router
 
-app = FastAPI(title="Retcona API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    validate_keys()
+    yield
+
+
+app = FastAPI(title="Retcona API", lifespan=lifespan)
 
 
 @app.get("/health")

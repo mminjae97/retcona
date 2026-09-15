@@ -28,9 +28,13 @@ export class ApiError extends Error {
 // Generic fallback for turning a caught error into user-facing Korean text.
 // Callers that want per-status messages (e.g. login's 401/409) should check
 // `err instanceof ApiError` themselves first and fall back to this.
+//
+// Deliberately doesn't surface `err.message` for an ApiError: that's the
+// backend's HTTPException detail (or a pydantic validation message), always
+// in English, and would leak untranslated text into this all-Korean UI.
 export function describeError(err: unknown): string {
   if (err instanceof ApiError) {
-    return err.message;
+    return "요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.";
   }
   return "네트워크 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
 }
