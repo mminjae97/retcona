@@ -12,7 +12,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from api.deps import get_owned_novel as _get_owned_novel
 from auth.dependencies import get_current_user
@@ -44,8 +44,10 @@ class EpisodePublic(EpisodeSummary):
     content: str
 
 
-def _get_episode(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, user: User) -> Episode:
-    _get_owned_novel(db, novel_id, user)
+def _get_episode(
+    db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, user: User, *, for_update: bool = False
+) -> Episode:
+    _get_owned_novel(db, novel_id, user, for_update=for_update)
     episode = db.scalar(select(Episode).where(Episode.id == episode_id, Episode.novel_id == novel_id))
     if episode is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Episode not found")
@@ -59,7 +61,14 @@ def list_episodes(
     _get_owned_novel(db, novel_id, user)
     return list(
         db.scalars(
-            select(Episode).where(Episode.novel_id == novel_id).order_by(Episode.episode_index.desc())
+            select(Episode)
+            # This list view only needs the summary fields — defers the Text
+            # content and 1024-dim embedding columns so listing a novel with
+            # many/long episodes doesn't pull its whole manuscript text over
+            # the wire just to discard it during response serialization.
+            .options(load_only(Episode.id, Episode.episode_index, Episode.status, Episode.updated_at))
+            .where(Episode.novel_id == novel_id)
+            .order_by(Episode.episode_index.desc())
         )
     )
 
@@ -109,7 +118,10 @@ def save_episode(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Episode:
-    episode = _get_episode(db, novel_id, episode_id, user)
+    # Locked for the same reason as create_episode/rename_novel: without it, a
+    # concurrent soft-delete of the novel could commit between this read and
+    # this function's own commit, letting a save land on a "deleted" novel.
+    episode = _get_episode(db, novel_id, episode_id, user, for_update=True)
     # Only touch the row (and flip a submitted episode back to draft) when the
     # content actually changed — otherwise re-saving unmodified content would
     # needlessly invalidate validation results and bump updated_at.

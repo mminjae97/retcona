@@ -66,6 +66,10 @@ export default function EditorPage() {
     // state. Also reset load/save state up front so a stale error or status
     // from the previous episode doesn't linger over the new one.
     let cancelled = false;
+    // Also invalidates any in-flight save() from the previous episode — its
+    // seq can no longer match once bumped here, so its response is ignored
+    // instead of landing setEpisode/setSaveState calls for this new episode.
+    saveSeqRef.current++;
     setEpisode(null);
     setContent("");
     setLoadError(null);
