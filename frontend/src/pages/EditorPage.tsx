@@ -51,6 +51,12 @@ export default function EditorPage() {
   // must never touch state once React has torn the component down.
   const mountedRef = useRef(true);
   useEffect(() => {
+    // Set true here too, not just in the useRef initializer: React 18
+    // StrictMode dev-mode double-invokes this effect (mount -> cleanup ->
+    // mount again) on the very first real mount, so without this the
+    // cleanup below would leave mountedRef permanently false and silently
+    // disable every save-status UI update for the component's whole life.
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
