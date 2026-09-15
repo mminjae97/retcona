@@ -59,6 +59,14 @@ export default function LoginPage() {
           setError("필명은 공백을 제외하고 2~20자로 입력해주세요.");
           return;
         }
+        // Matches the backend's 72-UTF-8-byte cap (bcrypt only hashes that
+        // much) — minLength={8} on the input is a floor, not a ceiling, so a
+        // long multi-byte password would otherwise pass client-side checks
+        // and only fail server-side with an unhelpful generic 422.
+        if (new TextEncoder().encode(password).length > 72) {
+          setError("비밀번호가 너무 깁니다. 72바이트 이내로 입력해주세요.");
+          return;
+        }
         await signup(email, password, trimmedNickname);
       } else {
         await login(email, password);

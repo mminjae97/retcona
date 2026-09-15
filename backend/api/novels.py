@@ -21,7 +21,7 @@ from models.user import User
 router = APIRouter()
 
 
-class NovelCreate(BaseModel):
+class _TitleInput(BaseModel):
     title: str = Field(min_length=1, max_length=200)
 
     @field_validator("title")
@@ -31,6 +31,18 @@ class NovelCreate(BaseModel):
         if not value:
             raise ValueError("Title must not be blank")
         return value
+
+
+# Creation and rename each get their own class (rather than one reused
+# directly, or aliased — a plain `NovelRename = NovelCreate` rebinding would
+# still be the identical class) so a future creation-only field on
+# NovelCreate can't silently become required on rename too.
+class NovelCreate(_TitleInput):
+    pass
+
+
+class NovelRename(_TitleInput):
+    pass
 
 
 class NovelPublic(BaseModel):
@@ -71,7 +83,7 @@ def create_novel(body: NovelCreate, db: Session = Depends(get_db), user: User = 
 @router.patch("/{novel_id}", response_model=NovelPublic)
 def rename_novel(
     novel_id: uuid.UUID,
-    body: NovelCreate,
+    body: NovelRename,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Novel:
