@@ -53,7 +53,7 @@
 .login-error {
   margin: 0;
   font-size: 13px;
-  color: #b3261e;
+  color: var(--color-danger);
 }
 
 .login-divider {

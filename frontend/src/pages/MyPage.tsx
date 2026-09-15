@@ -34,7 +34,11 @@ export default function MyPage() {
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
-    if (!newTitle.trim()) return;
+    // Guard on `novels` having loaded, not just on `creating`: creating a
+    // novel before the initial GET resolves would race an optimistic
+    // [novel, ...(prev ?? [])] update against that GET's list, and whichever
+    // resolves second would silently wipe out the other's result.
+    if (creating || novels === null || !newTitle.trim()) return;
     setError(null);
     setCreating(true);
     try {
@@ -117,7 +121,7 @@ export default function MyPage() {
             onChange={(e) => setNewTitle(e.target.value)}
             maxLength={200}
           />
-          <button type="submit" disabled={creating || !newTitle.trim()}>
+          <button type="submit" disabled={creating || novels === null || !newTitle.trim()}>
             + 새 작품
           </button>
         </form>
