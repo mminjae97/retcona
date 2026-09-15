@@ -183,9 +183,9 @@ export default function MyPage() {
                   <>
                     <span className="novel-title">{novel.title}</span>
                     <div className="novel-actions">
-                      <button type="button" disabled title="원고 작성 에디터는 준비 중입니다">
+                      <Link className="link-button" to={`/novels/${novel.id}/episodes`}>
                         열기
-                      </button>
+                      </Link>
                       <Link className="link-button" to={`/novels/${novel.id}/graph`}>
                         관계도·타임라인
                       </Link>

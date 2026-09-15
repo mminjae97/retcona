@@ -1,0 +1,83 @@
+.episode-list-page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.back-link {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.episode-list-page .section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.episode-list-page h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.episode-list-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-danger);
+}
+
+.empty-state {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.episode-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.episode-row a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  text-decoration: none;
+  color: var(--color-text);
+}
+
+.episode-row a:hover {
+  background: var(--color-surface);
+}
+
+.episode-index {
+  font-weight: 500;
+}
+
+.episode-status {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+
+.episode-status.status-submitted {
+  color: var(--color-primary);
+}
+
+.episode-updated {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}

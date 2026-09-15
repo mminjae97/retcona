@@ -8,11 +8,12 @@ novel_id (4.1). Deletion here is a soft delete (deleted_at) — the design doc's
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from api.deps import get_owned_novel as _get_owned_novel
 from auth.dependencies import get_current_user
 from models.db import get_db
 from models.novel import Novel
@@ -53,15 +54,6 @@ class NovelPublic(BaseModel):
     created_at: datetime
 
 
-def _get_owned_novel(db: Session, novel_id: uuid.UUID, user: User) -> Novel:
-    novel = db.scalar(
-        select(Novel).where(Novel.id == novel_id, Novel.user_id == user.id, Novel.deleted_at.is_(None))
-    )
-    if novel is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Novel not found")
-    return novel
-
-
 @router.get("", response_model=list[NovelPublic])
 def list_novels(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[Novel]:
     return list(
@@ -87,7 +79,11 @@ def rename_novel(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Novel:
-    novel = _get_owned_novel(db, novel_id, user)
+    # Locked for the same reason as episodes.py:create_episode — without it, a
+    # concurrent delete_novel can commit its soft-delete between this read and
+    # this function's own commit, leaving a "deleted" novel with an updated
+    # title (10.1).
+    novel = _get_owned_novel(db, novel_id, user, for_update=True)
     novel.title = body.title
     db.commit()
     db.refresh(novel)
@@ -100,6 +96,13 @@ def delete_novel(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> None:
-    novel = _get_owned_novel(db, novel_id, user)
+    # Locked for the same reason as rename_novel/create_episode/save_episode
+    # — without it, this read isn't actually serialized against theirs (an
+    # unlocked SELECT here doesn't block on their FOR UPDATE, and doesn't
+    # block them either), so a concurrent rename/save could still commit
+    # its change after this soft-delete reads deleted_at as still null,
+    # landing on top of it — exactly the outcome those locks are meant to
+    # prevent.
+    novel = _get_owned_novel(db, novel_id, user, for_update=True)
     novel.deleted_at = datetime.now(timezone.utc)
     db.commit()
