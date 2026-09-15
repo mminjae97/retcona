@@ -2,7 +2,7 @@
 // Account info (change nickname), my novels list (open/relationship graph·timeline/delete), danger zone (delete account)
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { getMe } from "../api/auth";
 import type { UserPublic } from "../api/auth";
 import { describeError } from "../api/client";
@@ -11,7 +11,6 @@ import type { NovelPublic } from "../api/novels";
 import "./MyPage.css";
 
 export default function MyPage() {
-  const navigate = useNavigate();
   const [user, setUser] = useState<UserPublic | null>(null);
   const [userError, setUserError] = useState<string | null>(null);
   const [novels, setNovels] = useState<NovelPublic[] | null>(null);
@@ -152,9 +151,9 @@ export default function MyPage() {
                       <button type="button" disabled title="원고 작성 에디터는 준비 중입니다">
                         열기
                       </button>
-                      <button type="button" onClick={() => navigate(`/novels/${novel.id}/graph`)}>
+                      <Link className="link-button" to={`/novels/${novel.id}/graph`}>
                         관계도·타임라인
-                      </button>
+                      </Link>
                       <button type="button" onClick={() => startRename(novel)}>
                         제목 변경
                       </button>
