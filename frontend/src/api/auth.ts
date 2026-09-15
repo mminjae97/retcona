@@ -31,3 +31,7 @@ export async function login(email: string, password: string): Promise<UserPublic
   setToken(res.access_token);
   return res.user;
 }
+
+export function getMe(): Promise<UserPublic> {
+  return apiFetch<UserPublic>("/auth/me");
+}

@@ -25,6 +25,16 @@ export class ApiError extends Error {
   }
 }
 
+// Generic fallback for turning a caught error into user-facing Korean text.
+// Callers that want per-status messages (e.g. login's 401/409) should check
+// `err instanceof ApiError` themselves first and fall back to this.
+export function describeError(err: unknown): string {
+  if (err instanceof ApiError) {
+    return err.message;
+  }
+  return "네트워크 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
+}
+
 // FastAPI sends `detail` as a plain string for HTTPException, but as an array
 // of {msg, ...} objects for its automatic request-validation (422) errors.
 function extractDetail(body: unknown): string | undefined {
@@ -59,6 +69,9 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
       .then(extractDetail)
       .catch(() => undefined);
     throw new ApiError(res.status, detail ?? `API error: ${res.status}`);
+  }
+  if (res.status === 204) {
+    return undefined as T;
   }
   return res.json();
 }
