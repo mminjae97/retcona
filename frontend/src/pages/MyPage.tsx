@@ -1,6 +1,6 @@
 // My Page (design doc 2.6)
 // Account info (change nickname), my novels list (open/relationship graph·timeline/delete), danger zone (delete account)
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { getMe } from "../api/auth";
@@ -15,12 +15,28 @@ export default function MyPage() {
   const [userError, setUserError] = useState<string | null>(null);
   const [novels, setNovels] = useState<NovelPublic[] | null>(null);
   const [novelsError, setNovelsError] = useState<string | null>(null);
-  const [novelsLoaded, setNovelsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [creating, setCreating] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [renaming, setRenaming] = useState(false);
+  // Ref, not state: needs to block a second call synchronously (e.g. a fast
+  // double-click on "다시 시도"), before a state update could re-render and
+  // disable the button.
+  const novelsLoadingRef = useRef(false);
+
+  function loadNovels() {
+    if (novelsLoadingRef.current) return;
+    novelsLoadingRef.current = true;
+    setNovelsError(null);
+    listNovels()
+      .then(setNovels)
+      .catch((err) => setNovelsError(describeError(err)))
+      .finally(() => {
+        novelsLoadingRef.current = false;
+      });
+  }
 
   useEffect(() => {
     // Fetched independently, not via Promise.all, so one failing (e.g. an
@@ -28,21 +44,21 @@ export default function MyPage() {
     getMe()
       .then(setUser)
       .catch((err) => setUserError(describeError(err)));
-    listNovels()
-      .then(setNovels)
-      .catch((err) => setNovelsError(describeError(err)))
-      .finally(() => setNovelsLoaded(true));
+    loadNovels();
   }, []);
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
-    // Guard on the initial GET having settled, not just on `creating`:
-    // creating a novel before it resolves would race an optimistic
+    // Guard on `novels` having loaded (not just `creating`): creating before
+    // the initial GET resolves would race an optimistic
     // [novel, ...(prev ?? [])] update against that GET's list, and whichever
-    // resolves second would silently wipe out the other's result. Gating on
-    // `novelsLoaded` (settled either way) rather than `novels === null`
-    // means a failed initial fetch doesn't permanently block creation.
-    if (creating || !novelsLoaded || !newTitle.trim()) return;
+    // resolves second would silently wipe out the other's result. If the
+    // load instead failed, `novels` also stays null here — that's
+    // deliberate too, since creating against an unknown/incomplete list
+    // would make it look like the account's other novels had vanished.
+    // The "다시 시도" button (shown on load failure) is the way out, not
+    // loosening this guard.
+    if (creating || novels === null || !newTitle.trim()) return;
     setError(null);
     setCreating(true);
     try {
@@ -63,14 +79,17 @@ export default function MyPage() {
 
   async function handleRename(e: FormEvent, id: string) {
     e.preventDefault();
-    if (!renameValue.trim()) return;
+    if (renaming || !renameValue.trim()) return;
     setError(null);
+    setRenaming(true);
     try {
       const updated = await renameNovel(id, renameValue);
       setNovels((prev) => prev?.map((n) => (n.id === id ? updated : n)) ?? null);
       setRenamingId(null);
     } catch (err) {
       setError(describeError(err));
+    } finally {
+      setRenaming(false);
     }
   }
 
@@ -125,13 +144,19 @@ export default function MyPage() {
             onChange={(e) => setNewTitle(e.target.value)}
             maxLength={200}
           />
-          <button type="submit" disabled={creating || !novelsLoaded || !newTitle.trim()}>
+          <button type="submit" disabled={creating || novels === null || !newTitle.trim()}>
             + 새 작품
           </button>
         </form>
 
         {novels === null ? (
-          novelsError ? <p className="mypage-error">{novelsError}</p> : <p>불러오는 중...</p>
+          novelsError ? (
+            <p className="mypage-error">
+              {novelsError} <button type="button" onClick={loadNovels}>다시 시도</button>
+            </p>
+          ) : (
+            <p>불러오는 중...</p>
+          )
         ) : novels.length === 0 ? (
           <p className="empty-state">아직 등록한 작품이 없습니다.</p>
         ) : (
@@ -147,7 +172,9 @@ export default function MyPage() {
                       maxLength={200}
                       autoFocus
                     />
-                    <button type="submit">저장</button>
+                    <button type="submit" disabled={renaming}>
+                      저장
+                    </button>
                     <button type="button" onClick={() => setRenamingId(null)}>
                       취소
                     </button>

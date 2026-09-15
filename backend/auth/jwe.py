@@ -18,12 +18,22 @@ from jose import jwe, jwt
 
 ACCESS_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 days
 
+# RFC 7518 recommends an HS256 key at least as long as the hash output (32
+# bytes); .env.example's suggested secrets.token_urlsafe(32) is well over this.
+MIN_SIGNING_KEY_LENGTH = 32
+
 
 def _signing_key() -> str:
     key = os.environ.get("JWT_SIGNING_KEY")
     if not key:
         raise RuntimeError("JWT_SIGNING_KEY is not set")
+    if len(key) < MIN_SIGNING_KEY_LENGTH:
+        raise RuntimeError(f"JWT_SIGNING_KEY must be at least {MIN_SIGNING_KEY_LENGTH} characters")
     return key
+
+
+def _to_str(value: str | bytes) -> str:
+    return value.decode("utf-8") if isinstance(value, bytes) else value
 
 
 def _encryption_key() -> bytes:
@@ -49,11 +59,9 @@ def issue_token(user_id: str, claims: dict | None = None) -> str:
     payload = {**(claims or {}), "sub": user_id, "iat": now, "exp": now + ACCESS_TOKEN_TTL_SECONDS}
     signed = jwt.encode(payload, _signing_key(), algorithm="HS256")
     encrypted = jwe.encrypt(signed, _encryption_key(), algorithm="dir", encryption="A256GCM")
-    return encrypted.decode("utf-8") if isinstance(encrypted, bytes) else encrypted
+    return _to_str(encrypted)
 
 
 def decode_token(token: str) -> dict:
-    signed = jwe.decrypt(token, _encryption_key())
-    if isinstance(signed, bytes):
-        signed = signed.decode("utf-8")
+    signed = _to_str(jwe.decrypt(token, _encryption_key()))
     return jwt.decode(signed, _signing_key(), algorithms=["HS256"])
