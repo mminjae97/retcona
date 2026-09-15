@@ -1,6 +1,6 @@
 // My Page (design doc 2.6)
 // Account info (change nickname), my novels list (open/relationship graph·timeline/delete), danger zone (delete account)
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { getMe } from "../api/auth";
@@ -21,12 +21,21 @@ export default function MyPage() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renaming, setRenaming] = useState(false);
+  // Ref, not state: needs to block a second call synchronously (e.g. a fast
+  // double-click on "다시 시도"), before a state update could re-render and
+  // disable the button.
+  const novelsLoadingRef = useRef(false);
 
   function loadNovels() {
+    if (novelsLoadingRef.current) return;
+    novelsLoadingRef.current = true;
     setNovelsError(null);
     listNovels()
       .then(setNovels)
-      .catch((err) => setNovelsError(describeError(err)));
+      .catch((err) => setNovelsError(describeError(err)))
+      .finally(() => {
+        novelsLoadingRef.current = false;
+      });
   }
 
   useEffect(() => {
