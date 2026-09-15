@@ -21,7 +21,7 @@ from models.user import User
 router = APIRouter()
 
 
-class NovelCreate(BaseModel):
+class _TitleInput(BaseModel):
     title: str = Field(min_length=1, max_length=200)
 
     @field_validator("title")
@@ -33,11 +33,16 @@ class NovelCreate(BaseModel):
         return value
 
 
-# Rename's request body happens to have the same one field as creation
-# today, but is aliased rather than reused directly so a future
-# creation-only field on NovelCreate doesn't silently become required on
-# rename too.
-NovelRename = NovelCreate
+# Creation and rename each get their own class (rather than one reused
+# directly, or aliased — a plain `NovelRename = NovelCreate` rebinding would
+# still be the identical class) so a future creation-only field on
+# NovelCreate can't silently become required on rename too.
+class NovelCreate(_TitleInput):
+    pass
+
+
+class NovelRename(_TitleInput):
+    pass
 
 
 class NovelPublic(BaseModel):
