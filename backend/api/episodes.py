@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from api.deps import get_owned_novel as _get_owned_novel
 from auth.dependencies import get_current_user
 from models.db import get_db
 from models.episode import Episode
@@ -42,15 +43,6 @@ class EpisodeSummary(BaseModel):
 
 class EpisodePublic(EpisodeSummary):
     content: str
-
-
-def _get_owned_novel(db: Session, novel_id: uuid.UUID, user: User) -> Novel:
-    novel = db.scalar(
-        select(Novel).where(Novel.id == novel_id, Novel.user_id == user.id, Novel.deleted_at.is_(None))
-    )
-    if novel is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Novel not found")
-    return novel
 
 
 def _get_episode(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, user: User) -> Episode:
@@ -82,7 +74,12 @@ def create_episode(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Episode:
-    _get_owned_novel(db, novel_id, user)
+    novel = _get_owned_novel(db, novel_id, user)
+    # Lock the novel row for the rest of this transaction so two concurrent
+    # creates (double-click, two tabs) can't both read the same MAX(episode_index)
+    # and insert duplicate indexes — the second request blocks here until the
+    # first commits, by which point the MAX below reflects its new episode.
+    db.scalar(select(Novel).where(Novel.id == novel.id).with_for_update())
     next_index = db.scalar(
         select(func.coalesce(func.max(Episode.episode_index), 0)).where(Episode.novel_id == novel_id)
     ) + 1
@@ -112,9 +109,13 @@ def save_episode(
     user: User = Depends(get_current_user),
 ) -> Episode:
     episode = _get_episode(db, novel_id, episode_id, user)
-    episode.content = body.content
-    if episode.status == "submitted":
-        episode.status = "draft"
+    # Only touch the row (and flip a submitted episode back to draft) when the
+    # content actually changed — otherwise re-saving unmodified content would
+    # needlessly invalidate validation results and bump updated_at.
+    if body.content != episode.content:
+        episode.content = body.content
+        if episode.status == "submitted":
+            episode.status = "draft"
     db.commit()
     db.refresh(episode)
     return episode

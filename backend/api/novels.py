@@ -8,11 +8,12 @@ novel_id (4.1). Deletion here is a soft delete (deleted_at) — the design doc's
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from api.deps import get_owned_novel as _get_owned_novel
 from auth.dependencies import get_current_user
 from models.db import get_db
 from models.novel import Novel
@@ -51,15 +52,6 @@ class NovelPublic(BaseModel):
     id: uuid.UUID
     title: str
     created_at: datetime
-
-
-def _get_owned_novel(db: Session, novel_id: uuid.UUID, user: User) -> Novel:
-    novel = db.scalar(
-        select(Novel).where(Novel.id == novel_id, Novel.user_id == user.id, Novel.deleted_at.is_(None))
-    )
-    if novel is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Novel not found")
-    return novel
 
 
 @router.get("", response_model=list[NovelPublic])
