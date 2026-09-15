@@ -33,6 +33,13 @@ class NovelCreate(BaseModel):
         return value
 
 
+# Rename's request body happens to have the same one field as creation
+# today, but is aliased rather than reused directly so a future
+# creation-only field on NovelCreate doesn't silently become required on
+# rename too.
+NovelRename = NovelCreate
+
+
 class NovelPublic(BaseModel):
     model_config = {"from_attributes": True}
 
@@ -71,7 +78,7 @@ def create_novel(body: NovelCreate, db: Session = Depends(get_db), user: User = 
 @router.patch("/{novel_id}", response_model=NovelPublic)
 def rename_novel(
     novel_id: uuid.UUID,
-    body: NovelCreate,
+    body: NovelRename,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Novel:
