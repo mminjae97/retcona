@@ -19,28 +19,32 @@ export default function EpisodeListPage() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   // Holds the novelId currently being fetched (or null when idle) — guards
-  // against a duplicate in-flight request for the SAME novel, without a
-  // stale request for a PREVIOUS novel's resolution clearing the flag out
-  // from under a newer, still-in-flight request for the current one (which
-  // a plain boolean reset on every novelId change would allow).
+  // against a duplicate in-flight request for the SAME novel (e.g. clicking
+  // "다시 시도" while a load is already in progress), purely to avoid a
+  // wasted network call; correctness against stale responses is handled by
+  // requestSeqRef below, not this.
   const loadingForRef = useRef<string | null>(null);
-  // Lets an in-flight request from a previous novel (route param changed
-  // without unmounting this page) recognize it's stale once it resolves,
-  // instead of applying its result over the new novel's episode list.
-  const currentNovelIdRef = useRef(novelId);
+  // Bumped on every load() call, including ones for the same novelId (e.g.
+  // an A -> B -> A route-param change without unmounting this page can issue
+  // two separate in-flight requests for "A"). A response is only applied if
+  // it's still the most recently issued one — checking the novelId alone
+  // isn't enough, since an older "A" request resolving after a newer "A"
+  // request would otherwise silently win just because the id matches.
+  const requestSeqRef = useRef(0);
 
   function load() {
     if (!novelId || loadingForRef.current === novelId) return;
     loadingForRef.current = novelId;
     const requestNovelId = novelId;
+    const seq = ++requestSeqRef.current;
     setError(null);
     listEpisodes(requestNovelId)
       .then((eps) => {
-        if (currentNovelIdRef.current !== requestNovelId) return;
+        if (seq !== requestSeqRef.current) return;
         setEpisodes(eps);
       })
       .catch((err) => {
-        if (currentNovelIdRef.current !== requestNovelId) return;
+        if (seq !== requestSeqRef.current) return;
         setError(describeError(err));
       })
       .finally(() => {
@@ -51,7 +55,6 @@ export default function EpisodeListPage() {
   }
 
   useEffect(() => {
-    currentNovelIdRef.current = novelId;
     setEpisodes(null);
     setError(null);
     load();
