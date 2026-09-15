@@ -96,6 +96,13 @@ def delete_novel(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> None:
-    novel = _get_owned_novel(db, novel_id, user)
+    # Locked for the same reason as rename_novel/create_episode/save_episode
+    # — without it, this read isn't actually serialized against theirs (an
+    # unlocked SELECT here doesn't block on their FOR UPDATE, and doesn't
+    # block them either), so a concurrent rename/save could still commit
+    # its change after this soft-delete reads deleted_at as still null,
+    # landing on top of it — exactly the outcome those locks are meant to
+    # prevent.
+    novel = _get_owned_novel(db, novel_id, user, for_update=True)
     novel.deleted_at = datetime.now(timezone.utc)
     db.commit()
