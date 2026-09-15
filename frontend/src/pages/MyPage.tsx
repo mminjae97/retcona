@@ -15,6 +15,7 @@ export default function MyPage() {
   const [userError, setUserError] = useState<string | null>(null);
   const [novels, setNovels] = useState<NovelPublic[] | null>(null);
   const [novelsError, setNovelsError] = useState<string | null>(null);
+  const [novelsLoaded, setNovelsLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [creating, setCreating] = useState(false);
@@ -29,16 +30,19 @@ export default function MyPage() {
       .catch((err) => setUserError(describeError(err)));
     listNovels()
       .then(setNovels)
-      .catch((err) => setNovelsError(describeError(err)));
+      .catch((err) => setNovelsError(describeError(err)))
+      .finally(() => setNovelsLoaded(true));
   }, []);
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
-    // Guard on `novels` having loaded, not just on `creating`: creating a
-    // novel before the initial GET resolves would race an optimistic
+    // Guard on the initial GET having settled, not just on `creating`:
+    // creating a novel before it resolves would race an optimistic
     // [novel, ...(prev ?? [])] update against that GET's list, and whichever
-    // resolves second would silently wipe out the other's result.
-    if (creating || novels === null || !newTitle.trim()) return;
+    // resolves second would silently wipe out the other's result. Gating on
+    // `novelsLoaded` (settled either way) rather than `novels === null`
+    // means a failed initial fetch doesn't permanently block creation.
+    if (creating || !novelsLoaded || !newTitle.trim()) return;
     setError(null);
     setCreating(true);
     try {
@@ -121,7 +125,7 @@ export default function MyPage() {
             onChange={(e) => setNewTitle(e.target.value)}
             maxLength={200}
           />
-          <button type="submit" disabled={creating || novels === null || !newTitle.trim()}>
+          <button type="submit" disabled={creating || !novelsLoaded || !newTitle.trim()}>
             + 새 작품
           </button>
         </form>

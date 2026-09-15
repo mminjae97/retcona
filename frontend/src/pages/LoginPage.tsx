@@ -10,6 +10,8 @@ import "./LoginPage.css";
 
 type Mode = "login" | "signup";
 
+const SOCIAL_PROVIDERS = ["Google", "Kakao", "Naver"] as const;
+
 // Keyed by HTTP status rather than the backend's exact message text, so a
 // wording change in the API's error detail can't silently break this mapping.
 const ERROR_MESSAGES_BY_STATUS: Record<number, string> = {
@@ -122,15 +124,11 @@ export default function LoginPage() {
         <div className="login-divider">또는</div>
 
         <div className="social-login-buttons">
-          <button type="button" disabled title="소셜 로그인은 준비 중입니다">
-            Google로 계속하기
-          </button>
-          <button type="button" disabled title="소셜 로그인은 준비 중입니다">
-            Kakao로 계속하기
-          </button>
-          <button type="button" disabled title="소셜 로그인은 준비 중입니다">
-            Naver로 계속하기
-          </button>
+          {SOCIAL_PROVIDERS.map((provider) => (
+            <button key={provider} type="button" disabled title="소셜 로그인은 준비 중입니다">
+              {provider}로 계속하기
+            </button>
+          ))}
         </div>
       </form>
     </div>

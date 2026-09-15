@@ -36,9 +36,17 @@ def _encryption_key() -> bytes:
     return key
 
 
+def validate_keys() -> None:
+    """Fail fast at startup if the JWT keys are missing/malformed, instead of
+    on the first request that needs them."""
+    _signing_key()
+    _encryption_key()
+
+
 def issue_token(user_id: str, claims: dict | None = None) -> str:
     now = int(time.time())
-    payload = {"sub": user_id, "iat": now, "exp": now + ACCESS_TOKEN_TTL_SECONDS, **(claims or {})}
+    # sub/iat/exp last, so a caller-supplied claims dict can never override them.
+    payload = {**(claims or {}), "sub": user_id, "iat": now, "exp": now + ACCESS_TOKEN_TTL_SECONDS}
     signed = jwt.encode(payload, _signing_key(), algorithm="HS256")
     encrypted = jwe.encrypt(signed, _encryption_key(), algorithm="dir", encryption="A256GCM")
     return encrypted.decode("utf-8") if isinstance(encrypted, bytes) else encrypted
