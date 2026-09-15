@@ -44,22 +44,35 @@ export default function EditorPage() {
   // the newer content server-side, which seq alone (client-side response
   // ordering only) can't prevent.
   const saveChainRef = useRef<Promise<void>>(Promise.resolve());
+  // True only while the component is actually mounted — separate from the
+  // per-episode "cancelled" flag in the load effect below, since the
+  // unmount-flush save is deliberately still sent (and still updates
+  // `episode`/`saveState` if it turns out to be the current episode) but
+  // must never touch state once React has torn the component down.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const save = useCallback(
     (targetNovelId: string, targetEpisodeId: string, nextContent: string) => {
       const seq = ++saveSeqRef.current;
-      setSaveState("saving");
-      setSaveError(null);
+      if (mountedRef.current) {
+        setSaveState("saving");
+        setSaveError(null);
+      }
       saveChainRef.current = saveChainRef.current
         .catch(() => {})
         .then(() => saveEpisode(targetNovelId, targetEpisodeId, nextContent))
         .then((updated) => {
-          if (seq !== saveSeqRef.current) return;
+          if (!mountedRef.current || seq !== saveSeqRef.current) return;
           setEpisode(updated);
           setSaveState("saved");
         })
         .catch((err) => {
-          if (seq !== saveSeqRef.current) return;
+          if (!mountedRef.current || seq !== saveSeqRef.current) return;
           setSaveError(describeError(err));
           setSaveState("error");
         });
@@ -105,9 +118,12 @@ export default function EditorPage() {
       const pending = pendingRef.current;
       if (pending) {
         pendingRef.current = null;
-        // Best-effort: the component has already moved on, so there's no
-        // state left here to update with the result.
-        saveEpisode(pending.novelId, pending.episodeId, pending.content).catch(() => {});
+        // Goes through save() (and so through saveChainRef) rather than a
+        // standalone saveEpisode() call, so this flush still serializes with
+        // any save already in flight for the same episode instead of racing
+        // it — the whole reason saveChainRef exists. Its state update is a
+        // no-op once the seq bump below (or unmount) makes it stale.
+        save(pending.novelId, pending.episodeId, pending.content);
       }
     };
   }, [novelId, episodeId]);

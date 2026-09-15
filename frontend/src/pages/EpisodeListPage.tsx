@@ -18,15 +18,20 @@ export default function EpisodeListPage() {
   const [episodes, setEpisodes] = useState<EpisodeSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const loadingRef = useRef(false);
+  // Holds the novelId currently being fetched (or null when idle) — guards
+  // against a duplicate in-flight request for the SAME novel, without a
+  // stale request for a PREVIOUS novel's resolution clearing the flag out
+  // from under a newer, still-in-flight request for the current one (which
+  // a plain boolean reset on every novelId change would allow).
+  const loadingForRef = useRef<string | null>(null);
   // Lets an in-flight request from a previous novel (route param changed
   // without unmounting this page) recognize it's stale once it resolves,
   // instead of applying its result over the new novel's episode list.
   const currentNovelIdRef = useRef(novelId);
 
   function load() {
-    if (!novelId || loadingRef.current) return;
-    loadingRef.current = true;
+    if (!novelId || loadingForRef.current === novelId) return;
+    loadingForRef.current = novelId;
     const requestNovelId = novelId;
     setError(null);
     listEpisodes(requestNovelId)
@@ -39,13 +44,14 @@ export default function EpisodeListPage() {
         setError(describeError(err));
       })
       .finally(() => {
-        loadingRef.current = false;
+        if (loadingForRef.current === requestNovelId) {
+          loadingForRef.current = null;
+        }
       });
   }
 
   useEffect(() => {
     currentNovelIdRef.current = novelId;
-    loadingRef.current = false;
     setEpisodes(null);
     setError(null);
     load();
