@@ -18,7 +18,6 @@ from api.deps import get_owned_novel as _get_owned_novel
 from auth.dependencies import get_current_user
 from models.db import get_db
 from models.episode import Episode
-from models.novel import Novel
 from models.user import User
 
 router = APIRouter()
@@ -74,12 +73,14 @@ def create_episode(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Episode:
-    novel = _get_owned_novel(db, novel_id, user)
-    # Lock the novel row for the rest of this transaction so two concurrent
+    # Locks the novel row for the rest of this transaction so two concurrent
     # creates (double-click, two tabs) can't both read the same MAX(episode_index)
     # and insert duplicate indexes — the second request blocks here until the
     # first commits, by which point the MAX below reflects its new episode.
-    db.scalar(select(Novel).where(Novel.id == novel.id).with_for_update())
+    # Relies on the default READ COMMITTED isolation level (models/db.py) to see
+    # that committed episode once unblocked; a higher isolation level would need
+    # a fresh transaction/snapshot here instead.
+    _get_owned_novel(db, novel_id, user, for_update=True)
     next_index = db.scalar(
         select(func.coalesce(func.max(Episode.episode_index), 0)).where(Episode.novel_id == novel_id)
     ) + 1

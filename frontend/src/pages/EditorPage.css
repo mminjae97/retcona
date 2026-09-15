@@ -29,15 +29,6 @@
   color: var(--color-danger);
 }
 
-.editor-banner {
-  margin: 0;
-  padding: 10px 14px;
-  border-radius: 8px;
-  background: var(--color-primary);
-  border: 1px solid var(--color-border);
-  font-size: 13px;
-}
-
 .editor-textarea {
   flex: 1;
   min-height: 400px;
