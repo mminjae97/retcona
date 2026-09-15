@@ -59,14 +59,31 @@ export default function EditorPage() {
 
   useEffect(() => {
     if (!novelId || !episodeId) return;
+    // Guards against this effect's own fetch resolving after novelId/episodeId
+    // has already changed again (component stays mounted across param
+    // changes on this route) — without it, a slow load for the episode we've
+    // navigated away from could land after, and clobber, the next episode's
+    // state. Also reset load/save state up front so a stale error or status
+    // from the previous episode doesn't linger over the new one.
+    let cancelled = false;
+    setEpisode(null);
+    setContent("");
+    setLoadError(null);
+    setSaveState("idle");
+    setSaveError(null);
     getEpisode(novelId, episodeId)
       .then((ep) => {
+        if (cancelled) return;
         setEpisode(ep);
         setContent(ep.content);
       })
-      .catch((err) => setLoadError(describeError(err)));
+      .catch((err) => {
+        if (cancelled) return;
+        setLoadError(describeError(err));
+      });
 
     return () => {
+      cancelled = true;
       if (autosaveTimerRef.current) {
         clearTimeout(autosaveTimerRef.current);
         autosaveTimerRef.current = null;

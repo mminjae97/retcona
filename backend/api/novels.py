@@ -79,7 +79,11 @@ def rename_novel(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Novel:
-    novel = _get_owned_novel(db, novel_id, user)
+    # Locked for the same reason as episodes.py:create_episode — without it, a
+    # concurrent delete_novel can commit its soft-delete between this read and
+    # this function's own commit, leaving a "deleted" novel with an updated
+    # title (10.1).
+    novel = _get_owned_novel(db, novel_id, user, for_update=True)
     novel.title = body.title
     db.commit()
     db.refresh(novel)
