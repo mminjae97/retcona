@@ -19,20 +19,37 @@ export default function EpisodeListPage() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const loadingRef = useRef(false);
+  // Lets an in-flight request from a previous novel (route param changed
+  // without unmounting this page) recognize it's stale once it resolves,
+  // instead of applying its result over the new novel's episode list.
+  const currentNovelIdRef = useRef(novelId);
 
   function load() {
     if (!novelId || loadingRef.current) return;
     loadingRef.current = true;
+    const requestNovelId = novelId;
     setError(null);
-    listEpisodes(novelId)
-      .then(setEpisodes)
-      .catch((err) => setError(describeError(err)))
+    listEpisodes(requestNovelId)
+      .then((eps) => {
+        if (currentNovelIdRef.current !== requestNovelId) return;
+        setEpisodes(eps);
+      })
+      .catch((err) => {
+        if (currentNovelIdRef.current !== requestNovelId) return;
+        setError(describeError(err));
+      })
       .finally(() => {
         loadingRef.current = false;
       });
   }
 
-  useEffect(load, [novelId]);
+  useEffect(() => {
+    currentNovelIdRef.current = novelId;
+    loadingRef.current = false;
+    setEpisodes(null);
+    setError(null);
+    load();
+  }, [novelId]);
 
   async function handleCreate() {
     if (!novelId || creating) return;

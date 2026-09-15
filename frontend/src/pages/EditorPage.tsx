@@ -37,22 +37,32 @@ export default function EditorPage() {
   // Tracks in-flight/most-recent save to avoid an out-of-order autosave
   // response clobbering a newer explicit save's result.
   const saveSeqRef = useRef(0);
+  // Chains save requests so a later one (e.g. an explicit save fired right
+  // after an autosave) always waits for the previous request to finish
+  // before sending — otherwise two in-flight PATCHes for the same episode
+  // could commit out of order and the older one would silently overwrite
+  // the newer content server-side, which seq alone (client-side response
+  // ordering only) can't prevent.
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve());
 
   const save = useCallback(
-    async (targetNovelId: string, targetEpisodeId: string, nextContent: string) => {
+    (targetNovelId: string, targetEpisodeId: string, nextContent: string) => {
       const seq = ++saveSeqRef.current;
       setSaveState("saving");
       setSaveError(null);
-      try {
-        const updated = await saveEpisode(targetNovelId, targetEpisodeId, nextContent);
-        if (seq !== saveSeqRef.current) return;
-        setEpisode(updated);
-        setSaveState("saved");
-      } catch (err) {
-        if (seq !== saveSeqRef.current) return;
-        setSaveError(describeError(err));
-        setSaveState("error");
-      }
+      saveChainRef.current = saveChainRef.current
+        .catch(() => {})
+        .then(() => saveEpisode(targetNovelId, targetEpisodeId, nextContent))
+        .then((updated) => {
+          if (seq !== saveSeqRef.current) return;
+          setEpisode(updated);
+          setSaveState("saved");
+        })
+        .catch((err) => {
+          if (seq !== saveSeqRef.current) return;
+          setSaveError(describeError(err));
+          setSaveState("error");
+        });
     },
     []
   );
