@@ -5,7 +5,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { login, signup } from "../api/auth";
-import { ApiError } from "../api/client";
+import { ApiError, describeError as describeApiError } from "../api/client";
 import "./LoginPage.css";
 
 type Mode = "login" | "signup";
@@ -22,7 +22,7 @@ function describeError(err: unknown): string {
   if (err instanceof ApiError) {
     return ERROR_MESSAGES_BY_STATUS[err.status] ?? err.message;
   }
-  return "네트워크 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
+  return describeApiError(err);
 }
 
 export default function LoginPage() {

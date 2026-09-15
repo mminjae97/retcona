@@ -2,24 +2,20 @@
 // Account info (change nickname), my novels list (open/relationship graph·timeline/delete), danger zone (delete account)
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { getMe } from "../api/auth";
 import type { UserPublic } from "../api/auth";
-import { ApiError } from "../api/client";
+import { describeError } from "../api/client";
 import { createNovel, deleteNovel, listNovels, renameNovel } from "../api/novels";
 import type { NovelPublic } from "../api/novels";
 import "./MyPage.css";
 
-function describeError(err: unknown): string {
-  if (err instanceof ApiError) {
-    return err.message;
-  }
-  return "네트워크 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
-}
-
 export default function MyPage() {
+  const navigate = useNavigate();
   const [user, setUser] = useState<UserPublic | null>(null);
+  const [userError, setUserError] = useState<string | null>(null);
   const [novels, setNovels] = useState<NovelPublic[] | null>(null);
+  const [novelsError, setNovelsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [creating, setCreating] = useState(false);
@@ -27,12 +23,14 @@ export default function MyPage() {
   const [renameValue, setRenameValue] = useState("");
 
   useEffect(() => {
-    Promise.all([getMe(), listNovels()])
-      .then(([me, list]) => {
-        setUser(me);
-        setNovels(list);
-      })
-      .catch((err) => setError(describeError(err)));
+    // Fetched independently, not via Promise.all, so one failing (e.g. an
+    // expired token) doesn't also strand the other section on "불러오는 중".
+    getMe()
+      .then(setUser)
+      .catch((err) => setUserError(describeError(err)));
+    listNovels()
+      .then(setNovels)
+      .catch((err) => setNovelsError(describeError(err)));
   }, []);
 
   async function handleCreate(e: FormEvent) {
@@ -100,6 +98,8 @@ export default function MyPage() {
             <dt>이메일</dt>
             <dd>{user.email}</dd>
           </dl>
+        ) : userError ? (
+          <p className="mypage-error">{userError}</p>
         ) : (
           <p>불러오는 중...</p>
         )}
@@ -124,7 +124,7 @@ export default function MyPage() {
         </form>
 
         {novels === null ? (
-          <p>불러오는 중...</p>
+          novelsError ? <p className="mypage-error">{novelsError}</p> : <p>불러오는 중...</p>
         ) : novels.length === 0 ? (
           <p className="empty-state">아직 등록한 작품이 없습니다.</p>
         ) : (
@@ -152,9 +152,9 @@ export default function MyPage() {
                       <button type="button" disabled title="원고 작성 에디터는 준비 중입니다">
                         열기
                       </button>
-                      <Link to={`/novels/${novel.id}/graph`}>
-                        <button type="button">관계도·타임라인</button>
-                      </Link>
+                      <button type="button" onClick={() => navigate(`/novels/${novel.id}/graph`)}>
+                        관계도·타임라인
+                      </button>
                       <button type="button" onClick={() => startRename(novel)}>
                         제목 변경
                       </button>
