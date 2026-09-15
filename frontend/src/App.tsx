@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
+import EpisodeListPage from "./pages/EpisodeListPage";
 import EditorPage from "./pages/EditorPage";
 import SettingsPage from "./pages/SettingsPage";
 import ValidationResultPage from "./pages/ValidationResultPage";
@@ -17,6 +18,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<DashboardPage />} />
         <Route path="/novels/:novelId/settings" element={<SettingsPage />} />
+        <Route path="/novels/:novelId/episodes" element={<EpisodeListPage />} />
         <Route path="/novels/:novelId/episodes/:episodeId" element={<EditorPage />} />
         <Route path="/novels/:novelId/episodes/:episodeId/result" element={<ValidationResultPage />} />
         <Route path="/mypage" element={<MyPage />} />

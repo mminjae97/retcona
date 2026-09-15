@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from api.episodes import router as episodes_router
 from api.novels import router as novels_router
 from auth.jwe import validate_keys
 from auth.router import router as auth_router
@@ -29,5 +30,6 @@ def health() -> dict:
 
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(novels_router, prefix="/novels", tags=["novels"])
+app.include_router(episodes_router, prefix="/novels", tags=["episodes"])
 
-# TODO: register remaining routers (design doc 2.2 editor, 2.4 validation results, etc.)
+# TODO: register remaining routers (design doc 2.4 validation results, etc.)
