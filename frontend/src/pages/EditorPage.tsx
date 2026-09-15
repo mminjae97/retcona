@@ -98,7 +98,16 @@ export default function EditorPage() {
     setLoadError(null);
     setSaveState("idle");
     setSaveError(null);
-    getEpisode(novelId, episodeId)
+    // Chained after saveChainRef instead of fired directly: a quick
+    // A -> B -> A navigation queues a flush save for A (below, on this
+    // effect's cleanup) that may still be in flight when this same episode
+    // is loaded again. Without waiting for it, this GET could race that
+    // PATCH and win, loading pre-edit content over what was just flushed —
+    // the user would then keep editing from a stale baseline and the next
+    // save would silently drop the flushed edit.
+    saveChainRef.current
+      .catch(() => {})
+      .then(() => getEpisode(novelId, episodeId))
       .then((ep) => {
         if (cancelled) return;
         setEpisode(ep);
