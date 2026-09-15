@@ -28,16 +28,17 @@ export default function MyPage() {
       .then(setUser)
       .catch((err) => setUserError(describeError(err)));
     listNovels()
-      // If a create/rename/delete already resolved and populated `novels`
-      // before this initial GET comes back, keep that newer state instead
-      // of clobbering it with the pre-mutation snapshot.
-      .then((list) => setNovels((prev) => prev ?? list))
+      .then(setNovels)
       .catch((err) => setNovelsError(describeError(err)));
   }, []);
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
-    if (creating || !newTitle.trim()) return;
+    // Guard on `novels` having loaded, not just on `creating`: creating a
+    // novel before the initial GET resolves would race an optimistic
+    // [novel, ...(prev ?? [])] update against that GET's list, and whichever
+    // resolves second would silently wipe out the other's result.
+    if (creating || novels === null || !newTitle.trim()) return;
     setError(null);
     setCreating(true);
     try {
@@ -120,7 +121,7 @@ export default function MyPage() {
             onChange={(e) => setNewTitle(e.target.value)}
             maxLength={200}
           />
-          <button type="submit" disabled={creating || !newTitle.trim()}>
+          <button type="submit" disabled={creating || novels === null || !newTitle.trim()}>
             + 새 작품
           </button>
         </form>
