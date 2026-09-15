@@ -28,13 +28,16 @@ export default function MyPage() {
       .then(setUser)
       .catch((err) => setUserError(describeError(err)));
     listNovels()
-      .then(setNovels)
+      // If a create/rename/delete already resolved and populated `novels`
+      // before this initial GET comes back, keep that newer state instead
+      // of clobbering it with the pre-mutation snapshot.
+      .then((list) => setNovels((prev) => prev ?? list))
       .catch((err) => setNovelsError(describeError(err)));
   }, []);
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
-    if (!newTitle.trim()) return;
+    if (creating || !newTitle.trim()) return;
     setError(null);
     setCreating(true);
     try {

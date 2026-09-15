@@ -20,7 +20,11 @@ const ERROR_MESSAGES_BY_STATUS: Record<number, string> = {
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
-    return ERROR_MESSAGES_BY_STATUS[err.status] ?? err.message;
+    // Don't fall back to err.message here — for a status this map doesn't
+    // cover (e.g. an unhandled 500), that's the raw client.ts fallback
+    // string ("API error: 500"), which would leak English into this
+    // all-Korean UI.
+    return ERROR_MESSAGES_BY_STATUS[err.status] ?? "요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.";
   }
   return describeApiError(err);
 }
@@ -45,7 +49,15 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       if (mode === "signup") {
-        await signup(email, password, nickname);
+        // Validate against the trimmed length, matching the backend's
+        // strip-then-check rule (3.6) — the native minLength attribute
+        // checks the raw, untrimmed value and would let e.g. "a " through.
+        const trimmedNickname = nickname.trim();
+        if (trimmedNickname.length < 2 || trimmedNickname.length > 20) {
+          setError("필명은 공백을 제외하고 2~20자로 입력해주세요.");
+          return;
+        }
+        await signup(email, password, trimmedNickname);
       } else {
         await login(email, password);
       }
@@ -96,7 +108,6 @@ export default function LoginPage() {
               value={nickname}
               onChange={(e) => setNickname(e.target.value)}
               required
-              minLength={2}
               maxLength={20}
             />
           </label>

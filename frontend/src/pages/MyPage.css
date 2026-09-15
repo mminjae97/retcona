@@ -15,7 +15,7 @@
 .mypage-error {
   margin: 0;
   font-size: 13px;
-  color: #b3261e;
+  color: var(--color-danger);
 }
 
 .mypage-section {
@@ -124,5 +124,5 @@
 }
 
 .danger-zone {
-  border-color: #b3261e;
+  border-color: var(--color-danger);
 }
