@@ -48,7 +48,11 @@ export default function EpisodeListPage() {
         setError(describeError(err));
       })
       .finally(() => {
-        if (loadingForRef.current === requestNovelId) {
+        // Keyed on seq, not requestNovelId: an A -> B -> A change can have
+        // two in-flight "A" requests, and the older one's finally must not
+        // clear the flag out from under the newer one that's still pending
+        // (which would let a manual retry fire a redundant duplicate).
+        if (seq === requestSeqRef.current) {
           loadingForRef.current = null;
         }
       });

@@ -68,7 +68,7 @@ def list_episodes(
             # the wire just to discard it during response serialization.
             .options(load_only(Episode.id, Episode.episode_index, Episode.status, Episode.updated_at))
             .where(Episode.novel_id == novel_id)
-            .order_by(Episode.episode_index.desc())
+            .order_by(Episode.episode_index.asc())
         )
     )
 
