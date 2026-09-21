@@ -26,7 +26,7 @@ def get_current_user(
         user_id = uuid.UUID(claims["sub"])
         # Tokens minted before `ver` existed count as version 0.
         token_version = int(claims.get("ver", 0))
-    except (JWEError, JWTError, ValueError, KeyError) as exc:
+    except (JWEError, JWTError, ValueError, KeyError, TypeError) as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token") from exc
 
     user = db.get(User, user_id)

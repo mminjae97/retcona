@@ -3,6 +3,11 @@ import type { ChangeEvent, CompositionEvent } from "react";
 // Pen name rules (design doc 3.6), mirroring the backend's `_strip_nickname`.
 export const NICKNAME_MIN_LENGTH = 2;
 export const NICKNAME_MAX_LENGTH = 20;
+// What the input itself accepts, before NFC and strip: the backend's raw cap.
+// The 20 limit applies to the normalized text, which can be a third of the raw
+// length (decomposed Hangul), so cutting the raw text at 20 would truncate a
+// pasted name without any message.
+const NICKNAME_MAX_RAW_LENGTH = 200;
 
 // Python's `str.strip()` whitespace set (str.isspace). JS's `trim()` differs
 // from it: it also strips U+FEFF but not U+001C-U+001F or U+0085, so trimming
@@ -28,8 +33,7 @@ export function stripNickname(value: string): string {
 // them yet and rejects them, where this accepts them.)
 //
 // Every allowed character is a single UTF-16 unit, so `String.length` here is
-// the same count as the backend's `len()` and the input's native `maxLength`
-// is exact — no code-point bookkeeping needed.
+// the same count as the backend's `len()` — no code-point bookkeeping needed.
 const DISALLOWED_SOURCE = String.raw`[^\p{L}\p{N}\p{Mn}\p{Mc} ]|[\u{10000}-\u{10FFFF}]|[\u034F\u115F\u1160\u17B4\u17B5\u180B-\u180D\u180F\u3164\uFFA0\uFE00-\uFE0F]`;
 const DISALLOWED_ALL = new RegExp(DISALLOWED_SOURCE, "gu");
 const DISALLOWED_ANY = new RegExp(DISALLOWED_SOURCE, "u");
@@ -62,10 +66,11 @@ export function getNicknameError(value: string): string | null {
 // (symbols, or emoji from an emoji keyboard or a paste) are dropped as they arrive. While
 // an IME is composing, the input's value holds an uncommitted syllable and
 // rewriting it can drop or duplicate jamo in some browsers, so it's cleaned
-// when composition ends instead. Length is left to the input's own `maxLength`.
+// when composition ends instead. Length is left to `getNicknameError` (the input's
+// `maxLength` is only the raw cap).
 export function nicknameInputProps(setValue: (value: string) => void) {
   return {
-    maxLength: NICKNAME_MAX_LENGTH,
+    maxLength: NICKNAME_MAX_RAW_LENGTH,
     placeholder: NICKNAME_HINT,
     onChange: (e: ChangeEvent<HTMLInputElement>) => {
       const composing = (e.nativeEvent as InputEvent).isComposing;

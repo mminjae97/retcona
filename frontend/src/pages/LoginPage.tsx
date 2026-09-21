@@ -140,7 +140,9 @@ export default function LoginPage() {
         )}
 
         {sessionEnded && (
-          <p className="login-notice">로그인 세션이 종료되었습니다. 다시 로그인하면 하던 작업으로 돌아갑니다.</p>
+          <p className="login-notice">
+            로그인 세션이 종료되었습니다.{returnTo !== null && " 다시 로그인하면 하던 작업으로 돌아갑니다."}
+          </p>
         )}
 
         {error && <p className="login-error">{error}</p>}
