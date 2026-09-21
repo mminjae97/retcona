@@ -30,4 +30,8 @@ def get_current_user(
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
+    if user.deletion_requested_at is not None:
+        # Pending deletion (3.5): the account only comes back by logging in
+        # again, so a token issued before the request must stop working.
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account is scheduled for deletion")
     return user

@@ -2,15 +2,21 @@
 // Account info (change nickname), my novels list (open/relationship graph·timeline/delete), danger zone (delete account)
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Link } from "react-router-dom";
-import { getMe } from "../api/auth";
+import { Link, useNavigate } from "react-router-dom";
+import { getMe, requestAccountDeletion, updateNickname } from "../api/auth";
 import type { UserPublic } from "../api/auth";
-import { describeError } from "../api/client";
+import { ApiError, describeError } from "../api/client";
 import { createNovel, deleteNovel, listNovels, renameNovel } from "../api/novels";
 import type { NovelPublic } from "../api/novels";
 import "./MyPage.css";
 
+const DELETION_ERROR_MESSAGES_BY_STATUS: Record<number, string> = {
+  403: "비밀번호가 올바르지 않습니다.",
+  501: "소셜 로그인 계정의 탈퇴는 아직 지원되지 않습니다.",
+};
+
 export default function MyPage() {
+  const navigate = useNavigate();
   const [user, setUser] = useState<UserPublic | null>(null);
   const [userError, setUserError] = useState<string | null>(null);
   const [novels, setNovels] = useState<NovelPublic[] | null>(null);
@@ -21,6 +27,14 @@ export default function MyPage() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const [editingNickname, setEditingNickname] = useState(false);
+  const [nicknameValue, setNicknameValue] = useState("");
+  const [savingNickname, setSavingNickname] = useState(false);
+  const [nicknameError, setNicknameError] = useState<string | null>(null);
+  const [confirmingDeletion, setConfirmingDeletion] = useState(false);
+  const [deletionPassword, setDeletionPassword] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deletionError, setDeletionError] = useState<string | null>(null);
   // Ref, not state: needs to block a second call synchronously (e.g. a fast
   // double-click on "다시 시도"), before a state update could re-render and
   // disable the button.
@@ -93,6 +107,66 @@ export default function MyPage() {
     }
   }
 
+  function startEditNickname() {
+    if (!user) return;
+    setNicknameValue(user.nickname);
+    setNicknameError(null);
+    setEditingNickname(true);
+  }
+
+  async function handleSaveNickname(e: FormEvent) {
+    e.preventDefault();
+    if (savingNickname) return;
+    // Validate against the trimmed length, matching the backend's
+    // strip-then-check rule (3.6).
+    const trimmed = nicknameValue.trim();
+    if (trimmed.length < 2 || trimmed.length > 20) {
+      setNicknameError("필명은 공백을 제외하고 2~20자로 입력해주세요.");
+      return;
+    }
+    setNicknameError(null);
+    setSavingNickname(true);
+    try {
+      setUser(await updateNickname(trimmed));
+      setEditingNickname(false);
+    } catch (err) {
+      setNicknameError(describeError(err));
+    } finally {
+      setSavingNickname(false);
+    }
+  }
+
+  function cancelDeletion() {
+    setConfirmingDeletion(false);
+    setDeletionPassword("");
+    setDeletionError(null);
+  }
+
+  async function handleRequestDeletion(e: FormEvent) {
+    e.preventDefault();
+    if (deleting || !deletionPassword) return;
+    if (
+      !window.confirm(
+        "정말 회원 탈퇴를 접수하시겠습니까?\n30일의 유예기간이 지나면 계정과 모든 작품 데이터가 영구 삭제되며 복구할 수 없습니다.",
+      )
+    ) {
+      return;
+    }
+    setDeletionError(null);
+    setDeleting(true);
+    try {
+      const result = await requestAccountDeletion(deletionPassword);
+      const purgeDate = new Date(result.purge_after).toLocaleDateString("ko-KR");
+      window.alert(`탈퇴가 접수되었습니다. ${purgeDate}에 모든 데이터가 영구 삭제됩니다.\n그 전에 다시 로그인하면 탈퇴가 취소됩니다.`);
+      navigate("/login");
+    } catch (err) {
+      setDeletionError(
+        (err instanceof ApiError && DELETION_ERROR_MESSAGES_BY_STATUS[err.status]) || describeError(err),
+      );
+      setDeleting(false);
+    }
+  }
+
   async function handleDelete(novel: NovelPublic) {
     if (!window.confirm(`"${novel.title}"을(를) 삭제하시겠습니까? 30일 이내에는 복구할 수 있습니다.`)) return;
     setError(null);
@@ -116,10 +190,31 @@ export default function MyPage() {
           <dl className="account-info">
             <dt>필명</dt>
             <dd>
-              {user.nickname}{" "}
-              <button type="button" disabled title="필명 변경은 준비 중입니다">
-                변경
-              </button>
+              {editingNickname ? (
+                <form className="rename-form" onSubmit={handleSaveNickname}>
+                  <input
+                    type="text"
+                    value={nicknameValue}
+                    onChange={(e) => setNicknameValue(e.target.value)}
+                    maxLength={20}
+                    autoFocus
+                  />
+                  <button type="submit" disabled={savingNickname}>
+                    저장
+                  </button>
+                  <button type="button" onClick={() => setEditingNickname(false)}>
+                    취소
+                  </button>
+                </form>
+              ) : (
+                <>
+                  {user.nickname}{" "}
+                  <button type="button" onClick={startEditNickname}>
+                    변경
+                  </button>
+                </>
+              )}
+              {nicknameError && <p className="mypage-error">{nicknameError}</p>}
             </dd>
             <dt>이메일</dt>
             <dd>{user.email}</dd>
@@ -206,9 +301,33 @@ export default function MyPage() {
 
       <section className="mypage-section danger-zone">
         <h2>⚠ 위험 영역</h2>
-        <button type="button" disabled title="회원 탈퇴는 준비 중입니다">
-          회원 탈퇴
-        </button>
+        {confirmingDeletion ? (
+          <form className="deletion-form" onSubmit={handleRequestDeletion}>
+            <p>
+              본인 확인을 위해 비밀번호를 입력해주세요. 탈퇴 접수 후 30일이 지나면 계정과 모든 작품 데이터가 영구
+              삭제되며, 그 전에 다시 로그인하면 탈퇴가 취소됩니다.
+            </p>
+            <input
+              type="password"
+              placeholder="비밀번호"
+              value={deletionPassword}
+              onChange={(e) => setDeletionPassword(e.target.value)}
+              autoComplete="current-password"
+              autoFocus
+            />
+            <button type="submit" disabled={deleting || !deletionPassword}>
+              탈퇴 접수
+            </button>
+            <button type="button" onClick={cancelDeletion} disabled={deleting}>
+              취소
+            </button>
+            {deletionError && <p className="mypage-error">{deletionError}</p>}
+          </form>
+        ) : (
+          <button type="button" onClick={() => setConfirmingDeletion(true)}>
+            회원 탈퇴
+          </button>
+        )}
       </section>
     </div>
   );

@@ -1,12 +1,22 @@
 """Pydantic request/response schemas for the auth endpoints."""
 
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 def _normalize_email(value: str) -> str:
     return value.lower()
+
+
+def _strip_nickname(value: str) -> str:
+    # Strip before length-checking, so surrounding whitespace can't push a
+    # nickname over the 20-char limit or hide an all-whitespace value.
+    value = value.strip()
+    if not 2 <= len(value) <= 20:
+        raise ValueError("Nickname must be 2-20 characters")
+    return value
 
 
 class SignupRequest(BaseModel):
@@ -30,12 +40,7 @@ class SignupRequest(BaseModel):
     @field_validator("nickname")
     @classmethod
     def strip_nickname(cls, value: str) -> str:
-        # Strip before length-checking, so surrounding whitespace can't push a
-        # nickname over the 20-char limit or hide an all-whitespace value.
-        value = value.strip()
-        if not 2 <= len(value) <= 20:
-            raise ValueError("Nickname must be 2-20 characters")
-        return value
+        return _strip_nickname(value)
 
 
 class LoginRequest(BaseModel):
@@ -46,6 +51,24 @@ class LoginRequest(BaseModel):
     @classmethod
     def validate_email(cls, value: str) -> str:
         return _normalize_email(value)
+
+
+class NicknameUpdate(BaseModel):
+    nickname: str = Field(min_length=2)
+
+    @field_validator("nickname")
+    @classmethod
+    def strip_nickname(cls, value: str) -> str:
+        return _strip_nickname(value)
+
+
+class DeletionRequest(BaseModel):
+    password: str
+
+
+class DeletionResponse(BaseModel):
+    deletion_requested_at: datetime
+    purge_after: datetime
 
 
 class UserPublic(BaseModel):
