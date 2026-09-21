@@ -1,8 +1,7 @@
 // Auth API calls (design doc 3.1, 3.5, 3.6) — email/password signup and login,
 // nickname change, account deletion request.
 
-import { discardDraftsForDeletion } from "../utils/draft";
-import { setUserId } from "../utils/session";
+import { announceAccountDeleted, setUserId } from "../utils/session";
 import { apiFetch, clearToken, setToken } from "./client";
 
 export interface UserPublic {
@@ -82,13 +81,14 @@ export interface DeletionResult {
 // The user was just told their data is being deleted, so unsaved manuscript
 // drafts must not linger in this browser (shared machines) either: the
 // response names the account the request was made for, which is the one whose
-// drafts go (not whichever account happens to be remembered locally).
+// local data goes (not whichever account happens to be remembered locally).
+// Announced, not done here: clearing it is up to whoever holds it (utils/draft.ts).
 export async function requestAccountDeletion(password: string): Promise<DeletionResult> {
   const result = await apiFetch<DeletionResult>("/auth/me/deletion", {
     method: "POST",
     body: JSON.stringify({ password }),
   });
-  discardDraftsForDeletion(result.user_id);
+  announceAccountDeleted(result.user_id);
   clearToken();
   return result;
 }

@@ -45,6 +45,10 @@ const AUTOSAVE_NO_BACKUP_MAX_WAIT_MS = 10000;
 // After an autosave failed for a reason that may pass (network, server error),
 // the text is sent again this long afterwards unless something newer came first.
 const AUTOSAVE_RETRY_AFTER_FAILURE_MS = 45000;
+// ...at most this many times in a row (a text the server keeps rejecting would
+// otherwise be sent every 45 s for as long as the page is open); after that it
+// waits for the next edit or the save button.
+const AUTOSAVE_MAX_RETRIES = 5;
 // A save due while one is still in flight waits and re-checks this often, so
 // only the latest text goes out afterwards, not every intermediate version.
 const AUTOSAVE_WHILE_SAVING_RECHECK_MS = 1000;
@@ -93,6 +97,8 @@ export default function EditorPage() {
   const autosaveMaxWaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Saves sent and not yet answered.
   const savesInFlightRef = useRef(0);
+  // Failed autosaves in a row that have been retried automatically.
+  const autosaveRetriesRef = useRef(0);
   // Whether the last local draft write went through.
   const draftBackupOkRef = useRef(true);
   // Content not yet sent to the API. Flushed directly (bypassing component
@@ -253,6 +259,7 @@ export default function EditorPage() {
           // Before the mounted/seq checks below: whether the local backup is
           // still needed depends only on what the server now holds, even if
           // this component has since moved on to another episode.
+          autosaveRetriesRef.current = 0;
           if (targetEpisodeId === currentEpisodeIdRef.current) setServerVersion(updated.updated_at, updated.content);
           // Only this session's own draft is touched: another tab's says
           // nothing about which version *its* text was based on.
@@ -296,7 +303,13 @@ export default function EditorPage() {
           // the time in between. Not for a rejection that retrying can't
           // change (session ended, episode gone, bad request).
           const passing = !(err instanceof ApiError) || err.status >= 500;
-          if (passing && targetEpisodeId === currentEpisodeIdRef.current && pendingRef.current === null) {
+          if (
+            passing &&
+            autosaveRetriesRef.current < AUTOSAVE_MAX_RETRIES &&
+            targetEpisodeId === currentEpisodeIdRef.current &&
+            pendingRef.current === null
+          ) {
+            autosaveRetriesRef.current++;
             pendingRef.current = { novelId: targetNovelId, episodeId: targetEpisodeId, content: nextContent };
             if (!autosaveTimerRef.current) {
               autosaveTimerRef.current = setTimeout(() => autosaveNowRef.current(), AUTOSAVE_RETRY_AFTER_FAILURE_MS);
@@ -425,6 +438,7 @@ export default function EditorPage() {
     // Debounced: pushed back by every change. The max-wait timer is started by
     // the first change and left alone until the save goes out.
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveRetriesRef.current = 0;
     const backupOk = draftBackupOkRef.current;
     autosaveTimerRef.current = setTimeout(
       () => autosaveNowRef.current(),
@@ -471,6 +485,7 @@ export default function EditorPage() {
     if (!novelId || !episodeId) return;
     pendingRef.current = null;
     clearAutosaveTimers();
+    autosaveRetriesRef.current = 0;
     flushDraft();
     save(novelId, episodeId, content);
   }

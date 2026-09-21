@@ -1,9 +1,8 @@
 // Thin client for talking to backend/api (FastAPI).
 // The auth token (JWE, 3.3) is sent via the Authorization header.
 
-import { resumeDrafts } from "../utils/draft";
 import { persistedValue } from "../utils/safeStorage";
-import { setUserId } from "../utils/session";
+import { announceSignedIn } from "../utils/session";
 
 const BASE_URL = "/api";
 
@@ -19,8 +18,7 @@ export const getToken = (): string | null => tokenStore.get();
 
 export function setToken(value: string, userId: string): void {
   sessionSeen = true;
-  setUserId(userId);
-  resumeDrafts(userId); // a new session: drafts are written again after a deletion wipe
+  announceSignedIn(userId);
   tokenStore.set(value);
 }
 

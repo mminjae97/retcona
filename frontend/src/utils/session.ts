@@ -14,3 +14,32 @@ const userId = persistedValue("retcona_user_id");
 export const getUserId = (): string | null => userId.get();
 
 export const setUserId = (id: string): void => userId.set(id);
+
+// What happens to local data when the account changes is not the API layer's
+// business: it announces these events, and whoever holds such data (the draft
+// storage, utils/draft.ts) subscribes.
+type AccountListener = (userId: string) => void;
+const signedInListeners = new Set<AccountListener>();
+const deletedListeners = new Set<AccountListener>();
+
+function subscribe(listeners: Set<AccountListener>, listener: AccountListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+export const onSignedIn = (listener: AccountListener): (() => void) => subscribe(signedInListeners, listener);
+
+// A deletion request for this account has gone through.
+export const onAccountDeleted = (listener: AccountListener): (() => void) => subscribe(deletedListeners, listener);
+
+// A login or signup has succeeded: remembers the account and tells subscribers.
+export function announceSignedIn(id: string): void {
+  setUserId(id);
+  signedInListeners.forEach((listener) => listener(id));
+}
+
+export function announceAccountDeleted(id: string): void {
+  deletedListeners.forEach((listener) => listener(id));
+}

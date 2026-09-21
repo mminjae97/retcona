@@ -13,7 +13,7 @@
 // left behind is offered rather than silently written over.
 
 import { storageGet, storageKeys, storageRemove, storageSet } from "./safeStorage";
-import { getUserId } from "./session";
+import { getUserId, onAccountDeleted, onSignedIn } from "./session";
 
 const DRAFT_PREFIX = "retcona_draft:";
 // Set when an account is put up for deletion, cleared by its next login; one per account.
@@ -284,4 +284,16 @@ export function pruneStaleDrafts(now = Date.now()): void {
     const draft = readDraft(key);
     if (draft === null || now - draft.savedAt >= MAX_DRAFT_AGE_MS) discardDraft(key);
   }
+  // A deletion marker (it holds the time it was set) matters for as long as the
+  // deletion can still be cancelled; after that the account is gone, or the
+  // window for coming back has closed, and the marker would sit there forever.
+  for (const key of storageKeys(WIPED_PREFIX)) {
+    const setAt = Number(storageGet(key));
+    if (!Number.isFinite(setAt) || now - setAt >= MAX_DRAFT_AGE_MS) storageRemove(key);
+  }
 }
+
+// Account events (see utils/session.ts): a login starts a session in which this
+// account's drafts are written again; a deletion request wipes them.
+onSignedIn(resumeDrafts);
+onAccountDeleted(discardDraftsForDeletion);
