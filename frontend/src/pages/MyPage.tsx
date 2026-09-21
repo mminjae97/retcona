@@ -306,7 +306,12 @@ export default function MyPage() {
 
       <section className="mypage-section danger-zone">
         <h2>⚠ 위험 영역</h2>
-        {user && !user.has_password ? (
+        {user === null ? (
+          // Not offered until the account is known: whether the password form
+          // applies depends on has_password, and a failed getMe (e.g. a dead
+          // token) means there's no account to delete from this session.
+          <p>{userError ?? "불러오는 중..."}</p>
+        ) : !user.has_password ? (
           <p>소셜 로그인 계정의 회원 탈퇴는 아직 지원되지 않습니다.</p>
         ) : confirmingDeletion ? (
           <form className="deletion-form" onSubmit={handleRequestDeletion}>

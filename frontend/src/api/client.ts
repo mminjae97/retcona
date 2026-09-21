@@ -57,6 +57,10 @@ function extractDetail(body: unknown): string | undefined {
   return undefined;
 }
 
+// Login and signup answer 401 for a wrong password, which their own screens
+// handle — every other 401 on an authenticated call means the session is over.
+const AUTH_ENTRY_PATHS = ["/auth/login", "/auth/signup"];
+
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getToken();
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -67,6 +71,15 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
       ...options?.headers,
     },
   });
+  if (res.status === 401 && token && !AUTH_ENTRY_PATHS.includes(path)) {
+    // The token is expired or was revoked (e.g. by an account-deletion request
+    // from another device, 3.5). Drop it and go back to the login screen
+    // rather than leaving every page failing with a generic error.
+    clearToken();
+    if (window.location.pathname !== "/login") {
+      window.location.assign("/login");
+    }
+  }
   if (!res.ok) {
     const detail = await res
       .json()

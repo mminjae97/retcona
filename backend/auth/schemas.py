@@ -18,6 +18,10 @@ def _strip_nickname(value: str) -> str:
     value = value.strip()
     if not 2 <= len(value) <= 20:
         raise ValueError("Nickname must be 2-20 characters")
+    # str.strip() leaves NUL in place, and Postgres text columns reject it — a
+    # 500 from the UPDATE/INSERT instead of a 422 here.
+    if "\x00" in value:
+        raise ValueError("Nickname must not contain NUL characters")
     return value
 
 

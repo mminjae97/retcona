@@ -36,11 +36,6 @@ def _issue_access_token(user: User) -> str:
 DELETION_GRACE_PERIOD = timedelta(days=30)
 
 
-def _as_utc(value: datetime) -> datetime:
-    # The column is timestamptz; this only guards a driver that hands back a naive value.
-    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
-
-
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 def signup(body: SignupRequest, db: Session = Depends(get_db)) -> TokenResponse:
     if db.scalar(select(User).where(User.email == body.email)) is not None:
@@ -78,7 +73,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
         # token_version, which the request bumps, so it simply stops working.
         db.refresh(user, with_for_update=True)
         if user.deletion_requested_at is not None:
-            if datetime.now(timezone.utc) >= _as_utc(user.deletion_requested_at) + DELETION_GRACE_PERIOD:
+            if datetime.now(timezone.utc) >= user.deletion_requested_at + DELETION_GRACE_PERIOD:
                 # Past the grace period the account can no longer be recovered
                 # (3.5), even if the purge job hasn't got to it yet.
                 raise HTTPException(status.HTTP_410_GONE, "Account deletion grace period has passed")

@@ -5,7 +5,7 @@ export const NICKNAME_MIN_LENGTH = 2;
 export const NICKNAME_MAX_LENGTH = 20;
 
 // Python's `str.strip()` whitespace set (str.isspace). JS's `trim()` differs
-// from it — it also strips U+FEFF but not - or  — so trimming
+// from it: it also strips U+FEFF but not U+001C-U+001F or U+0085, so trimming
 // with `trim()` could pass a value the backend then shortens below the minimum.
 const PY_WHITESPACE = "\t-\r\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000";
 const PY_STRIP = new RegExp(`^[${PY_WHITESPACE}]+|[${PY_WHITESPACE}]+$`, "g");
