@@ -14,6 +14,7 @@ import { describeError } from "../api/client";
 import { getEpisode, saveEpisode } from "../api/episodes";
 import type { EpisodePublic } from "../api/episodes";
 import {
+  MAX_DRAFTS_PER_EPISODE,
   clearDraft,
   discardDraft,
   isDraftEventFor,
@@ -104,6 +105,10 @@ export default function EditorPage() {
   // have moved on, and must record the base as of *now*.
   const currentEpisodeIdRef = useRef<string | undefined>(undefined);
   const serverUpdatedAtRef = useRef("");
+  // The same version as state, for what is drawn from it: kept in step with the
+  // ref (which the debounced writes need), so the list and the load
+  // confirmation always agree.
+  const [serverUpdatedAt, setServerUpdatedAt] = useState("");
   const serverContentRef = useRef("");
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftPendingRef = useRef<{ episodeId: string; content: string } | null>(null);
@@ -194,6 +199,7 @@ export default function EditorPage() {
           // this component has since moved on to another episode.
           if (targetEpisodeId === currentEpisodeIdRef.current) {
             serverUpdatedAtRef.current = updated.updated_at;
+            setServerUpdatedAt(updated.updated_at);
             serverContentRef.current = updated.content;
           }
           // Only this session's own draft is touched: another tab's says
@@ -246,6 +252,7 @@ export default function EditorPage() {
     setOtherDrafts([]);
     currentEpisodeIdRef.current = episodeId;
     serverUpdatedAtRef.current = "";
+    setServerUpdatedAt("");
     serverContentRef.current = "";
     // This load writes to a slot of its own; drafts an earlier load left stay
     // in storage and show up in the list.
@@ -264,6 +271,7 @@ export default function EditorPage() {
       .then((ep) => {
         if (cancelled || ep === null) return;
         serverUpdatedAtRef.current = ep.updated_at;
+        setServerUpdatedAt(ep.updated_at);
         serverContentRef.current = ep.content;
         setEpisode(ep);
         setContent(ep.content);
@@ -315,7 +323,7 @@ export default function EditorPage() {
   // paths, saves it). The draft itself stays listed until the server holds the
   // same text, so it can be loaded again or discarded later.
   function loadOtherDraft(draft: StoredDraft) {
-    const changedSince = draft.baseUpdatedAt !== serverUpdatedAtRef.current;
+    const changedSince = draft.baseUpdatedAt !== serverUpdatedAt;
     const replacesText = content !== "" && content !== draft.content;
     if (
       (replacesText || changedSince) &&
@@ -381,12 +389,18 @@ export default function EditorPage() {
             남은 초안입니다. 각 탭은 자기 초안만 다시 저장하므로 서로 덮어쓰지 않습니다. 불러오기를 누르면 지금 화면의
             내용이 그 초안으로 바뀝니다.
           </p>
+          {otherDrafts.length >= MAX_DRAFTS_PER_EPISODE && (
+            <p>
+              이 화의 초안이 가득 차(최대 {MAX_DRAFTS_PER_EPISODE}개) 최근에 쓰인 초안이 아닌 것이 없으면 새로 여는 탭은 자동 백업이
+              꺼집니다. 필요 없는 초안은 버려 주세요.
+            </p>
+          )}
           <ul className="editor-draft-list">
             {otherDrafts.map((draft) => (
               <li key={draft.key}>
                 <span className="editor-draft-preview">
                   {new Date(draft.savedAt).toLocaleString()} · {previewDraft(draft.content)}
-                  {draft.baseUpdatedAt !== episode.updated_at && " · 이후 이 화가 수정됨"}
+                  {draft.baseUpdatedAt !== serverUpdatedAt && " · 이후 이 화가 수정됨"}
                 </span>
                 <span className="editor-actions">
                   <button type="button" onClick={() => loadOtherDraft(draft)}>

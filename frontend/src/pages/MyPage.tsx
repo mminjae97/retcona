@@ -170,7 +170,9 @@ export default function MyPage() {
     try {
       const result = await requestAccountDeletion(deletionPassword);
       const purgeDate = new Date(result.purge_after).toLocaleDateString("ko-KR");
-      window.alert(`탈퇴가 접수되었습니다. ${purgeDate}에 모든 데이터가 영구 삭제됩니다.\n그 전에 다시 로그인하면 탈퇴가 취소됩니다.`);
+      window.alert(
+        `탈퇴가 접수되었습니다. ${purgeDate} 이후 모든 데이터가 영구 삭제됩니다.\n그 전에 다시 로그인하면 탈퇴가 취소되며, 이 날짜가 지나면 취소할 수 없습니다.`,
+      );
       navigate("/login");
     } catch (err) {
       setDeletionError(

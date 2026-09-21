@@ -22,8 +22,14 @@ const WIPED_PREFIX = "retcona_drafts_wiped:";
 // A draft nobody came back for is dropped after this long.
 const MAX_DRAFT_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 // Upper bound on drafts per account and episode, so left-behind slots can't
-// grow without limit. A new slot pushes the oldest one out.
-const MAX_DRAFTS_PER_EPISODE = 10;
+// grow without limit.
+export const MAX_DRAFTS_PER_EPISODE = 10;
+// When the episode is full a new session's slot replaces the oldest one, but
+// only one that hasn't been written to for this long: a slot touched recently
+// may belong to a tab that is still open (its save is failing, which is the
+// only reason a draft outlives a save). If every slot is that recent, the new
+// session gets no backup rather than pushing someone else's out.
+const STALE_SLOT_MS = 60 * 60 * 1000;
 
 export interface Draft {
   content: string;
@@ -107,29 +113,35 @@ export function loadDraft(episodeId: string): Draft | null {
   return userId === null ? null : readDraft(ownKey(userId, episodeId));
 }
 
-// Slots this page load has already written. Writing runs every few hundred ms
-// while typing, so "does my slot exist yet" (which would mean reading the whole
-// previous manuscript back) is only asked for the first write.
-const writtenByThisLoad = new Set<string>();
+// Slots this load has already made room for. Writing runs every few hundred ms
+// while typing, and making room means scanning storage, so it is done once per
+// slot per page load — also across saves that clear the slot in between.
+const slotsWithRoom = new Set<string>();
+// A slot that found the episode full isn't retried on every keystroke burst
+// (each try reads other drafts' text back); it looks again after a while.
+const ROOM_RETRY_MS = 30_000;
+const retryRoomAt = new Map<string, number>();
 
 export function saveDraft(episodeId: string, draft: DraftInput): boolean {
   const userId = getUserId();
   if (userId === null || draftsWiped(userId)) return false;
   const key = ownKey(userId, episodeId);
-  if (!writtenByThisLoad.has(key) && storageGet(key) === null) makeRoom(userId, episodeId);
+  if (!slotsWithRoom.has(key)) {
+    if ((retryRoomAt.get(key) ?? 0) > Date.now()) return false;
+    if (storageGet(key) === null && !makeRoom(userId, episodeId)) {
+      retryRoomAt.set(key, Date.now() + ROOM_RETRY_MS);
+      return false;
+    }
+    retryRoomAt.delete(key);
+    slotsWithRoom.add(key);
+  }
   const stored: Draft = { content: draft.content, baseUpdatedAt: draft.baseUpdatedAt, savedAt: Date.now() };
-  const written = storageSet(key, JSON.stringify(stored));
-  if (written) writtenByThisLoad.add(key);
-  else writtenByThisLoad.delete(key);
-  return written;
+  return storageSet(key, JSON.stringify(stored));
 }
 
 export function clearDraft(episodeId: string): void {
   const userId = getUserId();
-  if (userId === null) return;
-  const key = ownKey(userId, episodeId);
-  writtenByThisLoad.delete(key);
-  storageRemove(key);
+  if (userId !== null) storageRemove(ownKey(userId, episodeId));
 }
 
 // Parsing a draft means parsing the whole manuscript, and the list is re-read
@@ -179,14 +191,20 @@ export function discardDraft(key: string): void {
   parsedByKey.delete(key);
 }
 
-// Frees a slot for a new session's first write when the episode is at its cap.
-function makeRoom(userId: string, episodeId: string): void {
+// Frees a slot for a new session's first write when the episode is at its cap,
+// oldest first and never one written to recently. Returns whether there is room.
+function makeRoom(userId: string, episodeId: string): boolean {
   const others = storageKeys(episodePrefix(userId, episodeId)).map((key) => ({
     key,
-    savedAt: readDraft(key)?.savedAt ?? 0,
+    savedAt: readDraftCached(key)?.savedAt ?? 0,
   }));
-  others.sort((a, b) => a.savedAt - b.savedAt);
-  for (const { key } of others.slice(0, Math.max(0, others.length - MAX_DRAFTS_PER_EPISODE + 1))) discardDraft(key);
+  const excess = others.length - MAX_DRAFTS_PER_EPISODE + 1;
+  if (excess <= 0) return true;
+  const now = Date.now();
+  const stale = others.filter((o) => now - o.savedAt >= STALE_SLOT_MS).sort((a, b) => a.savedAt - b.savedAt);
+  if (stale.length < excess) return false;
+  for (const { key } of stale.slice(0, excess)) discardDraft(key);
+  return true;
 }
 
 // Whether a storage event is about a draft of this episode (another tab wrote,

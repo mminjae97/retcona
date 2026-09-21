@@ -85,6 +85,9 @@ export async function requestAccountDeletion(password: string): Promise<Deletion
   // the token still works: a session from before the id was remembered has to
   // fetch it now rather than after the request revokes the token.
   const userId = await ensureUserId();
+  // Without it the drafts can't be wiped, and the user is about to be told
+  // their data is being deleted: don't start what can't be finished.
+  if (userId === null) throw new Error("Could not determine the account id");
   const result = await apiFetch<DeletionResult>("/auth/me/deletion", {
     method: "POST",
     body: JSON.stringify({ password }),
