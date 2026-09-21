@@ -15,24 +15,26 @@ from api.episodes import router as episodes_router
 from api.novels import router as novels_router
 from auth.jwe import validate_keys
 from auth.router import router as auth_router
-from workers.purge import purge_once
+from workers.purge import purge_once, seconds_until_next_midnight
 
-# uvicorn only configures its own loggers; without this the INFO line for an
-# irreversible purge is dropped while only failures show up.
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# uvicorn only sets up handlers for its own loggers, so this one is used to have
+# the purge's INFO line show up next to the server's own output.
+logger = logging.getLogger("uvicorn.error")
 
-# How often the API server purges accounts past their deletion grace period
-# (3.5); 0 turns it off (e.g. when a separate worker or scheduler does it).
-PURGE_INTERVAL_ENV = "PURGE_INTERVAL_SECONDS"
-DEFAULT_PURGE_INTERVAL_SECONDS = 6 * 60 * 60
-# Let startup (migrations, warm-up) settle before the first pass.
-PURGE_STARTUP_DELAY_SECONDS = 60.0
+# The API server purges accounts past their deletion grace period (3.5) every
+# day at midnight (PURGE_TIMEZONE, see workers/purge.py). Set this to 0 to turn
+# that off, e.g. when a separate worker or scheduler does it.
+PURGE_ENABLED_ENV = "PURGE_ENABLED"
+_FALSE_VALUES = {"0", "false", "no", "off"}
 
 
-async def _purge_periodically(interval: float, startup_delay: float = PURGE_STARTUP_DELAY_SECONDS) -> None:
-    await asyncio.sleep(startup_delay)
+def _purge_enabled() -> bool:
+    return os.environ.get(PURGE_ENABLED_ENV, "1").strip().lower() not in _FALSE_VALUES
+
+
+async def _purge_daily() -> None:
     while True:
+        await asyncio.sleep(seconds_until_next_midnight())
         try:
             # Blocking DB work, off the event loop. Safe alongside other
             # instances running the same loop: see workers/purge.py.
@@ -41,14 +43,15 @@ async def _purge_periodically(interval: float, startup_delay: float = PURGE_STAR
                 logger.info("Purged %d account(s) past the deletion grace period", result.purged)
         except Exception:
             logger.exception("Account purge pass failed")
-        await asyncio.sleep(interval)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_keys()
-    interval = float(os.environ.get(PURGE_INTERVAL_ENV, DEFAULT_PURGE_INTERVAL_SECONDS))  # a bad value fails startup
-    purge_task = asyncio.create_task(_purge_periodically(interval)) if interval > 0 else None
+    purge_task = None
+    if _purge_enabled():
+        seconds_until_next_midnight()  # a bad PURGE_TIMEZONE fails startup, not the first midnight
+        purge_task = asyncio.create_task(_purge_daily())
     yield
     if purge_task is not None:
         purge_task.cancel()

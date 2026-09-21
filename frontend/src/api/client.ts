@@ -2,51 +2,29 @@
 // The auth token (JWE, 3.3) is sent via the Authorization header.
 
 import { resumeDrafts } from "../utils/draft";
+import { persistedValue } from "../utils/safeStorage";
 import { setUserId } from "../utils/session";
 
 const BASE_URL = "/api";
-const TOKEN_STORAGE_KEY = "retcona_token";
 
-// Storage can be blocked (site data disabled, some private modes) and then
-// throws on access. Reading treats that as "no stored token"; this runs while
-// the module loads, where a throw would take the whole app down with it.
-export function getToken(): string | null {
-  if (memoryToken !== null) return memoryToken;
-  try {
-    return localStorage.getItem(TOKEN_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
+// The auth token. Storage failures are handled by persistedValue: a token whose
+// write was refused (blocked or full storage) is kept in memory, so the login
+// that just went through (the server has already acted on it, e.g. cancelled a
+// pending deletion) still gives a session for this page load instead of
+// reporting a failure. The first read runs while the module loads, where a
+// throw would take the whole app down with it, which is why nothing here throws.
+const tokenStore = persistedValue("retcona_token");
 
-// Only holds a token when storage refused the write (blocked, or full), so the
-// login that just went through (the server has already acted on it, e.g.
-// cancelled a pending deletion) still gives a session for this page load
-// instead of reporting a failure. It wins over whatever storage still holds,
-// which would be a stale token. Never set while storage works, so another
-// tab's logout isn't undone.
-let memoryToken: string | null = null;
+export const getToken = (): string | null => tokenStore.get();
 
-export function setToken(token: string, userId: string): void {
+export function setToken(value: string, userId: string): void {
   sessionSeen = true;
   setUserId(userId);
   resumeDrafts(userId); // a new session: drafts are written again after a deletion wipe
-  try {
-    localStorage.setItem(TOKEN_STORAGE_KEY, token);
-    memoryToken = null;
-  } catch {
-    memoryToken = token;
-  }
+  tokenStore.set(value);
 }
 
-export function clearToken(): void {
-  memoryToken = null;
-  try {
-    localStorage.removeItem(TOKEN_STORAGE_KEY);
-  } catch {
-    // nothing stored to clear
-  }
-}
+export const clearToken = (): void => tokenStore.clear();
 
 export class ApiError extends Error {
   status: number;

@@ -7,25 +7,10 @@
 // account that was signed in, not to whoever signs in next. The next login
 // overwrites it.
 
-const USER_ID_STORAGE_KEY = "retcona_user_id";
+import { persistedValue } from "./safeStorage";
 
-// Only holds the id when storage refused the write; see getToken() in api/client.ts.
-let memoryUserId: string | null = null;
+const userId = persistedValue("retcona_user_id");
 
-export function getUserId(): string | null {
-  if (memoryUserId !== null) return memoryUserId;
-  try {
-    return localStorage.getItem(USER_ID_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
+export const getUserId = (): string | null => userId.get();
 
-export function setUserId(userId: string): void {
-  try {
-    localStorage.setItem(USER_ID_STORAGE_KEY, userId);
-    memoryUserId = null;
-  } catch {
-    memoryUserId = userId;
-  }
-}
+export const setUserId = (id: string): void => userId.set(id);

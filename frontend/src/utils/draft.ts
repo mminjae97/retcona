@@ -2,7 +2,8 @@
 // doc 2.2: work in progress must never be lost). The editor writes it while
 // typing and drops it once a save confirms it, so it only survives when
 // something got in the way — an expired session, a network failure, a closed
-// tab. Best effort throughout: storage can be full, blocked or absent.
+// tab. Best effort throughout: storage can be full, blocked or absent (see
+// safeStorage.ts).
 //
 // Drafts are kept per account, per episode and per editor session ("slot"): a
 // tab rewrites its own slot every time and never touches another's, so two tabs
@@ -11,6 +12,7 @@
 // button). A page load gets a fresh slot, so what a closed or reloaded tab
 // left behind is offered rather than silently written over.
 
+import { storageGet, storageKeys, storageRemove, storageSet } from "./safeStorage";
 import { getUserId } from "./session";
 
 const DRAFT_PREFIX = "retcona_draft:";
@@ -47,45 +49,18 @@ function isDraft(value: unknown): value is Draft {
   );
 }
 
-function readJson(key: string): unknown {
+function parseDraft(raw: string | null): Draft | null {
+  if (raw === null) return null;
   try {
-    const raw = localStorage.getItem(key);
-    return raw === null ? null : JSON.parse(raw);
+    const value: unknown = JSON.parse(raw);
+    return isDraft(value) ? value : null;
   } catch {
-    return null; // unreadable, corrupt or storage blocked — same as absent
+    return null; // corrupt
   }
 }
 
-// Returns whether the write went through; callers that would be left holding
-// an out-of-date copy on failure (see the editor) need to know.
-function writeJson(key: string, value: unknown): boolean {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-    return true;
-  } catch {
-    return false; // quota exceeded / storage blocked
-  }
-}
-
-function remove(key: string): void {
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    // see writeJson()
-  }
-}
-
-function keysStartingWith(prefix: string): string[] {
-  const keys: string[] = [];
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key !== null && key.startsWith(prefix)) keys.push(key);
-    }
-  } catch {
-    // storage blocked
-  }
-  return keys;
+function readDraft(key: string): Draft | null {
+  return parseDraft(storageGet(key));
 }
 
 function newSlotId(): string {
@@ -123,33 +98,45 @@ function ownKey(userId: string, episodeId: string): string {
 // as it unmounts (the 401 that ends its session routes it away), which would
 // otherwise bring back what was just wiped.
 function draftsWiped(userId: string): boolean {
-  try {
-    return localStorage.getItem(WIPED_PREFIX + userId) !== null;
-  } catch {
-    return true; // storage blocked: nothing could be written anyway
-  }
+  return storageGet(WIPED_PREFIX + userId) !== null;
 }
 
 // This session's own draft of the episode.
 export function loadDraft(episodeId: string): Draft | null {
   const userId = getUserId();
-  if (userId === null) return null;
-  const value = readJson(ownKey(userId, episodeId));
-  return isDraft(value) ? value : null;
+  return userId === null ? null : readDraft(ownKey(userId, episodeId));
 }
 
 export function saveDraft(episodeId: string, draft: DraftInput): boolean {
   const userId = getUserId();
   if (userId === null || draftsWiped(userId)) return false;
   const key = ownKey(userId, episodeId);
-  if (readJson(key) === null) makeRoom(userId, episodeId);
+  if (storageGet(key) === null) makeRoom(userId, episodeId);
   const stored: Draft = { content: draft.content, baseUpdatedAt: draft.baseUpdatedAt, savedAt: Date.now() };
-  return writeJson(key, stored);
+  return storageSet(key, JSON.stringify(stored));
 }
 
 export function clearDraft(episodeId: string): void {
   const userId = getUserId();
-  if (userId !== null) remove(ownKey(userId, episodeId));
+  if (userId !== null) storageRemove(ownKey(userId, episodeId));
+}
+
+// Parsing a draft means parsing the whole manuscript, and the list is re-read
+// often (every save, every write another tab makes), so a slot whose stored
+// text hasn't changed is not parsed again.
+const parsedByKey = new Map<string, { raw: string; draft: Draft | null }>();
+
+function readDraftCached(key: string): Draft | null {
+  const raw = storageGet(key);
+  if (raw === null) {
+    parsedByKey.delete(key);
+    return null;
+  }
+  const cached = parsedByKey.get(key);
+  if (cached !== undefined && cached.raw === raw) return cached.draft;
+  const draft = parseDraft(raw);
+  parsedByKey.set(key, { raw, draft });
+  return draft;
 }
 
 // Drafts of this episode that other sessions left (another tab, or an earlier
@@ -159,27 +146,29 @@ export function listOtherDrafts(episodeId: string): StoredDraft[] {
   if (userId === null) return [];
   const own = ownKey(userId, episodeId);
   const found: StoredDraft[] = [];
-  for (const key of keysStartingWith(episodePrefix(userId, episodeId))) {
+  for (const key of storageKeys(episodePrefix(userId, episodeId))) {
     if (key === own) continue;
-    const value = readJson(key);
-    if (isDraft(value)) found.push({ ...value, key });
-    else remove(key); // corrupt
+    const draft = readDraftCached(key);
+    if (draft !== null) found.push({ ...draft, key });
+    else storageRemove(key); // corrupt
   }
   return found.sort((a, b) => b.savedAt - a.savedAt);
 }
 
 export function discardDraft(key: string): void {
-  if (key.startsWith(DRAFT_PREFIX)) remove(key);
+  if (!key.startsWith(DRAFT_PREFIX)) return;
+  storageRemove(key);
+  parsedByKey.delete(key);
 }
 
 // Frees a slot for a new session's first write when the episode is at its cap.
 function makeRoom(userId: string, episodeId: string): void {
-  const others = keysStartingWith(episodePrefix(userId, episodeId)).map((key) => {
-    const value = readJson(key);
-    return { key, savedAt: isDraft(value) ? value.savedAt : 0 };
-  });
+  const others = storageKeys(episodePrefix(userId, episodeId)).map((key) => ({
+    key,
+    savedAt: readDraft(key)?.savedAt ?? 0,
+  }));
   others.sort((a, b) => a.savedAt - b.savedAt);
-  for (const { key } of others.slice(0, Math.max(0, others.length - MAX_DRAFTS_PER_EPISODE + 1))) remove(key);
+  for (const { key } of others.slice(0, Math.max(0, others.length - MAX_DRAFTS_PER_EPISODE + 1))) discardDraft(key);
 }
 
 // Whether a storage event is about a draft of this episode (another tab wrote,
@@ -192,31 +181,24 @@ export function isDraftEventFor(episodeId: string, storageKey: string | null): b
 }
 
 // Manuscript text shouldn't outlive the account on a shared machine. Called
-// once the deletion request has gone through; logging in again within the grace
-// period cancels the deletion, but unsaved drafts are not brought back. Only
-// this account's drafts go: other accounts on the same browser keep theirs.
-export function discardDraftsForDeletion(): void {
-  const userId = getUserId();
+// once the deletion request has gone through, with the id of the account being
+// deleted; logging in again within the grace period cancels the deletion, but
+// unsaved drafts are not brought back. Only this account's drafts go: other
+// accounts on the same browser keep theirs.
+export function discardDraftsForDeletion(userId: string | null): void {
   if (userId === null) return;
   // Marker first, so a write racing with the removal below is refused.
-  const mark = () => {
-    try {
-      localStorage.setItem(WIPED_PREFIX + userId, String(Date.now()));
-    } catch {
-      // full or blocked
-    }
-  };
-  const removeAll = () => keysStartingWith(`${DRAFT_PREFIX}${userId}:`).forEach(remove);
+  const mark = () => storageSet(WIPED_PREFIX + userId, String(Date.now()));
   mark();
-  removeAll();
+  storageKeys(`${DRAFT_PREFIX}${userId}:`).forEach(discardDraft);
   // Storage that was full refused the marker; the drafts just removed made
-  // room. (Blocked storage still fails, but then draftsWiped() is true anyway.)
+  // room. (Blocked storage still fails, but then no draft can be written anyway.)
   if (!draftsWiped(userId)) mark();
 }
 
 // A login starts a fresh session, so this account's drafts are written again.
 export function resumeDrafts(userId: string): void {
-  remove(WIPED_PREFIX + userId);
+  storageRemove(WIPED_PREFIX + userId);
 }
 
 // Runs the prune once the browser is idle rather than during startup: it has
@@ -232,8 +214,8 @@ export function schedulePruneStaleDrafts(): void {
 // Drops drafts nobody came back for (including those of episodes or novels
 // that no longer exist), so they don't accumulate forever.
 export function pruneStaleDrafts(now = Date.now()): void {
-  for (const key of keysStartingWith(DRAFT_PREFIX)) {
-    const value = readJson(key);
-    if (!isDraft(value) || now - value.savedAt >= MAX_DRAFT_AGE_MS) remove(key);
+  for (const key of storageKeys(DRAFT_PREFIX)) {
+    const draft = readDraft(key);
+    if (draft === null || now - draft.savedAt >= MAX_DRAFT_AGE_MS) discardDraft(key);
   }
 }

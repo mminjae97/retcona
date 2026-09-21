@@ -35,6 +35,9 @@ export default function MyPage() {
   const [confirmingDeletion, setConfirmingDeletion] = useState(false);
   const [deletionPassword, setDeletionPassword] = useState("");
   const [deleting, setDeleting] = useState(false);
+  // The warning is confirmed once per attempt: a wrong password comes back as
+  // an error, and retrying shouldn't ask the same question again.
+  const deletionConfirmedRef = useRef(false);
   const [deletionError, setDeletionError] = useState<string | null>(null);
   // Ref, not state: needs to block a second call synchronously (e.g. a fast
   // double-click on "다시 시도"), before a state update could re-render and
@@ -144,6 +147,7 @@ export default function MyPage() {
   }
 
   function cancelDeletion() {
+    deletionConfirmedRef.current = false;
     setConfirmingDeletion(false);
     setDeletionPassword("");
     setDeletionError(null);
@@ -153,12 +157,14 @@ export default function MyPage() {
     e.preventDefault();
     if (deleting || !deletionPassword) return;
     if (
+      !deletionConfirmedRef.current &&
       !window.confirm(
         "정말 회원 탈퇴를 접수하시겠습니까?\n30일의 유예기간이 지나면 계정과 모든 작품 데이터가 영구 삭제되며 복구할 수 없습니다.",
       )
     ) {
       return;
     }
+    deletionConfirmedRef.current = true;
     setDeletionError(null);
     setDeleting(true);
     try {

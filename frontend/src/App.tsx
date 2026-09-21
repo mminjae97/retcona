@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { onAuthExpired } from "./api/client";
+import { getUserId } from "./utils/session";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import EpisodeListPage from "./pages/EpisodeListPage";
@@ -21,7 +22,8 @@ function AuthExpiryRedirect() {
         if (location.pathname === "/login") return;
         navigate("/login", {
           replace: true,
-          state: { returnTo: location.pathname + location.search, sessionEnded },
+          // Who was signed in: only that account is taken back to this page.
+          state: { returnTo: location.pathname + location.search, sessionEnded, userId: getUserId() },
         });
       }),
     [navigate, location.pathname, location.search],

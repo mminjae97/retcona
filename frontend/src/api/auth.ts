@@ -81,11 +81,15 @@ export interface DeletionResult {
 // The user was just told their data is being deleted, so unsaved manuscript
 // drafts must not linger in this browser (shared machines) either.
 export async function requestAccountDeletion(password: string): Promise<DeletionResult> {
+  // Needed to wipe this account's drafts afterwards, and only obtainable while
+  // the token still works: a session from before the id was remembered has to
+  // fetch it now rather than after the request revokes the token.
+  const userId = await ensureUserId();
   const result = await apiFetch<DeletionResult>("/auth/me/deletion", {
     method: "POST",
     body: JSON.stringify({ password }),
   });
-  discardDraftsForDeletion();
+  discardDraftsForDeletion(userId);
   clearToken();
   return result;
 }

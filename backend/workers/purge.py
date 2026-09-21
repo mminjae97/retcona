@@ -7,12 +7,13 @@ episodes, claims, flags, events and so on. The multi-tenant layout is what
 makes the scope a single path: user -> novels -> novel_id.
 
 It runs on a schedule by itself: the API server starts a background loop
-(api/main.py, interval from PURGE_INTERVAL_SECONDS), so a plain deployment
-needs nothing extra. It can also be run on its own — once from cron or
-Cloud Scheduler, or as a long-lived worker:
+(api/main.py) that does one pass every day at midnight (PURGE_TIMEZONE,
+Asia/Seoul unless set), so a plain deployment needs nothing extra. It can also
+be run on its own — once from cron or Cloud Scheduler, or as a long-lived
+worker that does the same daily pass:
 
-    python -m workers.purge                      # one pass
-    python -m workers.purge --loop --interval 3600
+    python -m workers.purge                      # one pass now
+    python -m workers.purge --loop               # one pass every midnight
 
 It is idempotent and safe to run concurrently (several API instances, a
 separate worker): each account is purged in its own transaction, under a row
@@ -22,11 +23,13 @@ another purge run) holds it.
 
 import argparse
 import logging
+import os
 import signal
 import sys
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, time, timedelta, timezone
 from typing import NamedTuple
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -37,6 +40,23 @@ from models.novel import Novel
 from models.user import DELETION_GRACE_PERIOD, User
 
 logger = logging.getLogger(__name__)
+
+# The purge runs once a day at midnight in this time zone (an IANA name).
+PURGE_TIMEZONE_ENV = "PURGE_TIMEZONE"
+DEFAULT_PURGE_TIMEZONE = "Asia/Seoul"
+
+
+def seconds_until_next_midnight(now: datetime | None = None) -> float:
+    """Seconds from `now` to the next midnight in the purge time zone.
+
+    Always the *next* one: at exactly midnight it is a full day away, so a pass
+    that finishes early can't run twice in the same minute."""
+    tz = ZoneInfo(os.environ.get(PURGE_TIMEZONE_ENV) or DEFAULT_PURGE_TIMEZONE)
+    local = (now or datetime.now(timezone.utc)).astimezone(tz)
+    next_midnight = datetime.combine(local.date() + timedelta(days=1), time.min, tzinfo=tz)
+    # Subtract in UTC: aware datetimes sharing a tzinfo subtract as wall-clock
+    # time, which is an hour off across a daylight-saving change.
+    return (next_midnight.astimezone(timezone.utc) - local.astimezone(timezone.utc)).total_seconds()
 
 
 class PurgeResult(NamedTuple):
@@ -98,7 +118,7 @@ def purge_once() -> PurgeResult:
         return purge_expired_accounts(db)
 
 
-def run(loop: bool = False, interval: float = 3600.0) -> None:
+def run(loop: bool = False) -> None:
     logging.basicConfig(level=logging.INFO)
     if not loop:
         # A failure should surface as a non-zero exit (cron, Cloud Scheduler), and Ctrl-C keeps its default meaning.
@@ -110,18 +130,16 @@ def run(loop: bool = False, interval: float = 3600.0) -> None:
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())  # finish the current pass, then exit (10.4.4)
-    while not stop.is_set():
+    while not stop.wait(seconds_until_next_midnight()):
         try:
             logger.info("Purged %d account(s), %d failed", *purge_once())
         except Exception:
-            # e.g. the database is briefly unreachable: a long-lived worker retries next interval.
+            # e.g. the database is briefly unreachable: a long-lived worker retries at the next midnight.
             logger.exception("Purge pass failed")
-        stop.wait(interval)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Permanently delete accounts past their deletion grace period.")
-    parser.add_argument("--loop", action="store_true", help="keep running, one pass per --interval")
-    parser.add_argument("--interval", type=float, default=3600.0, help="seconds between passes with --loop")
+    parser.add_argument("--loop", action="store_true", help="keep running, one pass every midnight")
     args = parser.parse_args()
-    run(loop=args.loop, interval=args.interval)
+    run(loop=args.loop)

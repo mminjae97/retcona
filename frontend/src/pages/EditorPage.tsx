@@ -30,6 +30,11 @@ const AUTOSAVE_DELAY_MS = 2000;
 // server save fires, but coalescing keystrokes: stringifying and storing a long
 // manuscript on every key press would make typing lag.
 const DRAFT_DEBOUNCE_MS = 300;
+// Another tab typing rewrites its draft every few hundred ms; the list only
+// needs to catch up once that settles.
+const OTHER_DRAFTS_REFRESH_DEBOUNCE_MS = 1000;
+// How long the "draft loaded" notice stays up.
+const NOTICE_DURATION_MS = 6000;
 
 // First characters of a draft, counted in code points so an emoji isn't cut in half.
 function previewDraft(content: string): string {
@@ -113,7 +118,13 @@ export default function EditorPage() {
       discardDraft(d.key);
       return false;
     });
-    setOtherDrafts(unsaved);
+    // Same drafts as before: keep the old array so nothing re-renders (the
+    // textarea holds a whole chapter).
+    setOtherDrafts((prev) =>
+      prev.length === unsaved.length && prev.every((d, i) => d.key === unsaved[i].key && d.savedAt === unsaved[i].savedAt)
+        ? prev
+        : unsaved,
+    );
   }, []);
 
   const flushDraft = useCallback(() => {
@@ -143,9 +154,12 @@ export default function EditorPage() {
       if (document.visibilityState === "hidden") flushDraft();
     };
     // Another tab writing or removing a draft of this episode.
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     const onStorage = (e: StorageEvent) => {
       const id = currentEpisodeIdRef.current;
-      if (id && isDraftEventFor(id, e.key)) refreshOtherDrafts();
+      if (!id || !isDraftEventFor(id, e.key)) return;
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(refreshOtherDrafts, OTHER_DRAFTS_REFRESH_DEBOUNCE_MS);
     };
     window.addEventListener("pagehide", flushDraft);
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -154,8 +168,15 @@ export default function EditorPage() {
       window.removeEventListener("pagehide", flushDraft);
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("storage", onStorage);
+      if (refreshTimer) clearTimeout(refreshTimer);
     };
   }, [flushDraft, refreshOtherDrafts]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), NOTICE_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   const save = useCallback(
     (targetNovelId: string, targetEpisodeId: string, nextContent: string) => {

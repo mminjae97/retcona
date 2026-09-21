@@ -62,6 +62,21 @@ export function getNicknameError(value: string): string | null {
   return null;
 }
 
+// Writes the cleaned value back. When something was dropped from the middle of
+// the text, React's rewrite of the input's value would send the caret to the
+// end, so it is put back where it was (minus what was dropped before it).
+function cleanInput(input: HTMLInputElement, setValue: (value: string) => void): void {
+  const raw = input.value;
+  const clean = sanitizeNickname(raw);
+  setValue(clean);
+  if (clean === raw) return;
+  const caret = sanitizeNickname(raw.slice(0, input.selectionStart ?? raw.length)).length;
+  // After React has rendered the new value.
+  requestAnimationFrame(() => {
+    if (input.isConnected && document.activeElement === input) input.setSelectionRange(caret, caret);
+  });
+}
+
 // Props for a controlled nickname <input>: characters that aren't allowed
 // (symbols, or emoji from an emoji keyboard or a paste) are dropped as they arrive. While
 // an IME is composing, the input's value holds an uncommitted syllable and
@@ -74,8 +89,9 @@ export function nicknameInputProps(setValue: (value: string) => void) {
     placeholder: NICKNAME_HINT,
     onChange: (e: ChangeEvent<HTMLInputElement>) => {
       const composing = (e.nativeEvent as InputEvent).isComposing;
-      setValue(composing ? e.target.value : sanitizeNickname(e.target.value));
+      if (composing) setValue(e.target.value);
+      else cleanInput(e.target, setValue);
     },
-    onCompositionEnd: (e: CompositionEvent<HTMLInputElement>) => setValue(sanitizeNickname(e.currentTarget.value)),
+    onCompositionEnd: (e: CompositionEvent<HTMLInputElement>) => cleanInput(e.currentTarget, setValue),
   };
 }
