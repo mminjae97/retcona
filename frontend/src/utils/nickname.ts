@@ -10,8 +10,11 @@ export const NICKNAME_MAX_LENGTH = 20;
 const PY_WHITESPACE = "\t-\r\x1c-\x20\x85\xa0  -     　";
 const PY_STRIP = new RegExp(`^[${PY_WHITESPACE}]+|[${PY_WHITESPACE}]+$`, "g");
 
+// NFC first, like the backend: the same visible name can arrive decomposed
+// (Hangul as separate jamo, letters with combining accents) depending on the
+// IME or where it was pasted from, and length is counted on the composed form.
 export function stripNickname(value: string): string {
-  return value.replace(PY_STRIP, "");
+  return value.normalize("NFC").replace(PY_STRIP, "");
 }
 
 // What a pen name may contain: letters, numbers, combining marks and the
@@ -31,6 +34,10 @@ const DISALLOWED_SOURCE = String.raw`[^\p{L}\p{N}\p{Mn}\p{Mc} ]|[\u{10000}-\u{10
 const DISALLOWED_ALL = new RegExp(DISALLOWED_SOURCE, "gu");
 const DISALLOWED_ANY = new RegExp(DISALLOWED_SOURCE, "u");
 const HAS_LETTER_OR_NUMBER = /[\p{L}\p{N}]/u;
+// A run of more than MAX_MARKS combining marks (zalgo-style stacking), or a
+// mark with nothing to attach to (at the start, or right after a space).
+const MAX_MARKS = 3;
+const BAD_MARKS = new RegExp(`[\\p{Mn}\\p{Mc}]{${MAX_MARKS + 1},}|(?:^| )[\\p{Mn}\\p{Mc}]`, "u");
 
 export const NICKNAME_HINT = "글자·숫자·공백만, 2~20자";
 
@@ -41,12 +48,13 @@ export function sanitizeNickname(value: string): string {
 // The message to show for a nickname that can't be submitted, or null if it's fine.
 export function getNicknameError(value: string): string | null {
   const stripped = stripNickname(value);
-  if (DISALLOWED_ANY.test(stripped) || !HAS_LETTER_OR_NUMBER.test(stripped)) {
+  const lengthMessage = "필명은 공백을 제외하고 2~20자로 입력해주세요.";
+  // Nothing typed (or only spaces): a length problem, not a character problem.
+  if (stripped.length === 0) return lengthMessage;
+  if (DISALLOWED_ANY.test(stripped) || !HAS_LETTER_OR_NUMBER.test(stripped) || BAD_MARKS.test(stripped)) {
     return "필명에는 글자·숫자·공백만 쓸 수 있습니다. 이모지와 특수 기호는 사용할 수 없습니다.";
   }
-  if (stripped.length < NICKNAME_MIN_LENGTH || stripped.length > NICKNAME_MAX_LENGTH) {
-    return "필명은 공백을 제외하고 2~20자로 입력해주세요.";
-  }
+  if (stripped.length < NICKNAME_MIN_LENGTH || stripped.length > NICKNAME_MAX_LENGTH) return lengthMessage;
   return null;
 }
 

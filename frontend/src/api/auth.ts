@@ -1,7 +1,6 @@
 // Auth API calls (design doc 3.1, 3.5, 3.6) — email/password signup and login,
 // nickname change, account deletion request.
 
-import { clearAllDrafts } from "../utils/draft";
 import { apiFetch, clearToken, setToken } from "./client";
 
 export interface UserPublic {
@@ -63,13 +62,11 @@ export interface DeletionResult {
 // The backend rejects the old token as soon as the request goes through (a
 // pending-deletion account is only reachable by logging in again, 3.5), so
 // the stored token is dropped here rather than left to fail on the next call.
-// Unsaved manuscript drafts go too: the user was just told the data is deleted.
 export async function requestAccountDeletion(password: string): Promise<DeletionResult> {
   const result = await apiFetch<DeletionResult>("/auth/me/deletion", {
     method: "POST",
     body: JSON.stringify({ password }),
   });
   clearToken();
-  clearAllDrafts();
   return result;
 }

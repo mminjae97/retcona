@@ -6,6 +6,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { getMe, requestAccountDeletion, updateNickname } from "../api/auth";
 import type { UserPublic } from "../api/auth";
 import { ApiError, describeError } from "../api/client";
+import { clearAllDrafts } from "../utils/draft";
 import { getNicknameError, nicknameInputProps, stripNickname } from "../utils/nickname";
 import { createNovel, deleteNovel, listNovels, renameNovel } from "../api/novels";
 import type { NovelPublic } from "../api/novels";
@@ -163,6 +164,9 @@ export default function MyPage() {
     setDeleting(true);
     try {
       const result = await requestAccountDeletion(deletionPassword);
+      // The user was just told their data is being deleted, so unsaved
+      // manuscript drafts must not linger in this browser (shared machines).
+      clearAllDrafts();
       const purgeDate = new Date(result.purge_after).toLocaleDateString("ko-KR");
       window.alert(`탈퇴가 접수되었습니다. ${purgeDate}에 모든 데이터가 영구 삭제됩니다.\n그 전에 다시 로그인하면 탈퇴가 취소됩니다.`);
       navigate("/login");

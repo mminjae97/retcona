@@ -21,6 +21,7 @@ import {
   saveDraft,
 } from "../utils/draft";
 import type { Draft } from "../utils/draft";
+import { claimEpisode } from "../utils/editorLock";
 import "./EditorPage.css";
 
 const AUTOSAVE_DELAY_MS = 2000;
@@ -31,9 +32,11 @@ const DRAFT_DEBOUNCE_MS = 300;
 
 // First characters of a draft, counted in code points so an emoji isn't cut in half.
 function previewDraft(content: string): string {
-  const chars = Array.from(content);
-  if (chars.length === 0) return "(빈 내용)";
-  return chars.slice(0, 40).join("") + (chars.length > 40 ? "…" : "");
+  if (content.length === 0) return "(빈 내용)";
+  // Only the head is split into code points: this runs for every parked draft
+  // on every render (each keystroke), and a chapter can be 100k characters.
+  const shown = Array.from(content.slice(0, 82)).slice(0, 40).join("");
+  return shown + (content.length > shown.length ? "…" : "");
 }
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -55,6 +58,8 @@ export default function EditorPage() {
   // Local drafts that can't be restored automatically because the episode
   // changed on the server after they were written — the author decides.
   const [conflictDrafts, setConflictDrafts] = useState<Draft[]>([]);
+  // Another tab already has this episode open (and owns its local draft).
+  const [otherTabOpen, setOtherTabOpen] = useState(false);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Content not yet sent to the API. Flushed directly (bypassing component
   // state) when the user navigates to a different episode or away from the
@@ -97,6 +102,9 @@ export default function EditorPage() {
   const serverUpdatedAtRef = useRef("");
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftPendingRef = useRef<{ episodeId: string; content: string } | null>(null);
+  // Episodes another tab owns the draft of: this tab leaves their local draft
+  // alone entirely (no restoring, writing, rebasing or clearing it).
+  const foreignEpisodesRef = useRef(new Set<string>());
 
   const flushDraft = useCallback(() => {
     if (draftTimerRef.current) {
@@ -106,6 +114,7 @@ export default function EditorPage() {
     const pending = draftPendingRef.current;
     if (!pending) return;
     draftPendingRef.current = null;
+    if (foreignEpisodesRef.current.has(pending.episodeId)) return;
     const written = saveDraft(pending.episodeId, {
       content: pending.content,
       baseUpdatedAt: serverUpdatedAtRef.current,
@@ -149,7 +158,7 @@ export default function EditorPage() {
           if (targetEpisodeId === currentEpisodeIdRef.current) {
             serverUpdatedAtRef.current = updated.updated_at;
           }
-          const draft = loadDraft(targetEpisodeId);
+          const draft = foreignEpisodesRef.current.has(targetEpisodeId) ? null : loadDraft(targetEpisodeId);
           if (draft) {
             if (draft.content === updated.content) {
               clearDraft(targetEpisodeId);
@@ -196,6 +205,8 @@ export default function EditorPage() {
     setSaveError(null);
     setNotice(null);
     setConflictDrafts([]);
+    setOtherTabOpen(false);
+    let releaseClaim = () => {};
     currentEpisodeIdRef.current = episodeId;
     serverUpdatedAtRef.current = "";
     // Chained after saveChainRef instead of fired directly: a quick
@@ -207,12 +218,27 @@ export default function EditorPage() {
     // save would silently drop the flushed edit.
     saveChainRef.current
       .catch(() => {})
-      .then(() => getEpisode(novelId, episodeId))
+      .then(() => claimEpisode(episodeId))
+      .then((claim) => {
+        if (cancelled) {
+          claim.release(); // the cleanup below already ran, so it can't release this one
+          return null;
+        }
+        releaseClaim = claim.release;
+        if (!claim.owned) foreignEpisodesRef.current.add(episodeId);
+        return getEpisode(novelId, episodeId);
+      })
       .then((ep) => {
-        if (cancelled) return;
+        if (cancelled || ep === null) return;
         serverUpdatedAtRef.current = ep.updated_at;
         setEpisode(ep);
         setContent(ep.content);
+
+        // Another tab has this episode open and owns its local draft: don't
+        // touch it, and don't back this tab's typing up over it.
+        const foreign = foreignEpisodesRef.current.has(episodeId);
+        setOtherTabOpen(foreign);
+        if (foreign) return;
 
         let held: Draft[] = [];
         const draft = loadDraft(episodeId);
@@ -254,6 +280,8 @@ export default function EditorPage() {
       // Before anything else: this is also what runs when an expired session
       // routes away from the editor, so the text has to reach storage now.
       flushDraft();
+      releaseClaim();
+      foreignEpisodesRef.current.delete(episodeId);
       if (autosaveTimerRef.current) {
         clearTimeout(autosaveTimerRef.current);
         autosaveTimerRef.current = null;
@@ -297,7 +325,10 @@ export default function EditorPage() {
       content && content !== draft.content
         ? { content, baseUpdatedAt: serverUpdatedAtRef.current, savedAt: Date.now() }
         : null;
-    const parked = replaced === null || addConflictDraft(episodeId, replaced);
+    // Already listed (an identical draft is parked): nothing to add, and
+    // adding it to the state again would show one text as two rows.
+    const alreadyListed = replaced !== null && conflictDrafts.some((d) => d.content === replaced.content);
+    const parked = replaced === null || alreadyListed || addConflictDraft(episodeId, replaced);
     if (
       !parked &&
       !window.confirm("지금 화면의 내용을 보관할 공간이 없어, 초안으로 복구하면 화면의 내용이 사라집니다. 계속할까요?")
@@ -307,7 +338,7 @@ export default function EditorPage() {
     }
     setConflictDrafts((prev) => {
       const rest = prev.filter((d) => d !== draft);
-      return replaced && parked ? [...rest, replaced] : rest;
+      return replaced && parked && !alreadyListed ? [...rest, replaced] : rest;
     });
     handleContentChange(draft.content);
   }
@@ -355,6 +386,12 @@ export default function EditorPage() {
       </div>
 
       {notice && <p className="editor-notice">{notice}</p>}
+      {otherTabOpen && (
+        <p className="editor-notice editor-notice-warning">
+          이 화가 다른 탭에서도 열려 있습니다. 이 탭에서는 작성 중인 글의 자동 백업(초안)이 꺼져 있고, 저장은 마지막에
+          저장한 내용이 남습니다. 한 탭에서만 편집하는 것을 권장합니다.
+        </p>
+      )}
       {conflictDrafts.length > 0 && (
         <div className="editor-notice editor-notice-warning">
           <p>

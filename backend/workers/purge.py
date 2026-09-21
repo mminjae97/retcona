@@ -6,13 +6,24 @@ novel_id on every other table (4.1), all of its characters, locations,
 episodes, claims, flags, events and so on. The multi-tenant layout is what
 makes the scope a single path: user -> novels -> novel_id.
 
-Run it periodically (cron / Cloud Scheduler):  python -m workers.purge
-It is idempotent and safe to run concurrently: each account is purged in its
-own transaction, under a row lock that is skipped if someone else (a login
-cancelling the deletion, another purge run) holds it.
+It runs on a schedule by itself: the API server starts a background loop
+(api/main.py, interval from PURGE_INTERVAL_SECONDS), so a plain deployment
+needs nothing extra. It can also be run on its own — once from cron or
+Cloud Scheduler, or as a long-lived worker:
+
+    python -m workers.purge                      # one pass
+    python -m workers.purge --loop --interval 3600
+
+It is idempotent and safe to run concurrently (several API instances, a
+separate worker): each account is purged in its own transaction, under a row
+lock that is skipped if someone else (a login cancelling the deletion,
+another purge run) holds it.
 """
 
+import argparse
 import logging
+import signal
+import threading
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, select
@@ -73,12 +84,26 @@ def purge_expired_accounts(db: Session, now: datetime | None = None) -> int:
     return purged
 
 
-def run() -> None:
-    logging.basicConfig(level=logging.INFO)
+def purge_once() -> int:
+    """One pass in a session of its own; returns how many accounts were removed."""
     with SessionLocal() as db:
-        purged = purge_expired_accounts(db)
-    logger.info("Purged %d account(s)", purged)
+        return purge_expired_accounts(db)
+
+
+def run(loop: bool = False, interval: float = 3600.0) -> None:
+    logging.basicConfig(level=logging.INFO)
+    stop = threading.Event()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda *_: stop.set())  # finish the current pass, then exit (10.4.4)
+    while True:
+        logger.info("Purged %d account(s)", purge_once())
+        if not loop or stop.wait(interval):
+            break
 
 
 if __name__ == "__main__":
-    run()
+    parser = argparse.ArgumentParser(description="Permanently delete accounts past their deletion grace period.")
+    parser.add_argument("--loop", action="store_true", help="keep running, one pass per --interval")
+    parser.add_argument("--interval", type=float, default=3600.0, help="seconds between passes with --loop")
+    args = parser.parse_args()
+    run(loop=args.loop, interval=args.interval)

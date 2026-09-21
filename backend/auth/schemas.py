@@ -21,6 +21,8 @@ def _normalize_email(value: str) -> str:
 # allowed character is one UTF-16 unit, so len() here and String.length there
 # agree.
 _NICKNAME_MARK_CATEGORIES = {"Mn", "Mc"}
+# Longest run of combining marks allowed on one character; more is zalgo-style stacking.
+_NICKNAME_MAX_MARKS = 3
 # Letters or marks that render as nothing (fillers, joiners, variation
 # selectors); they'd let a name look blank or hide characters.
 _NICKNAME_INVISIBLE = (
@@ -39,10 +41,26 @@ def _is_allowed_nickname_char(char: str) -> bool:
     return category[0] in ("L", "N") or category in _NICKNAME_MARK_CATEGORIES
 
 
+def _check_nickname_marks(value: str) -> None:
+    run = 0
+    previous = " "  # the start of the name counts like a space: nothing to attach to
+    for char in value:
+        if unicodedata.category(char) in _NICKNAME_MARK_CATEGORIES:
+            run += 1
+            if previous == " " or run > _NICKNAME_MAX_MARKS:
+                raise ValueError("Nickname has combining marks with nothing to attach to, or too many in a row")
+        else:
+            run = 0
+        previous = char
+
+
 def _strip_nickname(value: str) -> str:
-    # Strip before length-checking, so surrounding whitespace can't push a
-    # nickname over the 20-char limit or hide an all-whitespace value.
-    value = value.strip()
+    # NFC first, so the same visible name has one form and one length however
+    # it was typed (Hangul as separate jamo, letters with combining accents) —
+    # otherwise decomposed text slips past the 2-char minimum and 20-char cap.
+    # Then strip before length-checking, so surrounding whitespace can't push
+    # a nickname over the limit or hide an all-whitespace value.
+    value = unicodedata.normalize("NFC", value).strip()
     if not 2 <= len(value) <= 20:
         raise ValueError("Nickname must be 2-20 characters")
     # Also what keeps NUL out (Postgres text columns reject it: a 500 from the
@@ -52,6 +70,7 @@ def _strip_nickname(value: str) -> str:
     # Marks only attach to something; a name made of nothing else would render blank.
     if not any(unicodedata.category(char)[0] in ("L", "N") for char in value):
         raise ValueError("Nickname must contain at least one letter or number")
+    _check_nickname_marks(value)
     return value
 
 
