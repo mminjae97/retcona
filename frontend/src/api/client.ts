@@ -9,6 +9,7 @@ export function getToken(): string | null {
 }
 
 export function setToken(token: string): void {
+  sessionSeen = true;
   localStorage.setItem(TOKEN_STORAGE_KEY, token);
 }
 
@@ -63,6 +64,17 @@ const AUTH_ENTRY_PATHS = ["/auth/login", "/auth/signup"];
 
 const AUTH_EXPIRED_EVENT = "retcona:auth-expired";
 
+export interface AuthExpiredInfo {
+  // True if this page load had a session that has now ended; false for a
+  // visitor who never signed in (who should still be sent to log in, but not
+  // told a session "ended").
+  sessionEnded: boolean;
+}
+
+// Whether this page load has ever held a token — set by setToken and by any
+// request that carried one.
+let sessionSeen = getToken() !== null;
+
 // Fired when an authenticated call comes back 401: the token expired, was
 // revoked (e.g. by an account-deletion request from another device, 3.5), or
 // is gone altogether (another tab's session ended, or the page was reached
@@ -70,13 +82,15 @@ const AUTH_EXPIRED_EVENT = "retcona:auth-expired";
 // The API layer only announces it; the app decides how to leave the page
 // (App.tsx routes to /login), so pages holding unsaved work aren't torn down
 // by a hard reload behind their back.
-export function onAuthExpired(listener: () => void): () => void {
-  window.addEventListener(AUTH_EXPIRED_EVENT, listener);
-  return () => window.removeEventListener(AUTH_EXPIRED_EVENT, listener);
+export function onAuthExpired(listener: (info: AuthExpiredInfo) => void): () => void {
+  const handler = (e: Event) => listener((e as CustomEvent<AuthExpiredInfo>).detail);
+  window.addEventListener(AUTH_EXPIRED_EVENT, handler);
+  return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handler);
 }
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getToken();
+  if (token) sessionSeen = true;
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
     headers: {
@@ -91,7 +105,7 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
   // a stale response.
   if (res.status === 401 && token === getToken() && !AUTH_ENTRY_PATHS.includes(path)) {
     clearToken();
-    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+    window.dispatchEvent(new CustomEvent<AuthExpiredInfo>(AUTH_EXPIRED_EVENT, { detail: { sessionEnded: sessionSeen } }));
   }
   if (!res.ok) {
     const detail = await res

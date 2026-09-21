@@ -3,7 +3,7 @@
 Social login (Google/Kakao/Naver) is handled separately in auth/oauth.py.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -23,13 +23,9 @@ from auth.schemas import (
 )
 from auth.security import DUMMY_PASSWORD_HASH, hash_password, verify_password
 from models.db import get_db
-from models.user import User
+from models.user import DELETION_GRACE_PERIOD, User
 
 router = APIRouter()
-
-# Grace period between a deletion request and permanent deletion (3.5).
-DELETION_GRACE_PERIOD = timedelta(days=30)
-
 
 def _issue_access_token(user: User) -> str:
     # `ver` ties the token to users.token_version so a deletion request can revoke it.
@@ -70,7 +66,13 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     # has run out), or this login completes first and the deletion revokes the
     # token afterwards — never a "successful" login whose token was already
     # dead when it was issued.
-    db.refresh(user, with_for_update=True)
+    locked = db.scalar(
+        select(User).where(User.id == user.id).with_for_update().execution_options(populate_existing=True)
+    )
+    if locked is None:
+        # Purged (3.5) between the lookup and the lock.
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+    user = locked
     deletion_cancelled = False
     if user.deletion_requested_at is not None:
         if datetime.now(timezone.utc) >= user.deletion_requested_at + DELETION_GRACE_PERIOD:

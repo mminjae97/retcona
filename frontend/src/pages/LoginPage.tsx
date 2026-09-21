@@ -6,7 +6,7 @@ import type { FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { login, signup } from "../api/auth";
 import { ApiError, describeError as describeApiError } from "../api/client";
-import { isValidNickname, nicknameInputHandlers, stripNickname } from "../utils/nickname";
+import { isValidNickname, stripNickname, useNicknameInput } from "../utils/nickname";
 import "./LoginPage.css";
 
 type Mode = "login" | "signup";
@@ -33,24 +33,26 @@ function describeError(err: unknown): string {
   return describeApiError(err);
 }
 
-// Where the user was when their session ended (set by AuthExpiryRedirect).
-// Only an in-app absolute path is honored, never anything that could leave the app.
-function getExpiredFrom(state: unknown): string | null {
-  const from = (state as { expiredFrom?: unknown } | null)?.expiredFrom;
-  return typeof from === "string" && from.startsWith("/") && !from.startsWith("//") && !from.startsWith("/login")
-    ? from
-    : null;
+// Where the user was headed when they got sent here, and whether they had a
+// session that ended (both set by AuthExpiryRedirect). Only an in-app absolute
+// path is honored, never anything that could leave the app.
+function getRedirectState(state: unknown): { returnTo: string | null; sessionEnded: boolean } {
+  const { returnTo, sessionEnded } = (state ?? {}) as { returnTo?: unknown; sessionEnded?: unknown };
+  const safe =
+    typeof returnTo === "string" && returnTo.startsWith("/") && !returnTo.startsWith("//") && !returnTo.startsWith("/login");
+  return { returnTo: safe ? returnTo : null, sessionEnded: sessionEnded === true };
 }
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const expiredFrom = getExpiredFrom(useLocation().state);
+  const { returnTo, sessionEnded } = getRedirectState(useLocation().state);
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [nickname, setNickname] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const nicknameInput = useNicknameInput(nickname, setNickname);
 
   function switchMode(next: Mode) {
     setMode(next);
@@ -86,7 +88,7 @@ export default function LoginPage() {
           window.alert("진행 중이던 회원 탈퇴가 취소되었습니다. 계정이 원래대로 복구되었어요.");
         }
       }
-      navigate(expiredFrom ?? "/");
+      navigate(returnTo ?? "/");
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -131,13 +133,13 @@ export default function LoginPage() {
             <input
               type="text"
               value={nickname}
-              {...nicknameInputHandlers(setNickname)}
+              {...nicknameInput}
               required
             />
           </label>
         )}
 
-        {expiredFrom && (
+        {sessionEnded && (
           <p className="login-notice">로그인 세션이 종료되었습니다. 다시 로그인하면 하던 작업으로 돌아갑니다.</p>
         )}
 

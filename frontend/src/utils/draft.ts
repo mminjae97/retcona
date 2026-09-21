@@ -12,6 +12,10 @@ const MAX_DRAFT_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 // Upper bound on parked drafts per episode, so they can't grow without limit.
 const MAX_CONFLICT_DRAFTS = 10;
 
+// Identifies this page load. Two tabs can have the same episode open; a draft
+// only ever gets adjusted by the tab that wrote it, never by the other one.
+export const TAB_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
+
 export interface Draft {
   content: string;
   // The episode's `updated_at` this draft was written on top of. If the
@@ -19,9 +23,10 @@ export interface Draft {
   // would silently overwrite that newer work.
   baseUpdatedAt: string;
   savedAt: number; // ms since epoch
+  writer?: string; // TAB_ID of the tab that wrote it
 }
 
-export type DraftInput = Omit<Draft, "savedAt"> & { savedAt?: number };
+export type DraftInput = Omit<Draft, "savedAt" | "writer"> & { savedAt?: number; writer?: string };
 
 function isDraft(value: unknown): value is Draft {
   if (typeof value !== "object" || value === null) return false;
@@ -69,14 +74,15 @@ export function loadDraft(episodeId: string): Draft | null {
 }
 
 export const saveDraft = (episodeId: string, draft: DraftInput): boolean =>
-  writeJson(DRAFT_PREFIX + episodeId, withSavedAt(draft));
+  writeJson(DRAFT_PREFIX + episodeId, withSavedAt({ writer: TAB_ID, ...draft }));
 
 export const clearDraft = (episodeId: string): void => remove(DRAFT_PREFIX + episodeId);
 
 // A draft that conflicts with a newer server copy is parked under its own key,
 // so ordinary edits (which rewrite the regular draft) can't overwrite it
 // before the author has chosen what to do with it. Several can pile up, each
-// kept until resolved, so a new one never replaces an older one.
+// kept until resolved, so a new one never replaces an older one — and when the
+// list is full, a new one is refused (false) rather than evicting an old one.
 export function loadConflictDrafts(episodeId: string): Draft[] {
   const value = readJson(CONFLICT_PREFIX + episodeId);
   return Array.isArray(value) ? value.filter(isDraft) : [];
@@ -85,7 +91,8 @@ export function loadConflictDrafts(episodeId: string): Draft[] {
 export function addConflictDraft(episodeId: string, draft: DraftInput): boolean {
   const drafts = loadConflictDrafts(episodeId);
   if (drafts.some((d) => d.content === draft.content)) return true; // already parked
-  return writeJson(CONFLICT_PREFIX + episodeId, [...drafts, withSavedAt(draft)].slice(-MAX_CONFLICT_DRAFTS));
+  if (drafts.length >= MAX_CONFLICT_DRAFTS) return false;
+  return writeJson(CONFLICT_PREFIX + episodeId, [...drafts, withSavedAt(draft)]);
 }
 
 export function removeConflictDraft(episodeId: string, draft: Draft): void {

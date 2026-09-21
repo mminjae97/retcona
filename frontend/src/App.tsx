@@ -11,15 +11,18 @@ import MyPage from "./pages/MyPage";
 import GraphPage from "./pages/GraphPage";
 
 // Sends the user to the login screen when the API reports the session is over,
-// remembering where they were so LoginPage can bring them back afterwards.
+// remembering where they were headed so LoginPage can bring them back afterwards.
 function AuthExpiryRedirect() {
   const navigate = useNavigate();
   const location = useLocation();
   useEffect(
     () =>
-      onAuthExpired(() => {
+      onAuthExpired(({ sessionEnded }) => {
         if (location.pathname === "/login") return;
-        navigate("/login", { replace: true, state: { expiredFrom: location.pathname + location.search } });
+        navigate("/login", {
+          replace: true,
+          state: { returnTo: location.pathname + location.search, sessionEnded },
+        });
       }),
     [navigate, location.pathname, location.search],
   );

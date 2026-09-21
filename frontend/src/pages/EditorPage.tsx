@@ -12,6 +12,7 @@ import { describeError } from "../api/client";
 import { getEpisode, saveEpisode } from "../api/episodes";
 import type { EpisodePublic } from "../api/episodes";
 import {
+  TAB_ID,
   addConflictDraft,
   clearDraft,
   loadConflictDrafts,
@@ -117,10 +118,18 @@ export default function EditorPage() {
   }, []);
 
   useEffect(() => {
-    // pagehide (tab close, navigation away, mobile backgrounding) is the last
-    // chance to get a pending debounced write onto disk.
+    // Last chances to get a pending debounced write onto disk. On mobile,
+    // switching apps or the OS reclaiming the tab often fires no pagehide at
+    // all, only visibilitychange — so both are needed.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flushDraft();
+    };
     window.addEventListener("pagehide", flushDraft);
-    return () => window.removeEventListener("pagehide", flushDraft);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("pagehide", flushDraft);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [flushDraft]);
 
   const save = useCallback(
@@ -144,11 +153,13 @@ export default function EditorPage() {
           if (draft) {
             if (draft.content === updated.content) {
               clearDraft(targetEpisodeId);
-            } else {
-              // Newer text was typed while this save was in flight: keep it,
-              // now based on the version this save produced. (If this write
-              // fails the draft keeps its old base, so a later restore is
-              // treated as a conflict rather than overwriting anything.)
+            } else if (draft.writer === TAB_ID) {
+              // Newer text was typed here while this save was in flight: keep
+              // it, now based on the version this save produced. (If this
+              // write fails the draft keeps its old base, so a later restore
+              // is treated as a conflict rather than overwriting anything.)
+              // A draft another tab wrote is left alone: this save says
+              // nothing about what version *its* text was based on.
               saveDraft(targetEpisodeId, { ...draft, baseUpdatedAt: updated.updated_at });
             }
           }
@@ -203,6 +214,7 @@ export default function EditorPage() {
         setEpisode(ep);
         setContent(ep.content);
 
+        let held: Draft[] = [];
         const draft = loadDraft(episodeId);
         if (draft && draft.content !== ep.content) {
           if (draft.baseUpdatedAt === ep.updated_at) {
@@ -212,14 +224,25 @@ export default function EditorPage() {
             handleContentChange(draft.content);
           } else if (addConflictDraft(episodeId, draft)) {
             // The server's copy moved on after this draft was written. Parked
-            // beside any earlier ones rather than replacing them; if parking
-            // fails (storage full) the draft stays where it is instead.
+            // beside any earlier ones rather than replacing them.
             clearDraft(episodeId);
+          } else {
+            // Couldn't park it (storage full, or the list is at its cap). The
+            // regular copy is the same size, so freeing it may be what makes
+            // room; if it still doesn't fit, put it back untouched and hold
+            // it in memory so this page load can still offer it — the next
+            // keystroke rewrites the regular slot, which must not be the only
+            // place it lives.
+            clearDraft(episodeId);
+            if (!addConflictDraft(episodeId, draft)) {
+              saveDraft(episodeId, draft);
+              held = [draft];
+            }
           }
         } else if (draft) {
           clearDraft(episodeId); // already saved
         }
-        setConflictDrafts(loadConflictDrafts(episodeId));
+        setConflictDrafts([...loadConflictDrafts(episodeId), ...held]);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -267,18 +290,35 @@ export default function EditorPage() {
     if (!episodeId) return;
     // What's on screen is about to be replaced: park it too, so restoring is
     // never a one-way trip (it shows up in the list and can be swapped back).
-    if (content && content !== draft.content) {
-      addConflictDraft(episodeId, { content, baseUpdatedAt: serverUpdatedAtRef.current });
-    }
+    // The draft being restored is removed first, which frees the slot the
+    // parked text needs if the list was full.
     removeConflictDraft(episodeId, draft);
+    const replaced: Draft | null =
+      content && content !== draft.content
+        ? { content, baseUpdatedAt: serverUpdatedAtRef.current, savedAt: Date.now() }
+        : null;
+    const parked = replaced === null || addConflictDraft(episodeId, replaced);
+    if (
+      !parked &&
+      !window.confirm("지금 화면의 내용을 보관할 공간이 없어, 초안으로 복구하면 화면의 내용이 사라집니다. 계속할까요?")
+    ) {
+      addConflictDraft(episodeId, draft); // undo the removal above
+      return;
+    }
+    setConflictDrafts((prev) => {
+      const rest = prev.filter((d) => d !== draft);
+      return replaced && parked ? [...rest, replaced] : rest;
+    });
     handleContentChange(draft.content);
-    setConflictDrafts(loadConflictDrafts(episodeId));
   }
 
   function discardConflictDraft(draft: Draft) {
     if (!episodeId) return;
     removeConflictDraft(episodeId, draft);
-    setConflictDrafts(loadConflictDrafts(episodeId));
+    // A draft held only in memory (see the load path) may also still sit in
+    // the regular slot; discarding it must remove that copy as well.
+    if (loadDraft(episodeId)?.content === draft.content) clearDraft(episodeId);
+    setConflictDrafts((prev) => prev.filter((d) => d !== draft));
   }
 
   function handleSaveNow() {

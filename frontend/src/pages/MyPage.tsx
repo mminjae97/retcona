@@ -6,7 +6,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { getMe, requestAccountDeletion, updateNickname } from "../api/auth";
 import type { UserPublic } from "../api/auth";
 import { ApiError, describeError } from "../api/client";
-import { isValidNickname, nicknameInputHandlers, stripNickname } from "../utils/nickname";
+import { isValidNickname, stripNickname, useNicknameInput } from "../utils/nickname";
 import { createNovel, deleteNovel, listNovels, renameNovel } from "../api/novels";
 import type { NovelPublic } from "../api/novels";
 import "./MyPage.css";
@@ -30,6 +30,7 @@ export default function MyPage() {
   const [renaming, setRenaming] = useState(false);
   const [editingNickname, setEditingNickname] = useState(false);
   const [nicknameValue, setNicknameValue] = useState("");
+  const nicknameInput = useNicknameInput(nicknameValue, setNicknameValue);
   const [savingNickname, setSavingNickname] = useState(false);
   const [nicknameError, setNicknameError] = useState<string | null>(null);
   const [confirmingDeletion, setConfirmingDeletion] = useState(false);
@@ -201,7 +202,7 @@ export default function MyPage() {
                   <input
                     type="text"
                     value={nicknameValue}
-                    {...nicknameInputHandlers(setNicknameValue)}
+                    {...nicknameInput}
                     autoFocus
                   />
                   <button type="submit" disabled={savingNickname}>

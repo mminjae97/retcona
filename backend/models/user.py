@@ -11,13 +11,17 @@
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, TimestampMixin
+
+
+# Grace period between a deletion request and permanent deletion (3.5).
+DELETION_GRACE_PERIOD = timedelta(days=30)
 
 
 class User(Base, TimestampMixin):

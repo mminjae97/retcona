@@ -10,6 +10,7 @@ Follows the code structure from design doc section 6.2 as-is. Each module's resp
 | `models/` | DB models (users, novels, characters, locations ...) | Chapter 4 |
 | `ai/` | Embedding · reranker · NLI · LLM client wrappers | Chapter 5 |
 | `workers/` | cpu_worker / gpu_worker entry points (branch via `WORKER_TYPE`) | Section 10.4 |
+| `workers/purge.py` | Account purge job: permanently deletes accounts (and all their novels' data) whose deletion request is past the 30-day grace period. Run periodically: `python -m workers.purge` | Section 3.5 |
 | `infra/` | QueueClient · StorageClient · InferenceClient · LLMClient etc. cloud abstraction layer | Section 10.4.3 |
 
 ## Design principles (must follow)
