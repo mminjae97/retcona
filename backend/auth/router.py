@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from auth.dependencies import get_current_user, lock_current_user, lock_user
+from auth.dependencies import get_current_user, get_current_user_unlocked, lock_current_user, lock_user
 from auth.jwe import issue_token
 from auth.schemas import (
     DeletionRequest,
@@ -102,7 +102,7 @@ def me(current_user: User = Depends(get_current_user)) -> UserPublic:
 def update_nickname(
     body: NicknameUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_unlocked),
 ) -> User:
     lock_current_user(db, current_user)
     current_user.nickname = body.nickname
@@ -115,7 +115,7 @@ def update_nickname(
 def request_deletion(
     body: DeletionRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_unlocked),
 ) -> DeletionResponse:
     """Schedule account deletion after the grace period (3.5).
 

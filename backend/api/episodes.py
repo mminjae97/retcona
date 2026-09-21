@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, load_only
 
 from api.deps import get_owned_novel as _get_owned_novel
-from auth.dependencies import get_current_user, get_current_user_for_write
+from auth.dependencies import get_current_user
 from models.db import get_db
 from models.episode import Episode
 from models.user import User
@@ -80,7 +80,7 @@ def create_episode(
     novel_id: uuid.UUID,
     body: EpisodeCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user_for_write),
+    user: User = Depends(get_current_user),
 ) -> Episode:
     # Locks the novel row for the rest of this transaction so two concurrent
     # creates (double-click, two tabs) can't both read the same MAX(episode_index)
@@ -116,7 +116,7 @@ def save_episode(
     episode_id: uuid.UUID,
     body: EpisodeUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user_for_write),
+    user: User = Depends(get_current_user),
 ) -> Episode:
     # Locked for the same reason as create_episode/rename_novel: without it, a
     # concurrent soft-delete of the novel could commit between this read and

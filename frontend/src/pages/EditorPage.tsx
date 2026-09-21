@@ -10,13 +10,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { fetchCurrentUserId } from "../api/auth";
-import { describeError } from "../api/client";
+import { ApiError, describeError } from "../api/client";
 import { getEpisode, saveEpisode } from "../api/episodes";
 import type { EpisodePublic } from "../api/episodes";
 import {
   MAX_DRAFTS_PER_EPISODE,
   clearDraft,
   discardDraft,
+  discardDraftIfContent,
   isDraftEventFor,
   listOtherDrafts,
   releaseDraftCache,
@@ -41,6 +42,9 @@ const AUTOSAVE_MAX_WAIT_MS = 45000;
 // it is not left lazy.
 const AUTOSAVE_NO_BACKUP_DEBOUNCE_MS = 2000;
 const AUTOSAVE_NO_BACKUP_MAX_WAIT_MS = 10000;
+// After an autosave failed for a reason that may pass (network, server error),
+// the text is sent again this long afterwards unless something newer came first.
+const AUTOSAVE_RETRY_AFTER_FAILURE_MS = 45000;
 // A save due while one is still in flight waits and re-checks this often, so
 // only the latest text goes out afterwards, not every intermediate version.
 const AUTOSAVE_WHILE_SAVING_RECHECK_MS = 1000;
@@ -271,8 +275,11 @@ export default function EditorPage() {
             // would read every parked manuscript back.
             const held = otherDraftsRef.current.filter((d) => d.content === updated.content);
             if (held.length > 0) {
-              held.forEach((d) => discardDraft(d.key));
-              showOtherDrafts(otherDraftsRef.current.filter((d) => d.content !== updated.content));
+              // Only what is still exactly that text in storage: the list in
+              // memory can be a second behind, and its owner may have typed on.
+              const removed = held.filter((d) => discardDraftIfContent(d.key, updated.content));
+              showOtherDrafts(otherDraftsRef.current.filter((d) => !removed.includes(d)));
+              if (removed.length < held.length) refreshOtherDrafts();
             }
           }
           if (!mountedRef.current || seq !== saveSeqRef.current) return;
@@ -283,12 +290,24 @@ export default function EditorPage() {
           if (!mountedRef.current || seq !== saveSeqRef.current) return;
           setSaveError(describeError(err));
           setSaveState("error");
+          // A failure that may pass (a network blip, a server error) is not
+          // left to wait for the next keystroke: the text goes out again
+          // unless newer text is already waiting, and the local draft covers
+          // the time in between. Not for a rejection that retrying can't
+          // change (session ended, episode gone, bad request).
+          const passing = !(err instanceof ApiError) || err.status >= 500;
+          if (passing && targetEpisodeId === currentEpisodeIdRef.current && pendingRef.current === null) {
+            pendingRef.current = { novelId: targetNovelId, episodeId: targetEpisodeId, content: nextContent };
+            if (!autosaveTimerRef.current) {
+              autosaveTimerRef.current = setTimeout(() => autosaveNowRef.current(), AUTOSAVE_RETRY_AFTER_FAILURE_MS);
+            }
+          }
         })
         .finally(() => {
           savesInFlightRef.current--;
         });
     },
-    [showOtherDrafts, setServerVersion]
+    [showOtherDrafts, setServerVersion, refreshOtherDrafts]
   );
 
   const clearAutosaveTimers = useCallback(() => {

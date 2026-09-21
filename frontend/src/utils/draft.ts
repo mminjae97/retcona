@@ -207,6 +207,14 @@ export function releaseDraftCache(episodeId: string): void {
   }
 }
 
+// Removes the draft only if it still holds exactly this text: the caller's copy
+// may be a moment old, and its owner may have typed more since.
+export function discardDraftIfContent(key: string, content: string): boolean {
+  if (!key.startsWith(DRAFT_PREFIX) || readDraft(key)?.content !== content) return false;
+  discardDraft(key);
+  return true;
+}
+
 export function discardDraft(key: string): void {
   if (!key.startsWith(DRAFT_PREFIX)) return;
   storageRemove(key);

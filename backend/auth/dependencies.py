@@ -2,7 +2,7 @@
 
 import uuid
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose.exceptions import JWEError, JWTError
 from sqlalchemy import select
@@ -45,11 +45,38 @@ def _require_usable(user: User | None, token_version: int) -> User:
     return user
 
 
-def get_current_user(
+# Methods that change data: the user row is locked for these (see get_current_user).
+_MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def get_current_user_unlocked(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
 ) -> User:
+    """The authenticated user, from a plain read. Only for endpoints that take
+    the user row's exclusive lock themselves (lock_current_user) after their own
+    slow work — PATCH /auth/me and the deletion request — where the shared lock
+    of get_current_user would deadlock against that upgrade, and for reads."""
     user_id, token_version = _token_claims(credentials)
+    return _require_usable(db.get(User, user_id), token_version)
+
+
+def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> User:
+    """The authenticated user. For requests that change data the row is read
+    once under a shared lock (FOR SHARE) and the token is checked against that:
+    a plain read followed by a write would let a deletion request that commits in
+    between revoke the token while the write still goes through — and the write
+    would survive if the user then logged in to cancel the deletion. Shared, so
+    a user's own writes don't block one another, only wait for (and are ordered
+    against) a deletion request. Applied by method, so a new write endpoint is
+    covered without having to remember it. Reads take no lock."""
+    user_id, token_version = _token_claims(credentials)
+    if request.method in _MUTATING_METHODS:
+        return _require_usable(lock_user(db, user_id, shared=True), token_version)
     return _require_usable(db.get(User, user_id), token_version)
 
 
@@ -73,21 +100,9 @@ def lock_current_user(db: Session, current_user: User) -> None:
     matched before the lock: if a concurrent request already revoked this
     token's generation (or put the account up for deletion; a login may have
     cancelled that since), the token is no longer valid and must not be used to
-    change anything. For endpoints that change the user row itself; taken after
-    any slow work (the deletion request checks the password first)."""
+    change anything. For endpoints that change the user row itself (they use
+    get_current_user_unlocked); taken after any slow work (the deletion request
+    checks the password first)."""
     # Read before locking: the re-read overwrites current_user in place.
     token_version = current_user.token_version
     _require_usable(lock_user(db, current_user.id), token_version)
-
-
-def get_current_user_for_write(
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
-    db: Session = Depends(get_db),
-) -> User:
-    """get_current_user for endpoints that change the user's data. The plain
-    check reads without a lock, so a deletion request committing right after it
-    would let the write go through on a token that is already revoked — and it
-    would survive if the user then logged in to cancel the deletion. This reads
-    the row once, under a shared lock, and checks the token against that."""
-    user_id, token_version = _token_claims(credentials)
-    return _require_usable(lock_user(db, user_id, shared=True), token_version)

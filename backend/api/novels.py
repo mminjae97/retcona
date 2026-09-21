@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from api.deps import get_owned_novel as _get_owned_novel
-from auth.dependencies import get_current_user, get_current_user_for_write
+from auth.dependencies import get_current_user
 from models.db import get_db
 from models.novel import Novel
 from models.user import User
@@ -65,7 +65,7 @@ def list_novels(db: Session = Depends(get_db), user: User = Depends(get_current_
 
 @router.post("", response_model=NovelPublic, status_code=status.HTTP_201_CREATED)
 def create_novel(
-    body: NovelCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user_for_write)
+    body: NovelCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ) -> Novel:
     novel = Novel(user_id=user.id, title=body.title)
     db.add(novel)
@@ -79,7 +79,7 @@ def rename_novel(
     novel_id: uuid.UUID,
     body: NovelRename,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user_for_write),
+    user: User = Depends(get_current_user),
 ) -> Novel:
     # Locked for the same reason as episodes.py:create_episode — without it, a
     # concurrent delete_novel can commit its soft-delete between this read and
@@ -96,7 +96,7 @@ def rename_novel(
 def delete_novel(
     novel_id: uuid.UUID,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user_for_write),
+    user: User = Depends(get_current_user),
 ) -> None:
     # Locked for the same reason as rename_novel/create_episode/save_episode
     # — without it, this read isn't actually serialized against theirs (an
