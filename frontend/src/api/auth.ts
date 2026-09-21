@@ -2,6 +2,7 @@
 // nickname change, account deletion request.
 
 import { discardDraftsForDeletion } from "../utils/draft";
+import { getUserId, setUserId } from "../utils/session";
 import { apiFetch, clearToken, setToken } from "./client";
 
 export interface UserPublic {
@@ -24,7 +25,7 @@ export async function signup(email: string, password: string, nickname: string):
     method: "POST",
     body: JSON.stringify({ email, password, nickname }),
   });
-  setToken(res.access_token);
+  setToken(res.access_token, res.user.id);
   return res.user;
 }
 
@@ -40,12 +41,26 @@ export async function login(email: string, password: string): Promise<LoginResul
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
-  setToken(res.access_token);
+  setToken(res.access_token, res.user.id);
   return { user: res.user, deletionCancelled: res.deletion_cancelled };
 }
 
 export function getMe(): Promise<UserPublic> {
   return apiFetch<UserPublic>("/auth/me");
+}
+
+// The account's id for keying local drafts. Remembered at login; a session that
+// predates that (signed in before the id was stored) fetches it once.
+export async function ensureUserId(): Promise<string | null> {
+  const stored = getUserId();
+  if (stored !== null) return stored;
+  try {
+    const me = await getMe();
+    setUserId(me.id);
+    return me.id;
+  } catch {
+    return null; // drafts are simply off for this load
+  }
 }
 
 export function updateNickname(nickname: string): Promise<UserPublic> {

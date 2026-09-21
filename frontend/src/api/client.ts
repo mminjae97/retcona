@@ -2,6 +2,7 @@
 // The auth token (JWE, 3.3) is sent via the Authorization header.
 
 import { resumeDrafts } from "../utils/draft";
+import { setUserId } from "../utils/session";
 
 const BASE_URL = "/api";
 const TOKEN_STORAGE_KEY = "retcona_token";
@@ -26,9 +27,10 @@ export function getToken(): string | null {
 // tab's logout isn't undone.
 let memoryToken: string | null = null;
 
-export function setToken(token: string): void {
+export function setToken(token: string, userId: string): void {
   sessionSeen = true;
-  resumeDrafts(); // a new session: drafts are written again after a deletion wipe
+  setUserId(userId);
+  resumeDrafts(userId); // a new session: drafts are written again after a deletion wipe
   try {
     localStorage.setItem(TOKEN_STORAGE_KEY, token);
     memoryToken = null;

@@ -5,23 +5,24 @@
 // Editing a submitted episode flips its status back to draft (2.2).
 // Typing is also mirrored to a local draft (utils/draft.ts, debounced, and flushed when the page is hidden or
 // the editor unmounts) until a save confirms it, so text survives an expired session, a network failure or a
-// closed tab and is offered back on the next open.
+// closed tab. Every tab (every page load) keeps its own draft and rewrites only that one; the drafts other tabs
+// or earlier loads left are listed on the page and the author loads whichever one they want.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { ensureUserId } from "../api/auth";
 import { describeError } from "../api/client";
 import { getEpisode, saveEpisode } from "../api/episodes";
 import type { EpisodePublic } from "../api/episodes";
 import {
-  TAB_ID,
-  addConflictDraft,
   clearDraft,
-  loadConflictDrafts,
+  discardDraft,
+  isDraftEventFor,
+  listOtherDrafts,
   loadDraft,
-  removeConflictDraft,
   saveDraft,
+  startDraftSlot,
 } from "../utils/draft";
-import type { Draft } from "../utils/draft";
-import { claimEpisode } from "../utils/editorLock";
+import type { StoredDraft } from "../utils/draft";
 import "./EditorPage.css";
 
 const AUTOSAVE_DELAY_MS = 2000;
@@ -55,11 +56,9 @@ export default function EditorPage() {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // Local drafts that can't be restored automatically because the episode
-  // changed on the server after they were written — the author decides.
-  const [conflictDrafts, setConflictDrafts] = useState<Draft[]>([]);
-  // Another tab already has this episode open (and owns its local draft).
-  const [otherTabOpen, setOtherTabOpen] = useState(false);
+  // Unsaved drafts of this episode left by other tabs or earlier page loads;
+  // the author loads or discards them.
+  const [otherDrafts, setOtherDrafts] = useState<StoredDraft[]>([]);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Content not yet sent to the API. Flushed directly (bypassing component
   // state) when the user navigates to a different episode or away from the
@@ -100,11 +99,22 @@ export default function EditorPage() {
   // have moved on, and must record the base as of *now*.
   const currentEpisodeIdRef = useRef<string | undefined>(undefined);
   const serverUpdatedAtRef = useRef("");
+  const serverContentRef = useRef("");
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftPendingRef = useRef<{ episodeId: string; content: string } | null>(null);
-  // Episodes another tab owns the draft of: this tab leaves their local draft
-  // alone entirely (no restoring, writing, rebasing or clearing it).
-  const foreignEpisodesRef = useRef(new Set<string>());
+
+  // Re-reads the other sessions' drafts. What the server already holds is
+  // nothing left to offer, so it is dropped rather than listed.
+  const refreshOtherDrafts = useCallback(() => {
+    const id = currentEpisodeIdRef.current;
+    if (!id) return;
+    const unsaved = listOtherDrafts(id).filter((d) => {
+      if (d.content !== serverContentRef.current) return true;
+      discardDraft(d.key);
+      return false;
+    });
+    setOtherDrafts(unsaved);
+  }, []);
 
   const flushDraft = useCallback(() => {
     if (draftTimerRef.current) {
@@ -114,14 +124,13 @@ export default function EditorPage() {
     const pending = draftPendingRef.current;
     if (!pending) return;
     draftPendingRef.current = null;
-    if (foreignEpisodesRef.current.has(pending.episodeId)) return;
     const written = saveDraft(pending.episodeId, {
       content: pending.content,
       baseUpdatedAt: serverUpdatedAtRef.current,
     });
     // If the write failed, the copy already in storage is older than what the
     // author has typed. Leaving it would let a later save "rebase" it onto
-    // the new server version and restore it over their newer text — no draft
+    // the new server version and offer it as if it were current — no draft
     // is safer than a stale one.
     if (!written) clearDraft(pending.episodeId);
   }, []);
@@ -133,13 +142,20 @@ export default function EditorPage() {
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") flushDraft();
     };
+    // Another tab writing or removing a draft of this episode.
+    const onStorage = (e: StorageEvent) => {
+      const id = currentEpisodeIdRef.current;
+      if (id && isDraftEventFor(id, e.key)) refreshOtherDrafts();
+    };
     window.addEventListener("pagehide", flushDraft);
     document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("storage", onStorage);
     return () => {
       window.removeEventListener("pagehide", flushDraft);
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("storage", onStorage);
     };
-  }, [flushDraft]);
+  }, [flushDraft, refreshOtherDrafts]);
 
   const save = useCallback(
     (targetNovelId: string, targetEpisodeId: string, nextContent: string) => {
@@ -157,21 +173,23 @@ export default function EditorPage() {
           // this component has since moved on to another episode.
           if (targetEpisodeId === currentEpisodeIdRef.current) {
             serverUpdatedAtRef.current = updated.updated_at;
+            serverContentRef.current = updated.content;
           }
-          const draft = foreignEpisodesRef.current.has(targetEpisodeId) ? null : loadDraft(targetEpisodeId);
+          // Only this session's own draft is touched: another tab's says
+          // nothing about which version *its* text was based on.
+          const draft = loadDraft(targetEpisodeId);
           if (draft) {
             if (draft.content === updated.content) {
               clearDraft(targetEpisodeId);
-            } else if (draft.writer === TAB_ID) {
+            } else {
               // Newer text was typed here while this save was in flight: keep
               // it, now based on the version this save produced. (If this
-              // write fails the draft keeps its old base, so a later restore
-              // is treated as a conflict rather than overwriting anything.)
-              // A draft another tab wrote is left alone: this save says
-              // nothing about what version *its* text was based on.
+              // write fails the draft keeps its old base, so loading it later
+              // is flagged as older than the server's copy.)
               saveDraft(targetEpisodeId, { ...draft, baseUpdatedAt: updated.updated_at });
             }
           }
+          if (targetEpisodeId === currentEpisodeIdRef.current) refreshOtherDrafts();
           if (!mountedRef.current || seq !== saveSeqRef.current) return;
           setEpisode(updated);
           setSaveState("saved");
@@ -182,7 +200,7 @@ export default function EditorPage() {
           setSaveState("error");
         });
     },
-    []
+    [refreshOtherDrafts]
   );
 
   useEffect(() => {
@@ -204,11 +222,13 @@ export default function EditorPage() {
     setSaveState("idle");
     setSaveError(null);
     setNotice(null);
-    setConflictDrafts([]);
-    setOtherTabOpen(false);
-    let releaseClaim = () => {};
+    setOtherDrafts([]);
     currentEpisodeIdRef.current = episodeId;
     serverUpdatedAtRef.current = "";
+    serverContentRef.current = "";
+    // This load writes to a slot of its own; drafts an earlier load left stay
+    // in storage and show up in the list.
+    startDraftSlot(episodeId);
     // Chained after saveChainRef instead of fired directly: a quick
     // A -> B -> A navigation queues a flush save for A (below, on this
     // effect's cleanup) that may still be in flight when this same episode
@@ -218,57 +238,15 @@ export default function EditorPage() {
     // save would silently drop the flushed edit.
     saveChainRef.current
       .catch(() => {})
-      .then(() => claimEpisode(episodeId))
-      .then((claim) => {
-        if (cancelled) {
-          claim.release(); // the cleanup below already ran, so it can't release this one
-          return null;
-        }
-        releaseClaim = claim.release;
-        if (!claim.owned) foreignEpisodesRef.current.add(episodeId);
-        return getEpisode(novelId, episodeId);
-      })
+      .then(() => ensureUserId()) // drafts are keyed by account
+      .then(() => (cancelled ? null : getEpisode(novelId, episodeId)))
       .then((ep) => {
         if (cancelled || ep === null) return;
         serverUpdatedAtRef.current = ep.updated_at;
+        serverContentRef.current = ep.content;
         setEpisode(ep);
         setContent(ep.content);
-
-        // Another tab has this episode open and owns its local draft: don't
-        // touch it, and don't back this tab's typing up over it.
-        const foreign = foreignEpisodesRef.current.has(episodeId);
-        setOtherTabOpen(foreign);
-        if (foreign) return;
-
-        let held: Draft[] = [];
-        const draft = loadDraft(episodeId);
-        if (draft && draft.content !== ep.content) {
-          if (draft.baseUpdatedAt === ep.updated_at) {
-            // Written on top of exactly this version, so nothing newer exists
-            // to overwrite: put it back and save it.
-            setNotice("저장되지 않았던 초안을 복구했습니다.");
-            handleContentChange(draft.content);
-          } else if (addConflictDraft(episodeId, draft)) {
-            // The server's copy moved on after this draft was written. Parked
-            // beside any earlier ones rather than replacing them.
-            clearDraft(episodeId);
-          } else {
-            // Couldn't park it (storage full, or the list is at its cap). The
-            // regular copy is the same size, so freeing it may be what makes
-            // room; if it still doesn't fit, put it back untouched and hold
-            // it in memory so this page load can still offer it — the next
-            // keystroke rewrites the regular slot, which must not be the only
-            // place it lives.
-            clearDraft(episodeId);
-            if (!addConflictDraft(episodeId, draft)) {
-              saveDraft(episodeId, draft);
-              held = [draft];
-            }
-          }
-        } else if (draft) {
-          clearDraft(episodeId); // already saved
-        }
-        setConflictDrafts([...loadConflictDrafts(episodeId), ...held]);
+        refreshOtherDrafts();
       })
       .catch((err) => {
         if (cancelled) return;
@@ -280,8 +258,6 @@ export default function EditorPage() {
       // Before anything else: this is also what runs when an expired session
       // routes away from the editor, so the text has to reach storage now.
       flushDraft();
-      releaseClaim();
-      foreignEpisodesRef.current.delete(episodeId);
       if (autosaveTimerRef.current) {
         clearTimeout(autosaveTimerRef.current);
         autosaveTimerRef.current = null;
@@ -314,42 +290,33 @@ export default function EditorPage() {
     }, AUTOSAVE_DELAY_MS);
   }
 
-  function restoreConflictDraft(draft: Draft) {
-    if (!episodeId) return;
-    // What's on screen is about to be replaced: park it too, so restoring is
-    // never a one-way trip (it shows up in the list and can be swapped back).
-    // The draft being restored is removed first, which frees the slot the
-    // parked text needs if the list was full.
-    removeConflictDraft(episodeId, draft);
-    const replaced: Draft | null =
-      content && content !== draft.content
-        ? { content, baseUpdatedAt: serverUpdatedAtRef.current, savedAt: Date.now() }
-        : null;
-    // Already listed (an identical draft is parked): nothing to add, and
-    // adding it to the state again would show one text as two rows.
-    const alreadyListed = replaced !== null && conflictDrafts.some((d) => d.content === replaced.content);
-    const parked = replaced === null || alreadyListed || addConflictDraft(episodeId, replaced);
+  // Loading replaces what's on screen with the draft (and, through the usual
+  // paths, saves it). The draft itself stays listed until the server holds the
+  // same text, so it can be loaded again or discarded later.
+  function loadOtherDraft(draft: StoredDraft) {
+    const changedSince = draft.baseUpdatedAt !== serverUpdatedAtRef.current;
+    const replacesText = content !== "" && content !== draft.content;
     if (
-      !parked &&
-      !window.confirm("지금 화면의 내용을 보관할 공간이 없어, 초안으로 복구하면 화면의 내용이 사라집니다. 계속할까요?")
+      (replacesText || changedSince) &&
+      !window.confirm(
+        [
+          replacesText && "지금 화면의 내용이 이 초안으로 바뀝니다.",
+          changedSince && "이 초안을 작성한 뒤 이 화가 다른 곳에서 수정되었습니다. 불러오면 그 수정 내용은 덮어쓰입니다.",
+          "계속할까요?",
+        ]
+          .filter(Boolean)
+          .join("\n")
+      )
     ) {
-      addConflictDraft(episodeId, draft); // undo the removal above
       return;
     }
-    setConflictDrafts((prev) => {
-      const rest = prev.filter((d) => d !== draft);
-      return replaced && parked && !alreadyListed ? [...rest, replaced] : rest;
-    });
     handleContentChange(draft.content);
+    setNotice("초안을 불러왔습니다.");
   }
 
-  function discardConflictDraft(draft: Draft) {
-    if (!episodeId) return;
-    removeConflictDraft(episodeId, draft);
-    // A draft held only in memory (see the load path) may also still sit in
-    // the regular slot; discarding it must remove that copy as well.
-    if (loadDraft(episodeId)?.content === draft.content) clearDraft(episodeId);
-    setConflictDrafts((prev) => prev.filter((d) => d !== draft));
+  function discardOtherDraft(draft: StoredDraft) {
+    discardDraft(draft.key);
+    setOtherDrafts((prev) => prev.filter((d) => d.key !== draft.key));
   }
 
   function handleSaveNow() {
@@ -386,31 +353,26 @@ export default function EditorPage() {
       </div>
 
       {notice && <p className="editor-notice">{notice}</p>}
-      {otherTabOpen && (
-        <p className="editor-notice editor-notice-warning">
-          이 화가 다른 탭에서도 열려 있습니다. 이 탭에서는 작성 중인 글의 자동 백업(초안)이 꺼져 있고, 저장은 마지막에
-          저장한 내용이 남습니다. 한 탭에서만 편집하는 것을 권장합니다.
-        </p>
-      )}
-      {conflictDrafts.length > 0 && (
-        <div className="editor-notice editor-notice-warning">
+      {otherDrafts.length > 0 && (
+        <div className="editor-notice">
           <p>
-            이 기기에 자동으로 복구하지 않은 초안이 {conflictDrafts.length}개 있습니다. 저장된 뒤 이 화가 다른 곳에서
-            수정되어, 덮어쓰지 않도록 남겨 두었습니다. 초안으로 복구하면 지금 화면의 내용은 이 목록으로 옮겨져 다시
-            되돌릴 수 있습니다.
+            저장되지 않은 다른 초안이 {otherDrafts.length}개 있습니다. 다른 탭에서 작성 중이거나, 이전에 닫힌 탭·페이지에서
+            남은 초안입니다. 각 탭은 자기 초안만 다시 저장하므로 서로 덮어쓰지 않습니다. 불러오기를 누르면 지금 화면의
+            내용이 그 초안으로 바뀝니다.
           </p>
           <ul className="editor-draft-list">
-            {conflictDrafts.map((draft) => (
-              <li key={`${draft.savedAt}-${draft.content.length}`}>
+            {otherDrafts.map((draft) => (
+              <li key={draft.key}>
                 <span className="editor-draft-preview">
                   {new Date(draft.savedAt).toLocaleString()} · {previewDraft(draft.content)}
+                  {draft.baseUpdatedAt !== episode.updated_at && " · 이후 이 화가 수정됨"}
                 </span>
                 <span className="editor-actions">
-                  <button type="button" onClick={() => restoreConflictDraft(draft)}>
-                    초안으로 복구
+                  <button type="button" onClick={() => loadOtherDraft(draft)}>
+                    불러오기
                   </button>
-                  <button type="button" onClick={() => discardConflictDraft(draft)}>
-                    초안 버리기
+                  <button type="button" onClick={() => discardOtherDraft(draft)}>
+                    버리기
                   </button>
                 </span>
               </li>
