@@ -3,6 +3,7 @@
 Social login (Google/Kakao/Naver) is handled separately in auth/oauth.py.
 """
 
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -26,6 +27,15 @@ from models.db import get_db
 from models.user import DELETION_GRACE_PERIOD, User
 
 router = APIRouter()
+
+def _lock_user(db: Session, user_id: uuid.UUID) -> User | None:
+    """Re-read a user row under FOR UPDATE, overwriting whatever this session
+    had loaded, or None if the row no longer exists (purged, 3.5). Login and
+    deletion requests both serialize on it, so they stay in step."""
+    return db.scalar(
+        select(User).where(User.id == user_id).with_for_update().execution_options(populate_existing=True)
+    )
+
 
 def _issue_access_token(user: User) -> str:
     # `ver` ties the token to users.token_version so a deletion request can revoke it.
@@ -66,9 +76,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     # has run out), or this login completes first and the deletion revokes the
     # token afterwards — never a "successful" login whose token was already
     # dead when it was issued.
-    locked = db.scalar(
-        select(User).where(User.id == user.id).with_for_update().execution_options(populate_existing=True)
-    )
+    locked = _lock_user(db, user.id)
     if locked is None:
         # Purged (3.5) between the lookup and the lock.
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
@@ -135,8 +143,8 @@ def request_deletion(
     # may have cancelled that deletion since), this one must not start a
     # second deletion with a token that is no longer valid.
     token_version = current_user.token_version
-    db.refresh(current_user, with_for_update=True)
-    if current_user.token_version != token_version:
+    locked = _lock_user(db, current_user.id)
+    if locked is None or locked.token_version != token_version:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
 
     current_user.deletion_requested_at = datetime.now(timezone.utc)

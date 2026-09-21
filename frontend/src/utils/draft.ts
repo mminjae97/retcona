@@ -119,8 +119,18 @@ export function clearAllDrafts(): void {
   draftKeys().forEach(remove);
 }
 
+// Runs the prune once the browser is idle rather than during startup: it has
+// to parse every stored draft (big text blobs), which would delay first paint.
+export function schedulePruneStaleDrafts(): void {
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(() => pruneStaleDrafts(), { timeout: 10_000 });
+  } else {
+    setTimeout(() => pruneStaleDrafts(), 2_000);
+  }
+}
+
 // Drops drafts nobody came back for (including those of episodes or novels
-// that no longer exist), so they don't accumulate forever. Run once at startup.
+// that no longer exist), so they don't accumulate forever.
 export function pruneStaleDrafts(now = Date.now()): void {
   const fresh = (d: Draft) => now - d.savedAt < MAX_DRAFT_AGE_MS;
   for (const key of draftKeys()) {

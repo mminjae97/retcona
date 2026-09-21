@@ -6,7 +6,7 @@ import type { FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { login, signup } from "../api/auth";
 import { ApiError, describeError as describeApiError } from "../api/client";
-import { isValidNickname, stripNickname, useNicknameInput } from "../utils/nickname";
+import { getNicknameError, nicknameInputProps, stripNickname } from "../utils/nickname";
 import "./LoginPage.css";
 
 type Mode = "login" | "signup";
@@ -52,7 +52,6 @@ export default function LoginPage() {
   const [nickname, setNickname] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const nicknameInput = useNicknameInput(nickname, setNickname);
 
   function switchMode(next: Mode) {
     setMode(next);
@@ -65,14 +64,15 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       if (mode === "signup") {
-        // Validate against the trimmed length, matching the backend's
-        // strip-then-check rule (3.6) — the native minLength attribute
-        // checks the raw, untrimmed value and would let e.g. "a " through.
-        const trimmedNickname = stripNickname(nickname);
-        if (!isValidNickname(trimmedNickname)) {
-          setError("필명은 공백을 제외하고 2~20자로 입력해주세요.");
+        // Validate the trimmed value, matching the backend's strip-then-check
+        // rule (3.6) — the native minLength attribute checks the raw,
+        // untrimmed value and would let e.g. "a " through.
+        const nicknameError = getNicknameError(nickname);
+        if (nicknameError) {
+          setError(nicknameError);
           return;
         }
+        const trimmedNickname = stripNickname(nickname);
         // Matches the backend's 72-UTF-8-byte cap (bcrypt only hashes that
         // much) — minLength={8} on the input is a floor, not a ceiling, so a
         // long multi-byte password would otherwise pass client-side checks
@@ -133,7 +133,7 @@ export default function LoginPage() {
             <input
               type="text"
               value={nickname}
-              {...nicknameInput}
+              {...nicknameInputProps(setNickname)}
               required
             />
           </label>

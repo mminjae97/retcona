@@ -6,7 +6,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { getMe, requestAccountDeletion, updateNickname } from "../api/auth";
 import type { UserPublic } from "../api/auth";
 import { ApiError, describeError } from "../api/client";
-import { isValidNickname, stripNickname, useNicknameInput } from "../utils/nickname";
+import { getNicknameError, nicknameInputProps, stripNickname } from "../utils/nickname";
 import { createNovel, deleteNovel, listNovels, renameNovel } from "../api/novels";
 import type { NovelPublic } from "../api/novels";
 import "./MyPage.css";
@@ -30,7 +30,6 @@ export default function MyPage() {
   const [renaming, setRenaming] = useState(false);
   const [editingNickname, setEditingNickname] = useState(false);
   const [nicknameValue, setNicknameValue] = useState("");
-  const nicknameInput = useNicknameInput(nicknameValue, setNicknameValue);
   const [savingNickname, setSavingNickname] = useState(false);
   const [nicknameError, setNicknameError] = useState<string | null>(null);
   const [confirmingDeletion, setConfirmingDeletion] = useState(false);
@@ -119,13 +118,14 @@ export default function MyPage() {
   async function handleSaveNickname(e: FormEvent) {
     e.preventDefault();
     if (savingNickname) return;
-    // Validate the trimmed value in code points, matching the backend's
-    // strip-then-check rule (3.6).
-    const trimmed = stripNickname(nicknameValue);
-    if (!isValidNickname(trimmed)) {
-      setNicknameError("필명은 공백을 제외하고 2~20자로 입력해주세요.");
+    // Validate the trimmed value, matching the backend's strip-then-check
+    // rule (3.6).
+    const problem = getNicknameError(nicknameValue);
+    if (problem) {
+      setNicknameError(problem);
       return;
     }
+    const trimmed = stripNickname(nicknameValue);
     setNicknameError(null);
     setSavingNickname(true);
     try {
@@ -202,7 +202,7 @@ export default function MyPage() {
                   <input
                     type="text"
                     value={nicknameValue}
-                    {...nicknameInput}
+                    {...nicknameInputProps(setNicknameValue)}
                     autoFocus
                   />
                   <button type="submit" disabled={savingNickname}>

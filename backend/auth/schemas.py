@@ -1,5 +1,6 @@
 """Pydantic request/response schemas for the auth endpoints."""
 
+import unicodedata
 import uuid
 from datetime import datetime
 
@@ -12,16 +13,34 @@ def _normalize_email(value: str) -> str:
     return value.lower()
 
 
+# What a pen name may contain (3.6): letters, combining marks, numbers,
+# punctuation, spaces and math/currency/modifier symbols, from the Basic
+# Multilingual Plane only. That leaves out emoji and other pictographs
+# (category "So", or outside the BMP), format and control characters (zero-width
+# joiner, zero-width space, NUL) and rare astral characters. The frontend applies
+# the same rule (utils/nickname.ts). Every allowed character is one UTF-16 unit,
+# so len() here and String.length there agree.
+_NICKNAME_CATEGORIES = {"Mn", "Mc", "Zs", "Sm", "Sc", "Sk"}
+_NICKNAME_CATEGORY_LETTERS = {"L", "N", "P"}
+
+
+def _is_allowed_nickname_char(char: str) -> bool:
+    if ord(char) > 0xFFFF:
+        return False
+    category = unicodedata.category(char)
+    return category in _NICKNAME_CATEGORIES or category[0] in _NICKNAME_CATEGORY_LETTERS
+
+
 def _strip_nickname(value: str) -> str:
     # Strip before length-checking, so surrounding whitespace can't push a
     # nickname over the 20-char limit or hide an all-whitespace value.
     value = value.strip()
     if not 2 <= len(value) <= 20:
         raise ValueError("Nickname must be 2-20 characters")
-    # str.strip() leaves NUL in place, and Postgres text columns reject it — a
-    # 500 from the UPDATE/INSERT instead of a 422 here.
-    if "\x00" in value:
-        raise ValueError("Nickname must not contain NUL characters")
+    # Also what keeps NUL out (Postgres text columns reject it: a 500 from the
+    # INSERT/UPDATE instead of a 422 here) along with emoji.
+    if not all(_is_allowed_nickname_char(char) for char in value):
+        raise ValueError("Nickname must not contain emoji, special symbols or control characters")
     return value
 
 

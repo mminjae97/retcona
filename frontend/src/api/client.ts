@@ -4,8 +4,15 @@
 const BASE_URL = "/api";
 const TOKEN_STORAGE_KEY = "retcona_token";
 
+// Storage can be blocked (site data disabled, some private modes) and then
+// throws on access. Reading treats that as "no token"; this runs while the
+// module loads, where a throw would take the whole app down with it.
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_STORAGE_KEY);
+  try {
+    return localStorage.getItem(TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
 }
 
 export function setToken(token: string): void {
@@ -14,7 +21,11 @@ export function setToken(token: string): void {
 }
 
 export function clearToken(): void {
-  localStorage.removeItem(TOKEN_STORAGE_KEY);
+  try {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+  } catch {
+    // nothing stored to clear
+  }
 }
 
 export class ApiError extends Error {
