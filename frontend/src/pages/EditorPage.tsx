@@ -1,5 +1,5 @@
 // Manuscript editor (design doc 2.2)
-// Autosave (debounced, doesn't call the AI pipeline) + explicit save, both hit the same
+// Autosave (debounced with a max wait, doesn't call the AI pipeline) + explicit save, both hit the same
 // PATCH endpoint — the only difference is what triggers them. "Run validation" (2.2, 8.2)
 // stays disabled: it depends on QueueClient (infra/queue_client.py), which isn't implemented yet.
 // Editing a submitted episode flips its status back to draft (2.2).
@@ -25,7 +25,19 @@ import {
 import type { StoredDraft } from "../utils/draft";
 import "./EditorPage.css";
 
-const AUTOSAVE_DELAY_MS = 2000;
+// Server saves are lazy on purpose: the local draft (below) is written within
+// a fraction of a second, so the network can wait. A chapter is about 5,000
+// characters, so each save is small; what is worth avoiding is a request per
+// pause in typing.
+// - saved once typing has stopped this long;
+// - but never later than this after the first unsaved change, however long the
+//   author keeps typing, so a crash costs at most this much beyond the draft;
+// - and also when the tab is hidden or the author leaves the episode.
+const AUTOSAVE_DEBOUNCE_MS = 8000;
+const AUTOSAVE_MAX_WAIT_MS = 45000;
+// A save due while one is still in flight waits and re-checks this often, so
+// only the latest text goes out afterwards, not every intermediate version.
+const AUTOSAVE_WHILE_SAVING_RECHECK_MS = 1000;
 // Much shorter than the autosave delay so the local draft is on disk before the
 // server save fires, but coalescing keystrokes: stringifying and storing a long
 // manuscript on every key press would make typing lag.
@@ -67,6 +79,10 @@ export default function EditorPage() {
   // The same list, for code that must look at the current one without waiting for a render.
   const otherDraftsRef = useRef<StoredDraft[]>([]);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Fires the save that is due however long typing goes on (see AUTOSAVE_MAX_WAIT_MS).
+  const autosaveMaxWaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Saves sent and not yet answered.
+  const savesInFlightRef = useRef(0);
   // Content not yet sent to the API. Flushed directly (bypassing component
   // state) when the user navigates to a different episode or away from the
   // editor before the debounce fires — otherwise the leftover timer would
@@ -180,7 +196,9 @@ export default function EditorPage() {
     // switching apps or the OS reclaiming the tab often fires no pagehide at
     // all, only visibilitychange — so both are needed.
     const onVisibilityChange = () => {
-      if (document.visibilityState === "hidden") flushDraft();
+      if (document.visibilityState !== "hidden") return;
+      flushDraft();
+      autosaveNowRef.current(); // and don't leave unsaved text waiting on the timers while hidden
     };
     // Another tab writing or removing a draft of this episode.
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -214,6 +232,7 @@ export default function EditorPage() {
         setSaveState("saving");
         setSaveError(null);
       }
+      savesInFlightRef.current++;
       saveChainRef.current = saveChainRef.current
         .catch(() => {})
         .then(() => saveEpisode(targetNovelId, targetEpisodeId, nextContent))
@@ -255,10 +274,61 @@ export default function EditorPage() {
           if (!mountedRef.current || seq !== saveSeqRef.current) return;
           setSaveError(describeError(err));
           setSaveState("error");
+        })
+        .finally(() => {
+          savesInFlightRef.current--;
         });
     },
     [showOtherDrafts, setServerVersion]
   );
+
+  const clearAutosaveTimers = useCallback(() => {
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    if (autosaveMaxWaitTimerRef.current) clearTimeout(autosaveMaxWaitTimerRef.current);
+    autosaveTimerRef.current = null;
+    autosaveMaxWaitTimerRef.current = null;
+  }, []);
+
+  // Sends text that hasn't reached the server — unless the server already holds
+  // exactly that (typed back to what was saved), when there is nothing to send
+  // and nothing left to back up.
+  const sendPending = useCallback(
+    (pending: PendingSave) => {
+      // Not while a save is in flight: the server is about to hold that save's text, so a
+      // match with what it held before says nothing.
+      if (
+        savesInFlightRef.current === 0 &&
+        pending.episodeId === currentEpisodeIdRef.current &&
+        pending.content === serverContentRef.current
+      ) {
+        draftPendingRef.current = null;
+        if (draftTimerRef.current) {
+          clearTimeout(draftTimerRef.current);
+          draftTimerRef.current = null;
+        }
+        clearDraft(pending.episodeId);
+        ownDraftRef.current.delete(pending.episodeId);
+        return;
+      }
+      flushDraft(); // the draft must be on disk before the save it backs up
+      save(pending.novelId, pending.episodeId, pending.content);
+    },
+    [flushDraft, save],
+  );
+
+  // The autosave that has come due (or is forced early, e.g. when the tab is hidden).
+  const autosaveNowRef = useRef<() => void>(() => {});
+  autosaveNowRef.current = () => {
+    clearAutosaveTimers();
+    const pending = pendingRef.current;
+    if (!pending) return;
+    if (savesInFlightRef.current > 0) {
+      autosaveTimerRef.current = setTimeout(() => autosaveNowRef.current(), AUTOSAVE_WHILE_SAVING_RECHECK_MS);
+      return;
+    }
+    pendingRef.current = null;
+    sendPending(pending);
+  };
 
   useEffect(() => {
     if (!novelId || !episodeId) return;
@@ -317,10 +387,7 @@ export default function EditorPage() {
       // Before anything else: this is also what runs when an expired session
       // routes away from the editor, so the text has to reach storage now.
       flushDraft();
-      if (autosaveTimerRef.current) {
-        clearTimeout(autosaveTimerRef.current);
-        autosaveTimerRef.current = null;
-      }
+      clearAutosaveTimers();
       const pending = pendingRef.current;
       if (pending) {
         pendingRef.current = null;
@@ -328,8 +395,9 @@ export default function EditorPage() {
         // standalone saveEpisode() call, so this flush still serializes with
         // any save already in flight for the same episode instead of racing
         // it — the whole reason saveChainRef exists. Its state update is a
-        // no-op once the seq bump below (or unmount) makes it stale.
-        save(pending.novelId, pending.episodeId, pending.content);
+        // no-op once the seq bump below (or unmount) makes it stale. Sent even
+        // while another save is in flight: leaving the episode is the last chance.
+        sendPending(pending);
       }
     };
   }, [novelId, episodeId]);
@@ -341,12 +409,13 @@ export default function EditorPage() {
     if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
     draftTimerRef.current = setTimeout(flushDraft, DRAFT_DEBOUNCE_MS);
     pendingRef.current = { novelId, episodeId, content: next };
+    // Debounced: pushed back by every change. The max-wait timer is started by
+    // the first change and left alone until the save goes out.
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    autosaveTimerRef.current = setTimeout(() => {
-      pendingRef.current = null;
-      flushDraft(); // the draft must be on disk before the save it backs up
-      save(novelId, episodeId, next);
-    }, AUTOSAVE_DELAY_MS);
+    autosaveTimerRef.current = setTimeout(() => autosaveNowRef.current(), AUTOSAVE_DEBOUNCE_MS);
+    if (!autosaveMaxWaitTimerRef.current) {
+      autosaveMaxWaitTimerRef.current = setTimeout(() => autosaveNowRef.current(), AUTOSAVE_MAX_WAIT_MS);
+    }
   }
 
   // Loading replaces what's on screen with the draft (and, through the usual
@@ -381,7 +450,7 @@ export default function EditorPage() {
   function handleSaveNow() {
     if (!novelId || !episodeId) return;
     pendingRef.current = null;
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    clearAutosaveTimers();
     flushDraft();
     save(novelId, episodeId, content);
   }
