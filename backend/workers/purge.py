@@ -23,8 +23,10 @@ another purge run) holds it.
 import argparse
 import logging
 import signal
+import sys
 import threading
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -35,6 +37,11 @@ from models.novel import Novel
 from models.user import DELETION_GRACE_PERIOD, User
 
 logger = logging.getLogger(__name__)
+
+
+class PurgeResult(NamedTuple):
+    purged: int
+    failed: int  # left pending, retried on the next pass
 
 
 def _purge_user(db: Session, user_id, cutoff: datetime) -> bool:
@@ -62,8 +69,8 @@ def _purge_user(db: Session, user_id, cutoff: datetime) -> bool:
     return True
 
 
-def purge_expired_accounts(db: Session, now: datetime | None = None) -> int:
-    """Purge every account past its grace period; returns how many were removed."""
+def purge_expired_accounts(db: Session, now: datetime | None = None) -> PurgeResult:
+    """Purge every account past its grace period; returns how many were removed and how many failed."""
     cutoff = (now or datetime.now(timezone.utc)) - DELETION_GRACE_PERIOD
     candidates = list(
         db.scalars(
@@ -72,7 +79,7 @@ def purge_expired_accounts(db: Session, now: datetime | None = None) -> int:
     )
     db.rollback()  # end the read transaction; each purge below is its own
 
-    purged = 0
+    purged = failed = 0
     for user_id in candidates:
         try:
             if _purge_user(db, user_id, cutoff):
@@ -80,12 +87,13 @@ def purge_expired_accounts(db: Session, now: datetime | None = None) -> int:
         except Exception:
             # One account failing must not stop the rest; it stays pending and is retried next run.
             db.rollback()
+            failed += 1
             logger.exception("Failed to purge account %s", user_id)
-    return purged
+    return PurgeResult(purged, failed)
 
 
-def purge_once() -> int:
-    """One pass in a session of its own; returns how many accounts were removed."""
+def purge_once() -> PurgeResult:
+    """One pass in a session of its own."""
     with SessionLocal() as db:
         return purge_expired_accounts(db)
 
@@ -93,15 +101,18 @@ def purge_once() -> int:
 def run(loop: bool = False, interval: float = 3600.0) -> None:
     logging.basicConfig(level=logging.INFO)
     if not loop:
-        # A failure here should surface (non-zero exit for cron), and Ctrl-C keeps its default meaning.
-        logger.info("Purged %d account(s)", purge_once())
+        # A failure should surface as a non-zero exit (cron, Cloud Scheduler), and Ctrl-C keeps its default meaning.
+        result = purge_once()
+        logger.info("Purged %d account(s), %d failed", *result)
+        if result.failed:
+            sys.exit(1)
         return
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())  # finish the current pass, then exit (10.4.4)
     while not stop.is_set():
         try:
-            logger.info("Purged %d account(s)", purge_once())
+            logger.info("Purged %d account(s), %d failed", *purge_once())
         except Exception:
             # e.g. the database is briefly unreachable: a long-lived worker retries next interval.
             logger.exception("Purge pass failed")

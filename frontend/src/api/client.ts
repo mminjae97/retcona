@@ -1,6 +1,8 @@
 // Thin client for talking to backend/api (FastAPI).
 // The auth token (JWE, 3.3) is sent via the Authorization header.
 
+import { resumeDrafts } from "../utils/draft";
+
 const BASE_URL = "/api";
 const TOKEN_STORAGE_KEY = "retcona_token";
 
@@ -26,6 +28,7 @@ let memoryToken: string | null = null;
 
 export function setToken(token: string): void {
   sessionSeen = true;
+  resumeDrafts(); // a new session: drafts are written again after a deletion wipe
   try {
     localStorage.setItem(TOKEN_STORAGE_KEY, token);
     memoryToken = null;

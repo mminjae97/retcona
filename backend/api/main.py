@@ -17,6 +17,9 @@ from auth.jwe import validate_keys
 from auth.router import router as auth_router
 from workers.purge import purge_once
 
+# uvicorn only configures its own loggers; without this the INFO line for an
+# irreversible purge is dropped while only failures show up.
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # How often the API server purges accounts past their deletion grace period
@@ -33,9 +36,9 @@ async def _purge_periodically(interval: float, startup_delay: float = PURGE_STAR
         try:
             # Blocking DB work, off the event loop. Safe alongside other
             # instances running the same loop: see workers/purge.py.
-            purged = await asyncio.to_thread(purge_once)
-            if purged:
-                logger.info("Purged %d account(s) past the deletion grace period", purged)
+            result = await asyncio.to_thread(purge_once)
+            if result.purged:
+                logger.info("Purged %d account(s) past the deletion grace period", result.purged)
         except Exception:
             logger.exception("Account purge pass failed")
         await asyncio.sleep(interval)

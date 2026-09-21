@@ -1,7 +1,7 @@
 // Auth API calls (design doc 3.1, 3.5, 3.6) — email/password signup and login,
 // nickname change, account deletion request.
 
-import { discardDraftsForDeletion, resumeDrafts } from "../utils/draft";
+import { discardDraftsForDeletion } from "../utils/draft";
 import { apiFetch, clearToken, setToken } from "./client";
 
 export interface UserPublic {
@@ -25,7 +25,6 @@ export async function signup(email: string, password: string, nickname: string):
     body: JSON.stringify({ email, password, nickname }),
   });
   setToken(res.access_token);
-  resumeDrafts();
   return res.user;
 }
 
@@ -42,7 +41,6 @@ export async function login(email: string, password: string): Promise<LoginResul
     body: JSON.stringify({ email, password }),
   });
   setToken(res.access_token);
-  resumeDrafts();
   return { user: res.user, deletionCancelled: res.deletion_cancelled };
 }
 
