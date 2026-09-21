@@ -53,3 +53,22 @@
   display: flex;
   gap: 8px;
 }
+
+.editor-notice {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.editor-notice p {
+  margin: 0 0 8px;
+}
+
+.editor-notice-warning {
+  border-color: var(--color-danger);
+  color: var(--color-text);
+}

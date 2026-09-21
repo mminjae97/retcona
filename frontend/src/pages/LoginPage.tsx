@@ -3,7 +3,7 @@
 // First-time social login signup goes to the nickname setup screen (3.2, 3.6)
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { login, signup } from "../api/auth";
 import { ApiError, describeError as describeApiError } from "../api/client";
 import { isValidNickname, nicknameInputHandlers, stripNickname } from "../utils/nickname";
@@ -33,8 +33,18 @@ function describeError(err: unknown): string {
   return describeApiError(err);
 }
 
+// Where the user was when their session ended (set by AuthExpiryRedirect).
+// Only an in-app absolute path is honored, never anything that could leave the app.
+function getExpiredFrom(state: unknown): string | null {
+  const from = (state as { expiredFrom?: unknown } | null)?.expiredFrom;
+  return typeof from === "string" && from.startsWith("/") && !from.startsWith("//") && !from.startsWith("/login")
+    ? from
+    : null;
+}
+
 export default function LoginPage() {
   const navigate = useNavigate();
+  const expiredFrom = getExpiredFrom(useLocation().state);
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -76,7 +86,7 @@ export default function LoginPage() {
           window.alert("진행 중이던 회원 탈퇴가 취소되었습니다. 계정이 원래대로 복구되었어요.");
         }
       }
-      navigate("/");
+      navigate(expiredFrom ?? "/");
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -125,6 +135,10 @@ export default function LoginPage() {
               required
             />
           </label>
+        )}
+
+        {expiredFrom && (
+          <p className="login-notice">로그인 세션이 종료되었습니다. 다시 로그인하면 하던 작업으로 돌아갑니다.</p>
         )}
 
         {error && <p className="login-error">{error}</p>}

@@ -1,4 +1,6 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { useEffect } from "react";
+import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { onAuthExpired } from "./api/client";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import EpisodeListPage from "./pages/EpisodeListPage";
@@ -8,12 +10,29 @@ import ValidationResultPage from "./pages/ValidationResultPage";
 import MyPage from "./pages/MyPage";
 import GraphPage from "./pages/GraphPage";
 
+// Sends the user to the login screen when the API reports the session is over,
+// remembering where they were so LoginPage can bring them back afterwards.
+function AuthExpiryRedirect() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  useEffect(
+    () =>
+      onAuthExpired(() => {
+        if (location.pathname === "/login") return;
+        navigate("/login", { replace: true, state: { expiredFrom: location.pathname + location.search } });
+      }),
+    [navigate, location.pathname, location.search],
+  );
+  return null;
+}
+
 // Screen flow follows design doc 2.1:
 // Login -> Dashboard -> {settings management / manuscript editor} -> run validation -> validation results
 //                     -> My Page -> per-novel relationship graph · timeline
 export default function App() {
   return (
     <BrowserRouter>
+      <AuthExpiryRedirect />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<DashboardPage />} />

@@ -63,30 +63,32 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     if user is None or user.password_hash is None or not password_ok:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
 
+    # Re-read under a row lock, taken only now that the slow password check is
+    # done. That serializes this login with request_deletion, so the state and
+    # token_version used below are current: either the deletion committed
+    # first (and this login cancels it, or is refused once the grace period
+    # has run out), or this login completes first and the deletion revokes the
+    # token afterwards — never a "successful" login whose token was already
+    # dead when it was issued.
+    db.refresh(user, with_for_update=True)
     deletion_cancelled = False
     if user.deletion_requested_at is not None:
+        if datetime.now(timezone.utc) >= user.deletion_requested_at + DELETION_GRACE_PERIOD:
+            # Past the grace period the account can no longer be recovered
+            # (3.5), even if the purge job hasn't got to it yet.
+            raise HTTPException(status.HTTP_410_GONE, "Account deletion grace period has passed")
         # Logging back in during the grace period cancels the deletion (3.5).
-        # Re-checked under a row lock so two concurrent logins can't both
-        # claim the cancellation. Only this path locks; the common login
-        # writes nothing. A login racing a request_deletion the other way
-        # round is safe without a lock: its token carries the old
-        # token_version, which the request bumps, so it simply stops working.
-        db.refresh(user, with_for_update=True)
-        if user.deletion_requested_at is not None:
-            if datetime.now(timezone.utc) >= user.deletion_requested_at + DELETION_GRACE_PERIOD:
-                # Past the grace period the account can no longer be recovered
-                # (3.5), even if the purge job hasn't got to it yet.
-                raise HTTPException(status.HTTP_410_GONE, "Account deletion grace period has passed")
-            user.deletion_requested_at = None
-            deletion_cancelled = True
-            db.commit()
-            db.refresh(user)
+        user.deletion_requested_at = None
+        deletion_cancelled = True
 
-    return TokenResponse(
-        access_token=_issue_access_token(user),
-        user=UserPublic.model_validate(user),
-        deletion_cancelled=deletion_cancelled,
-    )
+    # Snapshot before commit(), which expires the instance and would make the
+    # validation below re-query; commit() (even with nothing to write) also
+    # releases the row lock.
+    access_token = _issue_access_token(user)
+    user_public = UserPublic.model_validate(user)
+    db.commit()
+
+    return TokenResponse(access_token=access_token, user=user_public, deletion_cancelled=deletion_cancelled)
 
 
 @router.get("/me", response_model=UserPublic)

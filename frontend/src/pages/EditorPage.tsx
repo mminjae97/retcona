@@ -3,11 +3,22 @@
 // PATCH endpoint — the only difference is what triggers them. "Run validation" (2.2, 8.2)
 // stays disabled: it depends on QueueClient (infra/queue_client.py), which isn't implemented yet.
 // Editing a submitted episode flips its status back to draft (2.2).
+// Every keystroke is also mirrored to a local draft (utils/draft.ts) until a save confirms it, so text
+// survives an expired session, a network failure or a closed tab and is offered back on the next open.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { describeError } from "../api/client";
 import { getEpisode, saveEpisode } from "../api/episodes";
 import type { EpisodePublic } from "../api/episodes";
+import {
+  clearConflictDraft,
+  clearDraft,
+  loadConflictDraft,
+  loadDraft,
+  saveConflictDraft,
+  saveDraft,
+} from "../utils/draft";
+import type { Draft } from "../utils/draft";
 import "./EditorPage.css";
 
 const AUTOSAVE_DELAY_MS = 2000;
@@ -27,6 +38,10 @@ export default function EditorPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  // A local draft that can't be restored automatically because the episode
+  // changed on the server after it was written — the author decides.
+  const [conflictDraft, setConflictDraft] = useState<Draft | null>(null);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Content not yet sent to the API. Flushed directly (bypassing component
   // state) when the user navigates to a different episode or away from the
@@ -73,6 +88,19 @@ export default function EditorPage() {
         .catch(() => {})
         .then(() => saveEpisode(targetNovelId, targetEpisodeId, nextContent))
         .then((updated) => {
+          // Before the mounted/seq checks below: whether the local backup is
+          // still needed depends only on what the server now holds, even if
+          // this component has since moved on to another episode.
+          const draft = loadDraft(targetEpisodeId);
+          if (draft) {
+            if (draft.content === updated.content) {
+              clearDraft(targetEpisodeId);
+            } else {
+              // Newer text was typed while this save was in flight: keep it,
+              // now based on the version this save produced.
+              saveDraft(targetEpisodeId, { content: draft.content, baseUpdatedAt: updated.updated_at });
+            }
+          }
           if (!mountedRef.current || seq !== saveSeqRef.current) return;
           setEpisode(updated);
           setSaveState("saved");
@@ -104,6 +132,8 @@ export default function EditorPage() {
     setLoadError(null);
     setSaveState("idle");
     setSaveError(null);
+    setNotice(null);
+    setConflictDraft(null);
     // Chained after saveChainRef instead of fired directly: a quick
     // A -> B -> A navigation queues a flush save for A (below, on this
     // effect's cleanup) that may still be in flight when this same episode
@@ -118,6 +148,23 @@ export default function EditorPage() {
         if (cancelled) return;
         setEpisode(ep);
         setContent(ep.content);
+
+        const draft = loadDraft(episodeId);
+        if (draft && draft.content !== ep.content) {
+          if (draft.baseUpdatedAt === ep.updated_at) {
+            // Written on top of exactly this version, so nothing newer exists
+            // to overwrite: put it back and save it.
+            setNotice("저장되지 않았던 초안을 복구했습니다.");
+            handleContentChange(draft.content, ep.updated_at);
+          } else {
+            // The server's copy moved on after this draft was written.
+            saveConflictDraft(episodeId, draft);
+            clearDraft(episodeId);
+          }
+        } else if (draft) {
+          clearDraft(episodeId); // already saved
+        }
+        setConflictDraft(loadConflictDraft(episodeId));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -143,15 +190,29 @@ export default function EditorPage() {
     };
   }, [novelId, episodeId]);
 
-  function handleContentChange(next: string) {
+  function handleContentChange(next: string, baseUpdatedAt = episode?.updated_at ?? "") {
     setContent(next);
     if (!novelId || !episodeId) return;
+    saveDraft(episodeId, { content: next, baseUpdatedAt });
     pendingRef.current = { novelId, episodeId, content: next };
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = setTimeout(() => {
       pendingRef.current = null;
       save(novelId, episodeId, next);
     }, AUTOSAVE_DELAY_MS);
+  }
+
+  function restoreConflictDraft() {
+    if (!conflictDraft || !episodeId) return;
+    handleContentChange(conflictDraft.content);
+    clearConflictDraft(episodeId);
+    setConflictDraft(null);
+  }
+
+  function discardConflictDraft() {
+    if (!episodeId) return;
+    clearConflictDraft(episodeId);
+    setConflictDraft(null);
   }
 
   function handleSaveNow() {
@@ -185,6 +246,24 @@ export default function EditorPage() {
         </Link>
         <h1>{episode.episode_index}화 작성</h1>
       </div>
+
+      {notice && <p className="editor-notice">{notice}</p>}
+      {conflictDraft && (
+        <div className="editor-notice editor-notice-warning">
+          <p>
+            이 기기에 저장되지 않은 초안이 있지만, 그 사이 이 화가 다른 곳에서 수정되어 자동으로 복구하지 않았습니다.
+            초안으로 복구하면 지금 화면의 내용이 초안으로 바뀝니다.
+          </p>
+          <div className="editor-actions">
+            <button type="button" onClick={restoreConflictDraft}>
+              초안으로 복구
+            </button>
+            <button type="button" onClick={discardConflictDraft}>
+              초안 버리기
+            </button>
+          </div>
+        </div>
+      )}
 
       <textarea
         className="editor-textarea"

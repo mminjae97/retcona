@@ -3,7 +3,7 @@
 import os
 
 from passlib.context import CryptContext
-from passlib.exc import PasswordSizeError
+from passlib.exc import PasswordSizeError, PasswordValueError
 
 _pwd_context = CryptContext(schemes=[os.environ.get("PASSWORD_HASH_SCHEME", "bcrypt")], deprecated="auto")
 
@@ -20,7 +20,9 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, password_hash: str) -> bool:
     try:
         return _pwd_context.verify(password, password_hash)
-    except PasswordSizeError:
+    except (PasswordSizeError, PasswordValueError):
         # passlib refuses to hash/verify passwords over its own hard cap (4096
-        # bytes) as a DoS guard; treat that the same as a wrong password.
+        # bytes) as a DoS guard, and bcrypt rejects a NUL byte; either way it
+        # can't be the account's password, so treat it as a wrong one rather
+        # than letting it surface as a 500.
         return False

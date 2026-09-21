@@ -61,6 +61,18 @@ function extractDetail(body: unknown): string | undefined {
 // handle — every other 401 on an authenticated call means the session is over.
 const AUTH_ENTRY_PATHS = ["/auth/login", "/auth/signup"];
 
+const AUTH_EXPIRED_EVENT = "retcona:auth-expired";
+
+// Fired when a request that carried the current token came back 401 (expired,
+// or revoked — e.g. by an account-deletion request from another device, 3.5).
+// The API layer only announces it; the app decides how to leave the page
+// (App.tsx routes to /login), so pages holding unsaved work aren't torn down
+// by a hard reload behind their back.
+export function onAuthExpired(listener: () => void): () => void {
+  window.addEventListener(AUTH_EXPIRED_EVENT, listener);
+  return () => window.removeEventListener(AUTH_EXPIRED_EVENT, listener);
+}
+
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getToken();
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -71,14 +83,13 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
       ...options?.headers,
     },
   });
-  if (res.status === 401 && token && !AUTH_ENTRY_PATHS.includes(path)) {
-    // The token is expired or was revoked (e.g. by an account-deletion request
-    // from another device, 3.5). Drop it and go back to the login screen
-    // rather than leaving every page failing with a generic error.
+  // Only if the stored token is still the one this request was sent with: in
+  // the meantime another tab may have logged in again, and its fresh token
+  // must not be wiped by a stale response. (This also makes concurrent 401s
+  // announce the expiry just once — the first one clears the token.)
+  if (res.status === 401 && token && token === getToken() && !AUTH_ENTRY_PATHS.includes(path)) {
     clearToken();
-    if (window.location.pathname !== "/login") {
-      window.location.assign("/login");
-    }
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
   }
   if (!res.ok) {
     const detail = await res
