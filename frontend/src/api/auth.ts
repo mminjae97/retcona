@@ -13,6 +13,7 @@ interface TokenResponse {
   access_token: string;
   token_type: string;
   user: UserPublic;
+  deletion_cancelled: boolean;
 }
 
 export async function signup(email: string, password: string, nickname: string): Promise<UserPublic> {
@@ -24,13 +25,20 @@ export async function signup(email: string, password: string, nickname: string):
   return res.user;
 }
 
-export async function login(email: string, password: string): Promise<UserPublic> {
+export interface LoginResult {
+  user: UserPublic;
+  // True when this login cancelled a pending account deletion (3.5) —
+  // callers should tell the user, since it happens without them asking.
+  deletionCancelled: boolean;
+}
+
+export async function login(email: string, password: string): Promise<LoginResult> {
   const res = await apiFetch<TokenResponse>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
   setToken(res.access_token);
-  return res.user;
+  return { user: res.user, deletionCancelled: res.deletion_cancelled };
 }
 
 export function getMe(): Promise<UserPublic> {

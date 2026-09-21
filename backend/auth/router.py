@@ -58,13 +58,25 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     if user is None or user.password_hash is None or not password_ok:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
 
-    if user.deletion_requested_at is not None:
+    # Re-read under a row lock (after the slow password check, so it isn't
+    # held during hashing) so this serializes with request_deletion: either
+    # the deletion committed first and this login cancels it, or the login
+    # committed first and its token predates the deletion and is invalidated
+    # by it — never a token issued for an account that was just marked
+    # pending.
+    db.refresh(user, with_for_update=True)
+    deletion_cancelled = user.deletion_requested_at is not None
+    if deletion_cancelled:
         # Logging back in during the grace period cancels the deletion (3.5).
         user.deletion_requested_at = None
-        db.commit()
-        db.refresh(user)
+    # Snapshot before commit(), which expires the instance and would make the
+    # validation below re-query; commit() (even with nothing to write) also
+    # releases the row lock.
+    access_token = issue_token(str(user.id))
+    user_public = UserPublic.model_validate(user)
+    db.commit()
 
-    return TokenResponse(access_token=issue_token(str(user.id)), user=UserPublic.model_validate(user))
+    return TokenResponse(access_token=access_token, user=user_public, deletion_cancelled=deletion_cancelled)
 
 
 @router.get("/me", response_model=UserPublic)
@@ -107,7 +119,11 @@ def request_deletion(
     # their own timestamp, pushing the purge date out.
     db.refresh(current_user, with_for_update=True)
     if current_user.deletion_requested_at is None:
-        current_user.deletion_requested_at = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        current_user.deletion_requested_at = now
+        # Kills every token issued before this request for good, even if a
+        # later login cancels the deletion (see get_current_user).
+        current_user.sessions_valid_after = now
         db.commit()
         db.refresh(current_user)
 

@@ -6,6 +6,7 @@ import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { login, signup } from "../api/auth";
 import { ApiError, describeError as describeApiError } from "../api/client";
+import { isValidNickname } from "../utils/nickname";
 import "./LoginPage.css";
 
 type Mode = "login" | "signup";
@@ -55,7 +56,7 @@ export default function LoginPage() {
         // strip-then-check rule (3.6) — the native minLength attribute
         // checks the raw, untrimmed value and would let e.g. "a " through.
         const trimmedNickname = nickname.trim();
-        if (trimmedNickname.length < 2 || trimmedNickname.length > 20) {
+        if (!isValidNickname(trimmedNickname)) {
           setError("필명은 공백을 제외하고 2~20자로 입력해주세요.");
           return;
         }
@@ -69,7 +70,10 @@ export default function LoginPage() {
         }
         await signup(email, password, trimmedNickname);
       } else {
-        await login(email, password);
+        const { deletionCancelled } = await login(email, password);
+        if (deletionCancelled) {
+          window.alert("진행 중이던 회원 탈퇴가 취소되었습니다. 계정이 원래대로 복구되었어요.");
+        }
       }
       navigate("/");
     } catch (err) {
@@ -118,7 +122,9 @@ export default function LoginPage() {
               value={nickname}
               onChange={(e) => setNickname(e.target.value)}
               required
-              maxLength={20}
+              // 20 code points can take up to 40 UTF-16 units, which is what
+              // maxLength counts — the exact 2~20 check is isValidNickname's.
+              maxLength={40}
             />
           </label>
         )}

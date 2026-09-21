@@ -6,6 +6,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { getMe, requestAccountDeletion, updateNickname } from "../api/auth";
 import type { UserPublic } from "../api/auth";
 import { ApiError, describeError } from "../api/client";
+import { isValidNickname } from "../utils/nickname";
 import { createNovel, deleteNovel, listNovels, renameNovel } from "../api/novels";
 import type { NovelPublic } from "../api/novels";
 import "./MyPage.css";
@@ -117,10 +118,10 @@ export default function MyPage() {
   async function handleSaveNickname(e: FormEvent) {
     e.preventDefault();
     if (savingNickname) return;
-    // Validate against the trimmed length, matching the backend's
+    // Validate the trimmed value in code points, matching the backend's
     // strip-then-check rule (3.6).
     const trimmed = nicknameValue.trim();
-    if (trimmed.length < 2 || trimmed.length > 20) {
+    if (!isValidNickname(trimmed)) {
       setNicknameError("필명은 공백을 제외하고 2~20자로 입력해주세요.");
       return;
     }
@@ -134,6 +135,11 @@ export default function MyPage() {
     } finally {
       setSavingNickname(false);
     }
+  }
+
+  function cancelEditNickname() {
+    setEditingNickname(false);
+    setNicknameError(null);
   }
 
   function cancelDeletion() {
@@ -196,13 +202,15 @@ export default function MyPage() {
                     type="text"
                     value={nicknameValue}
                     onChange={(e) => setNicknameValue(e.target.value)}
-                    maxLength={20}
+                    // 20 code points can take up to 40 UTF-16 units, which is what
+                    // maxLength counts — the exact 2~20 check is isValidNickname's.
+                    maxLength={40}
                     autoFocus
                   />
                   <button type="submit" disabled={savingNickname}>
                     저장
                   </button>
-                  <button type="button" onClick={() => setEditingNickname(false)}>
+                  <button type="button" onClick={cancelEditNickname} disabled={savingNickname}>
                     취소
                   </button>
                 </form>

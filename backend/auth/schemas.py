@@ -3,7 +3,9 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from typing import Annotated
+
+from pydantic import AfterValidator, BaseModel, EmailStr, Field, field_validator
 
 
 def _normalize_email(value: str) -> str:
@@ -19,10 +21,14 @@ def _strip_nickname(value: str) -> str:
     return value
 
 
+# Shared by every request that takes a pen name, so the rule lives in one place.
+Nickname = Annotated[str, Field(min_length=2), AfterValidator(_strip_nickname)]  # 2-20 chars after stripping (3.6)
+
+
 class SignupRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
-    nickname: str = Field(min_length=2)  # pen name constraint (3.6): 2-20 chars after stripping
+    nickname: Nickname
 
     @field_validator("email")
     @classmethod
@@ -37,11 +43,6 @@ class SignupRequest(BaseModel):
             raise ValueError("Password must be at most 72 bytes")
         return value
 
-    @field_validator("nickname")
-    @classmethod
-    def strip_nickname(cls, value: str) -> str:
-        return _strip_nickname(value)
-
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -54,12 +55,7 @@ class LoginRequest(BaseModel):
 
 
 class NicknameUpdate(BaseModel):
-    nickname: str = Field(min_length=2)
-
-    @field_validator("nickname")
-    @classmethod
-    def strip_nickname(cls, value: str) -> str:
-        return _strip_nickname(value)
+    nickname: Nickname
 
 
 class DeletionRequest(BaseModel):
@@ -83,3 +79,5 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserPublic
+    # True when this login cancelled a pending account deletion (3.5).
+    deletion_cancelled: bool = False
