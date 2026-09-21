@@ -107,18 +107,29 @@ export function loadDraft(episodeId: string): Draft | null {
   return userId === null ? null : readDraft(ownKey(userId, episodeId));
 }
 
+// Slots this page load has already written. Writing runs every few hundred ms
+// while typing, so "does my slot exist yet" (which would mean reading the whole
+// previous manuscript back) is only asked for the first write.
+const writtenByThisLoad = new Set<string>();
+
 export function saveDraft(episodeId: string, draft: DraftInput): boolean {
   const userId = getUserId();
   if (userId === null || draftsWiped(userId)) return false;
   const key = ownKey(userId, episodeId);
-  if (storageGet(key) === null) makeRoom(userId, episodeId);
+  if (!writtenByThisLoad.has(key) && storageGet(key) === null) makeRoom(userId, episodeId);
   const stored: Draft = { content: draft.content, baseUpdatedAt: draft.baseUpdatedAt, savedAt: Date.now() };
-  return storageSet(key, JSON.stringify(stored));
+  const written = storageSet(key, JSON.stringify(stored));
+  if (written) writtenByThisLoad.add(key);
+  else writtenByThisLoad.delete(key);
+  return written;
 }
 
 export function clearDraft(episodeId: string): void {
   const userId = getUserId();
-  if (userId !== null) storageRemove(ownKey(userId, episodeId));
+  if (userId === null) return;
+  const key = ownKey(userId, episodeId);
+  writtenByThisLoad.delete(key);
+  storageRemove(key);
 }
 
 // Parsing a draft means parsing the whole manuscript, and the list is re-read
@@ -145,12 +156,19 @@ export function listOtherDrafts(episodeId: string): StoredDraft[] {
   const userId = getUserId();
   if (userId === null) return [];
   const own = ownKey(userId, episodeId);
+  const prefix = episodePrefix(userId, episodeId);
+  const keys = storageKeys(prefix);
   const found: StoredDraft[] = [];
-  for (const key of storageKeys(episodePrefix(userId, episodeId))) {
+  for (const key of keys) {
     if (key === own) continue;
     const draft = readDraftCached(key);
     if (draft !== null) found.push({ ...draft, key });
     else storageRemove(key); // corrupt
+  }
+  // Slots another tab has removed since: their cached manuscripts go too.
+  const present = new Set(keys);
+  for (const key of parsedByKey.keys()) {
+    if (key.startsWith(prefix) && !present.has(key)) parsedByKey.delete(key);
   }
   return found.sort((a, b) => b.savedAt - a.savedAt);
 }

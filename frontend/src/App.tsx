@@ -22,8 +22,9 @@ function AuthExpiryRedirect() {
         if (location.pathname === "/login") return;
         navigate("/login", {
           replace: true,
-          // Who was signed in: only that account is taken back to this page.
-          state: { returnTo: location.pathname + location.search, sessionEnded, userId: getUserId() },
+          // Who was signed in, when a session did end: only that account is
+          // taken back to this page. A visitor who never signed in has no one to protect.
+          state: { returnTo: location.pathname + location.search, sessionEnded, userId: sessionEnded ? getUserId() : null },
         });
       }),
     [navigate, location.pathname, location.search],

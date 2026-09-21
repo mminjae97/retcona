@@ -34,9 +34,11 @@ def get_current_user(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
     if token_version != user.token_version:
         # Issued before a deletion request (which bumps the version), even if
-        # that request has since been cancelled by logging in again. This also
-        # covers a pending-deletion account (3.5): the bump and the pending
-        # state happen together, and the only way back is logging in, which
-        # cancels the deletion and issues a token at the new version.
+        # that request has since been cancelled by logging in again.
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
+    if user.deletion_requested_at is not None:
+        # A pending-deletion account (3.5) is only reachable by logging in,
+        # which cancels the deletion. Checked on its own rather than relying on
+        # the version bump that the deletion request happens to make.
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account is pending deletion")
     return user
