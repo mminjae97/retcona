@@ -65,6 +65,8 @@ export default function EditorPage() {
   // Unsaved drafts of this episode left by other tabs or earlier page loads;
   // the author loads or discards them.
   const [otherDrafts, setOtherDrafts] = useState<StoredDraft[]>([]);
+  // The same list, for code that must look at the current one without waiting for a render.
+  const otherDraftsRef = useRef<StoredDraft[]>([]);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Content not yet sent to the API. Flushed directly (bypassing component
   // state) when the user navigates to a different episode or away from the
@@ -115,6 +117,15 @@ export default function EditorPage() {
 
   // Re-reads the other sessions' drafts. What the server already holds is
   // nothing left to offer, so it is dropped rather than listed.
+  const showOtherDrafts = useCallback((next: StoredDraft[]) => {
+    const prev = otherDraftsRef.current;
+    // Same drafts as before: keep the old array so nothing re-renders (the
+    // textarea holds a whole chapter).
+    if (prev.length === next.length && prev.every((d, i) => d.key === next[i].key && d.savedAt === next[i].savedAt)) return;
+    otherDraftsRef.current = next;
+    setOtherDrafts(next);
+  }, []);
+
   const refreshOtherDrafts = useCallback(() => {
     const id = currentEpisodeIdRef.current;
     if (!id) return;
@@ -123,14 +134,8 @@ export default function EditorPage() {
       discardDraft(d.key);
       return false;
     });
-    // Same drafts as before: keep the old array so nothing re-renders (the
-    // textarea holds a whole chapter).
-    setOtherDrafts((prev) =>
-      prev.length === unsaved.length && prev.every((d, i) => d.key === unsaved[i].key && d.savedAt === unsaved[i].savedAt)
-        ? prev
-        : unsaved,
-    );
-  }, []);
+    showOtherDrafts(unsaved);
+  }, [showOtherDrafts]);
 
   const flushDraft = useCallback(() => {
     if (draftTimerRef.current) {
@@ -216,7 +221,16 @@ export default function EditorPage() {
               saveDraft(targetEpisodeId, { ...draft, baseUpdatedAt: updated.updated_at });
             }
           }
-          if (targetEpisodeId === currentEpisodeIdRef.current) refreshOtherDrafts();
+          if (targetEpisodeId === currentEpisodeIdRef.current) {
+            // Listed drafts the server now holds are nothing left to offer.
+            // Judged from the list in memory: rescanning storage on every save
+            // would read every parked manuscript back.
+            const held = otherDraftsRef.current.filter((d) => d.content === updated.content);
+            if (held.length > 0) {
+              held.forEach((d) => discardDraft(d.key));
+              showOtherDrafts(otherDraftsRef.current.filter((d) => d.content !== updated.content));
+            }
+          }
           if (!mountedRef.current || seq !== saveSeqRef.current) return;
           setEpisode(updated);
           setSaveState("saved");
@@ -227,7 +241,7 @@ export default function EditorPage() {
           setSaveState("error");
         });
     },
-    [refreshOtherDrafts]
+    [showOtherDrafts]
   );
 
   useEffect(() => {
@@ -249,7 +263,7 @@ export default function EditorPage() {
     setSaveState("idle");
     setSaveError(null);
     setNotice(null);
-    setOtherDrafts([]);
+    showOtherDrafts([]);
     currentEpisodeIdRef.current = episodeId;
     serverUpdatedAtRef.current = "";
     setServerUpdatedAt("");
@@ -345,7 +359,7 @@ export default function EditorPage() {
 
   function discardOtherDraft(draft: StoredDraft) {
     discardDraft(draft.key);
-    setOtherDrafts((prev) => prev.filter((d) => d.key !== draft.key));
+    showOtherDrafts(otherDraftsRef.current.filter((d) => d.key !== draft.key));
   }
 
   function handleSaveNow() {

@@ -129,6 +129,9 @@ class DeletionRequest(BaseModel):
 
 
 class DeletionResponse(BaseModel):
+    # The account the request was made for (the one the token belonged to), so
+    # the client can clear that account's local data rather than guess at it.
+    user_id: uuid.UUID
     deletion_requested_at: datetime
     purge_after: datetime
 

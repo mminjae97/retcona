@@ -7,13 +7,14 @@ episodes, claims, flags, events and so on. The multi-tenant layout is what
 makes the scope a single path: user -> novels -> novel_id.
 
 It runs on a schedule by itself: the API server starts a background loop
-(api/main.py) that does one pass every day at midnight (PURGE_TIMEZONE,
-Asia/Seoul unless set), so a plain deployment needs nothing extra. It can also
+(api/main.py) that does one pass shortly after startup and then one every
+day at midnight (PURGE_TIMEZONE, Asia/Seoul unless set), so a plain deployment
+needs nothing extra. It can also
 be run on its own — once from cron or Cloud Scheduler, or as a long-lived
 worker that does the same daily pass:
 
     python -m workers.purge                      # one pass now
-    python -m workers.purge --loop               # one pass every midnight
+    python -m workers.purge --loop               # one pass now, then one every midnight
 
 It is idempotent and safe to run concurrently (several API instances, a
 separate worker): each account is purged in its own transaction, under a row
@@ -130,16 +131,19 @@ def run(loop: bool = False) -> None:
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())  # finish the current pass, then exit (10.4.4)
-    while not stop.wait(seconds_until_next_midnight()):
+    # One pass right away (catching up on a midnight it wasn't running for), then one every midnight.
+    wait_seconds = 0.0
+    while not stop.wait(wait_seconds):
         try:
             logger.info("Purged %d account(s), %d failed", *purge_once())
         except Exception:
             # e.g. the database is briefly unreachable: a long-lived worker retries at the next midnight.
             logger.exception("Purge pass failed")
+        wait_seconds = seconds_until_next_midnight()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Permanently delete accounts past their deletion grace period.")
-    parser.add_argument("--loop", action="store_true", help="keep running, one pass every midnight")
+    parser.add_argument("--loop", action="store_true", help="keep running: a pass now, then one every midnight")
     args = parser.parse_args()
     run(loop=args.loop)

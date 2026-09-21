@@ -71,6 +71,7 @@ export function updateNickname(nickname: string): Promise<UserPublic> {
 }
 
 export interface DeletionResult {
+  user_id: string;
   deletion_requested_at: string;
   purge_after: string;
 }
@@ -79,20 +80,15 @@ export interface DeletionResult {
 // pending-deletion account is only reachable by logging in again, 3.5), so
 // the stored token is dropped here rather than left to fail on the next call.
 // The user was just told their data is being deleted, so unsaved manuscript
-// drafts must not linger in this browser (shared machines) either.
+// drafts must not linger in this browser (shared machines) either: the
+// response names the account the request was made for, which is the one whose
+// drafts go (not whichever account happens to be remembered locally).
 export async function requestAccountDeletion(password: string): Promise<DeletionResult> {
-  // Needed to wipe this account's drafts afterwards, and only obtainable while
-  // the token still works: a session from before the id was remembered has to
-  // fetch it now rather than after the request revokes the token.
-  const userId = await ensureUserId();
-  // Without it the drafts can't be wiped, and the user is about to be told
-  // their data is being deleted: don't start what can't be finished.
-  if (userId === null) throw new Error("Could not determine the account id");
   const result = await apiFetch<DeletionResult>("/auth/me/deletion", {
     method: "POST",
     body: JSON.stringify({ password }),
   });
-  discardDraftsForDeletion(userId);
+  discardDraftsForDeletion(result.user_id);
   clearToken();
   return result;
 }

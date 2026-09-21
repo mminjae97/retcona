@@ -32,17 +32,31 @@ def _purge_enabled() -> bool:
     return os.environ.get(PURGE_ENABLED_ENV, "1").strip().lower() not in _FALSE_VALUES
 
 
+# Let startup (migrations, warm-up) settle before the catch-up pass.
+PURGE_STARTUP_DELAY_SECONDS = 60.0
+
+
+async def _purge_pass() -> None:
+    try:
+        # Blocking DB work, off the event loop. Safe alongside other
+        # instances running the same loop: see workers/purge.py.
+        result = await asyncio.to_thread(purge_once)
+        if result.purged:
+            logger.info("Purged %d account(s) past the deletion grace period", result.purged)
+    except Exception:
+        logger.exception("Account purge pass failed")
+
+
 async def _purge_daily() -> None:
+    # One pass shortly after startup, then one every midnight. The startup pass
+    # is what catches up on a midnight this process wasn't alive for (scaled to
+    # zero, restarted, redeployed); without it a service that keeps being
+    # restarted around then might never purge.
+    await asyncio.sleep(PURGE_STARTUP_DELAY_SECONDS)
+    await _purge_pass()
     while True:
         await asyncio.sleep(seconds_until_next_midnight())
-        try:
-            # Blocking DB work, off the event loop. Safe alongside other
-            # instances running the same loop: see workers/purge.py.
-            result = await asyncio.to_thread(purge_once)
-            if result.purged:
-                logger.info("Purged %d account(s) past the deletion grace period", result.purged)
-        except Exception:
-            logger.exception("Account purge pass failed")
+        await _purge_pass()
 
 
 @asynccontextmanager

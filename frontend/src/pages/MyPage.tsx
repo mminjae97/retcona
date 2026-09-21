@@ -169,9 +169,11 @@ export default function MyPage() {
     setDeleting(true);
     try {
       const result = await requestAccountDeletion(deletionPassword);
-      const purgeDate = new Date(result.purge_after).toLocaleDateString("ko-KR");
+      // The server refuses the login that would cancel it from exactly this
+      // moment on, so the exact time is shown, not just the date.
+      const deadline = new Date(result.purge_after).toLocaleString("ko-KR");
       window.alert(
-        `탈퇴가 접수되었습니다. ${purgeDate} 이후 모든 데이터가 영구 삭제됩니다.\n그 전에 다시 로그인하면 탈퇴가 취소되며, 이 날짜가 지나면 취소할 수 없습니다.`,
+        `탈퇴가 접수되었습니다.\n${deadline}까지 다시 로그인하면 탈퇴가 취소됩니다. 이 시각이 지나면 취소할 수 없으며, 이후 계정과 모든 데이터가 영구 삭제됩니다.`,
       );
       navigate("/login");
     } catch (err) {

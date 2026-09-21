@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from auth.dependencies import get_current_user
+from auth.dependencies import get_current_user, lock_current_user, lock_user
 from auth.jwe import issue_token
 from auth.schemas import (
     DeletionRequest,
@@ -27,27 +27,6 @@ from models.db import get_db
 from models.user import DELETION_GRACE_PERIOD, User
 
 router = APIRouter()
-
-def _lock_user(db: Session, user_id: uuid.UUID) -> User | None:
-    """Re-read a user row under FOR UPDATE, overwriting whatever this session
-    had loaded, or None if the row no longer exists (purged, 3.5). Login and
-    deletion requests both serialize on it, so they stay in step."""
-    return db.scalar(
-        select(User).where(User.id == user_id).with_for_update().execution_options(populate_existing=True)
-    )
-
-
-def _lock_current_user(db: Session, current_user: User) -> None:
-    """Lock the caller's row and re-check the token_version that
-    get_current_user matched the token against before the lock: if a
-    concurrent request already revoked this token's generation (and a login
-    may have cancelled that deletion since), the token is no longer valid and
-    must not be used to change anything."""
-    # Read before locking: the re-read overwrites current_user in place.
-    token_version = current_user.token_version
-    locked = _lock_user(db, current_user.id)
-    if locked is None or locked.token_version != token_version:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
 
 
 def _issue_access_token(user: User) -> str:
@@ -89,7 +68,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     # has run out), or this login completes first and the deletion revokes the
     # token afterwards — never a "successful" login whose token was already
     # dead when it was issued.
-    locked = _lock_user(db, user.id)
+    locked = lock_user(db, user.id)
     if locked is None:
         # Purged (3.5) between the lookup and the lock.
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
@@ -125,7 +104,7 @@ def update_nickname(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> User:
-    _lock_current_user(db, current_user)
+    lock_current_user(db, current_user)
     current_user.nickname = body.nickname
     db.commit()
     db.refresh(current_user)
@@ -153,7 +132,7 @@ def request_deletion(
 
     # A concurrent request may already have revoked this token's generation;
     # this one must not start a second deletion with a token that is no longer valid.
-    _lock_current_user(db, current_user)
+    lock_current_user(db, current_user)
 
     current_user.deletion_requested_at = datetime.now(timezone.utc)
     # Kills every token issued so far for good, even if a later login
@@ -163,6 +142,7 @@ def request_deletion(
     db.refresh(current_user)
 
     return DeletionResponse(
+        user_id=current_user.id,
         deletion_requested_at=current_user.deletion_requested_at,
         purge_after=current_user.deletion_requested_at + DELETION_GRACE_PERIOD,
     )
