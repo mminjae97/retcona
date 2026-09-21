@@ -45,6 +45,10 @@ class SignupRequest(BaseModel):
         # bcrypt only hashes the first 72 bytes, so cap by UTF-8 bytes, not characters
         if len(value.encode("utf-8")) > 72:
             raise ValueError("Password must be at most 72 bytes")
+        # bcrypt refuses a NUL byte (passlib raises PasswordValueError), which
+        # would otherwise surface from hash_password as a 500 instead of a 422.
+        if "\x00" in value:
+            raise ValueError("Password must not contain NUL characters")
         return value
 
 

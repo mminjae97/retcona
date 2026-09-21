@@ -3,25 +3,37 @@
 // PATCH endpoint — the only difference is what triggers them. "Run validation" (2.2, 8.2)
 // stays disabled: it depends on QueueClient (infra/queue_client.py), which isn't implemented yet.
 // Editing a submitted episode flips its status back to draft (2.2).
-// Every keystroke is also mirrored to a local draft (utils/draft.ts) until a save confirms it, so text
-// survives an expired session, a network failure or a closed tab and is offered back on the next open.
+// Typing is also mirrored to a local draft (utils/draft.ts, debounced, and flushed when the page is hidden or
+// the editor unmounts) until a save confirms it, so text survives an expired session, a network failure or a
+// closed tab and is offered back on the next open.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { describeError } from "../api/client";
 import { getEpisode, saveEpisode } from "../api/episodes";
 import type { EpisodePublic } from "../api/episodes";
 import {
-  clearConflictDraft,
+  addConflictDraft,
   clearDraft,
-  loadConflictDraft,
+  loadConflictDrafts,
   loadDraft,
-  saveConflictDraft,
+  removeConflictDraft,
   saveDraft,
 } from "../utils/draft";
 import type { Draft } from "../utils/draft";
 import "./EditorPage.css";
 
 const AUTOSAVE_DELAY_MS = 2000;
+// Much shorter than the autosave delay so the local draft is on disk before the
+// server save fires, but coalescing keystrokes: stringifying and storing a long
+// manuscript on every key press would make typing lag.
+const DRAFT_DEBOUNCE_MS = 300;
+
+// First characters of a draft, counted in code points so an emoji isn't cut in half.
+function previewDraft(content: string): string {
+  const chars = Array.from(content);
+  if (chars.length === 0) return "(빈 내용)";
+  return chars.slice(0, 40).join("") + (chars.length > 40 ? "…" : "");
+}
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -39,9 +51,9 @@ export default function EditorPage() {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // A local draft that can't be restored automatically because the episode
-  // changed on the server after it was written — the author decides.
-  const [conflictDraft, setConflictDraft] = useState<Draft | null>(null);
+  // Local drafts that can't be restored automatically because the episode
+  // changed on the server after they were written — the author decides.
+  const [conflictDrafts, setConflictDrafts] = useState<Draft[]>([]);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Content not yet sent to the API. Flushed directly (bypassing component
   // state) when the user navigates to a different episode or away from the
@@ -77,6 +89,40 @@ export default function EditorPage() {
     };
   }, []);
 
+  // Draft write-behind. The episode's server `updated_at` is tracked in a ref
+  // (not read from state) because the debounced write fires after renders
+  // have moved on, and must record the base as of *now*.
+  const currentEpisodeIdRef = useRef<string | undefined>(undefined);
+  const serverUpdatedAtRef = useRef("");
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftPendingRef = useRef<{ episodeId: string; content: string } | null>(null);
+
+  const flushDraft = useCallback(() => {
+    if (draftTimerRef.current) {
+      clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = null;
+    }
+    const pending = draftPendingRef.current;
+    if (!pending) return;
+    draftPendingRef.current = null;
+    const written = saveDraft(pending.episodeId, {
+      content: pending.content,
+      baseUpdatedAt: serverUpdatedAtRef.current,
+    });
+    // If the write failed, the copy already in storage is older than what the
+    // author has typed. Leaving it would let a later save "rebase" it onto
+    // the new server version and restore it over their newer text — no draft
+    // is safer than a stale one.
+    if (!written) clearDraft(pending.episodeId);
+  }, []);
+
+  useEffect(() => {
+    // pagehide (tab close, navigation away, mobile backgrounding) is the last
+    // chance to get a pending debounced write onto disk.
+    window.addEventListener("pagehide", flushDraft);
+    return () => window.removeEventListener("pagehide", flushDraft);
+  }, [flushDraft]);
+
   const save = useCallback(
     (targetNovelId: string, targetEpisodeId: string, nextContent: string) => {
       const seq = ++saveSeqRef.current;
@@ -91,14 +137,19 @@ export default function EditorPage() {
           // Before the mounted/seq checks below: whether the local backup is
           // still needed depends only on what the server now holds, even if
           // this component has since moved on to another episode.
+          if (targetEpisodeId === currentEpisodeIdRef.current) {
+            serverUpdatedAtRef.current = updated.updated_at;
+          }
           const draft = loadDraft(targetEpisodeId);
           if (draft) {
             if (draft.content === updated.content) {
               clearDraft(targetEpisodeId);
             } else {
               // Newer text was typed while this save was in flight: keep it,
-              // now based on the version this save produced.
-              saveDraft(targetEpisodeId, { content: draft.content, baseUpdatedAt: updated.updated_at });
+              // now based on the version this save produced. (If this write
+              // fails the draft keeps its old base, so a later restore is
+              // treated as a conflict rather than overwriting anything.)
+              saveDraft(targetEpisodeId, { ...draft, baseUpdatedAt: updated.updated_at });
             }
           }
           if (!mountedRef.current || seq !== saveSeqRef.current) return;
@@ -133,7 +184,9 @@ export default function EditorPage() {
     setSaveState("idle");
     setSaveError(null);
     setNotice(null);
-    setConflictDraft(null);
+    setConflictDrafts([]);
+    currentEpisodeIdRef.current = episodeId;
+    serverUpdatedAtRef.current = "";
     // Chained after saveChainRef instead of fired directly: a quick
     // A -> B -> A navigation queues a flush save for A (below, on this
     // effect's cleanup) that may still be in flight when this same episode
@@ -146,6 +199,7 @@ export default function EditorPage() {
       .then(() => getEpisode(novelId, episodeId))
       .then((ep) => {
         if (cancelled) return;
+        serverUpdatedAtRef.current = ep.updated_at;
         setEpisode(ep);
         setContent(ep.content);
 
@@ -155,16 +209,17 @@ export default function EditorPage() {
             // Written on top of exactly this version, so nothing newer exists
             // to overwrite: put it back and save it.
             setNotice("저장되지 않았던 초안을 복구했습니다.");
-            handleContentChange(draft.content, ep.updated_at);
-          } else {
-            // The server's copy moved on after this draft was written.
-            saveConflictDraft(episodeId, draft);
+            handleContentChange(draft.content);
+          } else if (addConflictDraft(episodeId, draft)) {
+            // The server's copy moved on after this draft was written. Parked
+            // beside any earlier ones rather than replacing them; if parking
+            // fails (storage full) the draft stays where it is instead.
             clearDraft(episodeId);
           }
         } else if (draft) {
           clearDraft(episodeId); // already saved
         }
-        setConflictDraft(loadConflictDraft(episodeId));
+        setConflictDrafts(loadConflictDrafts(episodeId));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -173,6 +228,9 @@ export default function EditorPage() {
 
     return () => {
       cancelled = true;
+      // Before anything else: this is also what runs when an expired session
+      // routes away from the editor, so the text has to reach storage now.
+      flushDraft();
       if (autosaveTimerRef.current) {
         clearTimeout(autosaveTimerRef.current);
         autosaveTimerRef.current = null;
@@ -190,35 +248,44 @@ export default function EditorPage() {
     };
   }, [novelId, episodeId]);
 
-  function handleContentChange(next: string, baseUpdatedAt = episode?.updated_at ?? "") {
+  function handleContentChange(next: string) {
     setContent(next);
     if (!novelId || !episodeId) return;
-    saveDraft(episodeId, { content: next, baseUpdatedAt });
+    draftPendingRef.current = { episodeId, content: next };
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(flushDraft, DRAFT_DEBOUNCE_MS);
     pendingRef.current = { novelId, episodeId, content: next };
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = setTimeout(() => {
       pendingRef.current = null;
+      flushDraft(); // the draft must be on disk before the save it backs up
       save(novelId, episodeId, next);
     }, AUTOSAVE_DELAY_MS);
   }
 
-  function restoreConflictDraft() {
-    if (!conflictDraft || !episodeId) return;
-    handleContentChange(conflictDraft.content);
-    clearConflictDraft(episodeId);
-    setConflictDraft(null);
+  function restoreConflictDraft(draft: Draft) {
+    if (!episodeId) return;
+    // What's on screen is about to be replaced: park it too, so restoring is
+    // never a one-way trip (it shows up in the list and can be swapped back).
+    if (content && content !== draft.content) {
+      addConflictDraft(episodeId, { content, baseUpdatedAt: serverUpdatedAtRef.current });
+    }
+    removeConflictDraft(episodeId, draft);
+    handleContentChange(draft.content);
+    setConflictDrafts(loadConflictDrafts(episodeId));
   }
 
-  function discardConflictDraft() {
+  function discardConflictDraft(draft: Draft) {
     if (!episodeId) return;
-    clearConflictDraft(episodeId);
-    setConflictDraft(null);
+    removeConflictDraft(episodeId, draft);
+    setConflictDrafts(loadConflictDrafts(episodeId));
   }
 
   function handleSaveNow() {
     if (!novelId || !episodeId) return;
     pendingRef.current = null;
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    flushDraft();
     save(novelId, episodeId, content);
   }
 
@@ -248,20 +315,30 @@ export default function EditorPage() {
       </div>
 
       {notice && <p className="editor-notice">{notice}</p>}
-      {conflictDraft && (
+      {conflictDrafts.length > 0 && (
         <div className="editor-notice editor-notice-warning">
           <p>
-            이 기기에 저장되지 않은 초안이 있지만, 그 사이 이 화가 다른 곳에서 수정되어 자동으로 복구하지 않았습니다.
-            초안으로 복구하면 지금 화면의 내용이 초안으로 바뀝니다.
+            이 기기에 자동으로 복구하지 않은 초안이 {conflictDrafts.length}개 있습니다. 저장된 뒤 이 화가 다른 곳에서
+            수정되어, 덮어쓰지 않도록 남겨 두었습니다. 초안으로 복구하면 지금 화면의 내용은 이 목록으로 옮겨져 다시
+            되돌릴 수 있습니다.
           </p>
-          <div className="editor-actions">
-            <button type="button" onClick={restoreConflictDraft}>
-              초안으로 복구
-            </button>
-            <button type="button" onClick={discardConflictDraft}>
-              초안 버리기
-            </button>
-          </div>
+          <ul className="editor-draft-list">
+            {conflictDrafts.map((draft) => (
+              <li key={`${draft.savedAt}-${draft.content.length}`}>
+                <span className="editor-draft-preview">
+                  {new Date(draft.savedAt).toLocaleString()} · {previewDraft(draft.content)}
+                </span>
+                <span className="editor-actions">
+                  <button type="button" onClick={() => restoreConflictDraft(draft)}>
+                    초안으로 복구
+                  </button>
+                  <button type="button" onClick={() => discardConflictDraft(draft)}>
+                    초안 버리기
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

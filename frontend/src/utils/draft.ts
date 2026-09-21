@@ -1,11 +1,16 @@
 // Local backup of manuscript text that hasn't been confirmed saved yet (design
-// doc 2.2: work in progress must never be lost). The editor writes it on every
-// keystroke and drops it once a save has gone through, so it only survives
-// when something got in the way — an expired session, a network failure, a
-// closed tab. Best effort throughout: storage can be full, blocked or absent.
+// doc 2.2: work in progress must never be lost). The editor writes it while
+// typing and drops it once a save confirms it, so it only survives when
+// something got in the way — an expired session, a network failure, a closed
+// tab. Best effort throughout: storage can be full, blocked or absent.
 
 const DRAFT_PREFIX = "retcona_draft:";
 const CONFLICT_PREFIX = "retcona_draft_conflict:";
+
+// A draft nobody came back for is dropped after this long.
+const MAX_DRAFT_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+// Upper bound on parked drafts per episode, so they can't grow without limit.
+const MAX_CONFLICT_DRAFTS = 10;
 
 export interface Draft {
   content: string;
@@ -13,32 +18,36 @@ export interface Draft {
   // server's copy has moved on since (edited elsewhere), restoring the draft
   // would silently overwrite that newer work.
   baseUpdatedAt: string;
+  savedAt: number; // ms since epoch
 }
 
-function read(key: string): Draft | null {
+export type DraftInput = Omit<Draft, "savedAt"> & { savedAt?: number };
+
+function isDraft(value: unknown): value is Draft {
+  if (typeof value !== "object" || value === null) return false;
+  const draft = value as Partial<Draft>;
+  return (
+    typeof draft.content === "string" && typeof draft.baseUpdatedAt === "string" && typeof draft.savedAt === "number"
+  );
+}
+
+function readJson(key: string): unknown {
   try {
     const raw = localStorage.getItem(key);
-    if (raw === null) return null;
-    const parsed: unknown = JSON.parse(raw);
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      typeof (parsed as Draft).content === "string" &&
-      typeof (parsed as Draft).baseUpdatedAt === "string"
-    ) {
-      return parsed as Draft;
-    }
+    return raw === null ? null : JSON.parse(raw);
   } catch {
-    // unreadable or corrupt — treat as no draft
+    return null; // unreadable, corrupt or storage blocked — same as absent
   }
-  return null;
 }
 
-function write(key: string, draft: Draft): void {
+// Returns whether the write went through; callers that would be left holding
+// an out-of-date copy on failure (see the editor) need to know.
+function writeJson(key: string, value: unknown): boolean {
   try {
-    localStorage.setItem(key, JSON.stringify(draft));
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
   } catch {
-    // quota exceeded / storage blocked — the draft is a safety net, not required
+    return false; // quota exceeded / storage blocked
   }
 }
 
@@ -46,17 +55,75 @@ function remove(key: string): void {
   try {
     localStorage.removeItem(key);
   } catch {
-    // see write()
+    // see writeJson()
   }
 }
 
-export const loadDraft = (episodeId: string) => read(DRAFT_PREFIX + episodeId);
-export const saveDraft = (episodeId: string, draft: Draft) => write(DRAFT_PREFIX + episodeId, draft);
-export const clearDraft = (episodeId: string) => remove(DRAFT_PREFIX + episodeId);
+function withSavedAt(draft: DraftInput): Draft {
+  return { ...draft, savedAt: draft.savedAt ?? Date.now() };
+}
+
+export function loadDraft(episodeId: string): Draft | null {
+  const value = readJson(DRAFT_PREFIX + episodeId);
+  return isDraft(value) ? value : null;
+}
+
+export const saveDraft = (episodeId: string, draft: DraftInput): boolean =>
+  writeJson(DRAFT_PREFIX + episodeId, withSavedAt(draft));
+
+export const clearDraft = (episodeId: string): void => remove(DRAFT_PREFIX + episodeId);
 
 // A draft that conflicts with a newer server copy is parked under its own key,
 // so ordinary edits (which rewrite the regular draft) can't overwrite it
-// before the author has chosen what to do with it.
-export const loadConflictDraft = (episodeId: string) => read(CONFLICT_PREFIX + episodeId);
-export const saveConflictDraft = (episodeId: string, draft: Draft) => write(CONFLICT_PREFIX + episodeId, draft);
-export const clearConflictDraft = (episodeId: string) => remove(CONFLICT_PREFIX + episodeId);
+// before the author has chosen what to do with it. Several can pile up, each
+// kept until resolved, so a new one never replaces an older one.
+export function loadConflictDrafts(episodeId: string): Draft[] {
+  const value = readJson(CONFLICT_PREFIX + episodeId);
+  return Array.isArray(value) ? value.filter(isDraft) : [];
+}
+
+export function addConflictDraft(episodeId: string, draft: DraftInput): boolean {
+  const drafts = loadConflictDrafts(episodeId);
+  if (drafts.some((d) => d.content === draft.content)) return true; // already parked
+  return writeJson(CONFLICT_PREFIX + episodeId, [...drafts, withSavedAt(draft)].slice(-MAX_CONFLICT_DRAFTS));
+}
+
+export function removeConflictDraft(episodeId: string, draft: Draft): void {
+  const rest = loadConflictDrafts(episodeId).filter((d) => d.content !== draft.content);
+  if (rest.length === 0) remove(CONFLICT_PREFIX + episodeId);
+  else writeJson(CONFLICT_PREFIX + episodeId, rest);
+}
+
+function draftKeys(): string[] {
+  const keys: string[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key !== null && (key.startsWith(DRAFT_PREFIX) || key.startsWith(CONFLICT_PREFIX))) keys.push(key);
+    }
+  } catch {
+    // storage blocked
+  }
+  return keys;
+}
+
+// Manuscript text shouldn't outlive the account on a shared machine.
+export function clearAllDrafts(): void {
+  draftKeys().forEach(remove);
+}
+
+// Drops drafts nobody came back for (including those of episodes or novels
+// that no longer exist), so they don't accumulate forever. Run once at startup.
+export function pruneStaleDrafts(now = Date.now()): void {
+  const fresh = (d: Draft) => now - d.savedAt < MAX_DRAFT_AGE_MS;
+  for (const key of draftKeys()) {
+    const value = readJson(key);
+    if (key.startsWith(DRAFT_PREFIX)) {
+      if (!isDraft(value) || !fresh(value)) remove(key);
+    } else {
+      const keep = Array.isArray(value) ? value.filter(isDraft).filter(fresh) : [];
+      if (keep.length === 0) remove(key);
+      else if (keep.length !== (value as unknown[]).length) writeJson(key, keep);
+    }
+  }
+}

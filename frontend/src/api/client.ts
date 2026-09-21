@@ -63,8 +63,10 @@ const AUTH_ENTRY_PATHS = ["/auth/login", "/auth/signup"];
 
 const AUTH_EXPIRED_EVENT = "retcona:auth-expired";
 
-// Fired when a request that carried the current token came back 401 (expired,
-// or revoked — e.g. by an account-deletion request from another device, 3.5).
+// Fired when an authenticated call comes back 401: the token expired, was
+// revoked (e.g. by an account-deletion request from another device, 3.5), or
+// is gone altogether (another tab's session ended, or the page was reached
+// again via Back after signing out).
 // The API layer only announces it; the app decides how to leave the page
 // (App.tsx routes to /login), so pages holding unsaved work aren't torn down
 // by a hard reload behind their back.
@@ -83,11 +85,11 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
       ...options?.headers,
     },
   });
-  // Only if the stored token is still the one this request was sent with: in
-  // the meantime another tab may have logged in again, and its fresh token
-  // must not be wiped by a stale response. (This also makes concurrent 401s
-  // announce the expiry just once — the first one clears the token.)
-  if (res.status === 401 && token && token === getToken() && !AUTH_ENTRY_PATHS.includes(path)) {
+  // Only if the stored token is still the one this request was sent with (or
+  // still absent): in the meantime another tab may have logged in again, and
+  // its fresh token must not be wiped — or its session bounced to /login — by
+  // a stale response.
+  if (res.status === 401 && token === getToken() && !AUTH_ENTRY_PATHS.includes(path)) {
     clearToken();
     window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
   }

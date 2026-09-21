@@ -27,13 +27,13 @@ from models.user import User
 
 router = APIRouter()
 
+# Grace period between a deletion request and permanent deletion (3.5).
+DELETION_GRACE_PERIOD = timedelta(days=30)
+
+
 def _issue_access_token(user: User) -> str:
     # `ver` ties the token to users.token_version so a deletion request can revoke it.
     return issue_token(str(user.id), {"ver": user.token_version})
-
-
-# Grace period between a deletion request and permanent deletion (3.5).
-DELETION_GRACE_PERIOD = timedelta(days=30)
 
 
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
