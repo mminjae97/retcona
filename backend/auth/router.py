@@ -37,6 +37,19 @@ def _lock_user(db: Session, user_id: uuid.UUID) -> User | None:
     )
 
 
+def _lock_current_user(db: Session, current_user: User) -> None:
+    """Lock the caller's row and re-check the token_version that
+    get_current_user matched the token against before the lock: if a
+    concurrent request already revoked this token's generation (and a login
+    may have cancelled that deletion since), the token is no longer valid and
+    must not be used to change anything."""
+    # Read before locking: the re-read overwrites current_user in place.
+    token_version = current_user.token_version
+    locked = _lock_user(db, current_user.id)
+    if locked is None or locked.token_version != token_version:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
+
+
 def _issue_access_token(user: User) -> str:
     # `ver` ties the token to users.token_version so a deletion request can revoke it.
     return issue_token(str(user.id), {"ver": user.token_version})
@@ -112,6 +125,7 @@ def update_nickname(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> User:
+    _lock_current_user(db, current_user)
     current_user.nickname = body.nickname
     db.commit()
     db.refresh(current_user)
@@ -137,15 +151,9 @@ def request_deletion(
         # expired session.
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Incorrect password")
 
-    # Re-read under a row lock, and re-check the token_version that
-    # get_current_user matched the token against before the lock: if a
-    # concurrent request already revoked this token's generation (and a login
-    # may have cancelled that deletion since), this one must not start a
-    # second deletion with a token that is no longer valid.
-    token_version = current_user.token_version
-    locked = _lock_user(db, current_user.id)
-    if locked is None or locked.token_version != token_version:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
+    # A concurrent request may already have revoked this token's generation;
+    # this one must not start a second deletion with a token that is no longer valid.
+    _lock_current_user(db, current_user)
 
     current_user.deletion_requested_at = datetime.now(timezone.utc)
     # Kills every token issued so far for good, even if a later login

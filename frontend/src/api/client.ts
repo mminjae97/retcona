@@ -8,17 +8,20 @@ const TOKEN_STORAGE_KEY = "retcona_token";
 // throws on access. Reading treats that as "no stored token"; this runs while
 // the module loads, where a throw would take the whole app down with it.
 export function getToken(): string | null {
+  if (memoryToken !== null) return memoryToken;
   try {
     return localStorage.getItem(TOKEN_STORAGE_KEY);
   } catch {
-    return memoryToken;
+    return null;
   }
 }
 
-// Only holds a token when storage refused it, so the login that just went
-// through (the server has already acted on it, e.g. cancelled a pending
-// deletion) still gives a session for this page load instead of reporting a
-// failure. Never set while storage works, so another tab's logout isn't undone.
+// Only holds a token when storage refused the write (blocked, or full), so the
+// login that just went through (the server has already acted on it, e.g.
+// cancelled a pending deletion) still gives a session for this page load
+// instead of reporting a failure. It wins over whatever storage still holds,
+// which would be a stale token. Never set while storage works, so another
+// tab's logout isn't undone.
 let memoryToken: string | null = null;
 
 export function setToken(token: string): void {

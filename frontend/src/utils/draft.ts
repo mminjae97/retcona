@@ -134,12 +134,18 @@ function draftKeys(): string[] {
 // period cancels the deletion, but unsaved drafts are not brought back.
 export function discardDraftsForDeletion(): void {
   // Marker first, so a write racing with the removal below is refused.
-  try {
-    localStorage.setItem(WIPED_KEY, String(Date.now()));
-  } catch {
-    // storage blocked: see draftsWiped()
-  }
+  const mark = () => {
+    try {
+      localStorage.setItem(WIPED_KEY, String(Date.now()));
+    } catch {
+      // full or blocked
+    }
+  };
+  mark();
   draftKeys().forEach(remove);
+  // Storage that was full refused the marker; the drafts just removed made
+  // room. (Blocked storage still fails, but then draftsWiped() is true anyway.)
+  if (!draftsWiped()) mark();
 }
 
 // A login starts a fresh session, so drafts are written again.
