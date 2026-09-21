@@ -6,7 +6,7 @@ import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { login, signup } from "../api/auth";
 import { ApiError, describeError as describeApiError } from "../api/client";
-import { clampNickname, isValidNickname, stripNickname } from "../utils/nickname";
+import { isValidNickname, nicknameInputHandlers, stripNickname } from "../utils/nickname";
 import "./LoginPage.css";
 
 type Mode = "login" | "signup";
@@ -18,6 +18,7 @@ const SOCIAL_PROVIDERS = ["Google", "Kakao", "Naver"] as const;
 const ERROR_MESSAGES_BY_STATUS: Record<number, string> = {
   401: "이메일 또는 비밀번호가 올바르지 않습니다.",
   409: "이미 가입된 이메일입니다.",
+  410: "탈퇴 유예기간이 지나 삭제 예정인 계정입니다. 복구할 수 없습니다.",
   422: "입력값을 다시 확인해주세요.",
 };
 
@@ -120,7 +121,7 @@ export default function LoginPage() {
             <input
               type="text"
               value={nickname}
-              onChange={(e) => setNickname(clampNickname(e.target.value))}
+              {...nicknameInputHandlers(setNickname)}
               required
             />
           </label>

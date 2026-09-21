@@ -6,7 +6,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { getMe, requestAccountDeletion, updateNickname } from "../api/auth";
 import type { UserPublic } from "../api/auth";
 import { ApiError, describeError } from "../api/client";
-import { clampNickname, isValidNickname, stripNickname } from "../utils/nickname";
+import { isValidNickname, nicknameInputHandlers, stripNickname } from "../utils/nickname";
 import { createNovel, deleteNovel, listNovels, renameNovel } from "../api/novels";
 import type { NovelPublic } from "../api/novels";
 import "./MyPage.css";
@@ -201,7 +201,7 @@ export default function MyPage() {
                   <input
                     type="text"
                     value={nicknameValue}
-                    onChange={(e) => setNicknameValue(clampNickname(e.target.value))}
+                    {...nicknameInputHandlers(setNicknameValue)}
                     autoFocus
                   />
                   <button type="submit" disabled={savingNickname}>
@@ -306,7 +306,9 @@ export default function MyPage() {
 
       <section className="mypage-section danger-zone">
         <h2>⚠ 위험 영역</h2>
-        {confirmingDeletion ? (
+        {user && !user.has_password ? (
+          <p>소셜 로그인 계정의 회원 탈퇴는 아직 지원되지 않습니다.</p>
+        ) : confirmingDeletion ? (
           <form className="deletion-form" onSubmit={handleRequestDeletion}>
             <p>
               본인 확인을 위해 비밀번호를 입력해주세요. 탈퇴 접수 후 30일이 지나면 계정과 모든 작품 데이터가 영구

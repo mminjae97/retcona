@@ -73,6 +73,7 @@ class UserPublic(BaseModel):
     id: uuid.UUID
     email: str
     nickname: str
+    has_password: bool
 
 
 class TokenResponse(BaseModel):

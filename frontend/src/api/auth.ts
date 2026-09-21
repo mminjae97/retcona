@@ -7,6 +7,8 @@ export interface UserPublic {
   id: string;
   email: string;
   nickname: string;
+  // False for social-login accounts, which can't confirm deletion with a password (3.5).
+  has_password: boolean;
 }
 
 interface TokenResponse {

@@ -32,11 +32,11 @@ def get_current_user(
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
-    if user.deletion_requested_at is not None:
-        # Pending deletion (3.5): the account only comes back by logging in again.
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account is scheduled for deletion")
     if token_version != user.token_version:
         # Issued before a deletion request (which bumps the version), even if
-        # that request has since been cancelled by logging in again.
+        # that request has since been cancelled by logging in again. This also
+        # covers a pending-deletion account (3.5): the bump and the pending
+        # state happen together, and the only way back is logging in, which
+        # cancels the deletion and issues a token at the new version.
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
     return user

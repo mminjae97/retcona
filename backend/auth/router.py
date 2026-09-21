@@ -36,6 +36,11 @@ def _issue_access_token(user: User) -> str:
 DELETION_GRACE_PERIOD = timedelta(days=30)
 
 
+def _as_utc(value: datetime) -> datetime:
+    # The column is timestamptz; this only guards a driver that hands back a naive value.
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 def signup(body: SignupRequest, db: Session = Depends(get_db)) -> TokenResponse:
     if db.scalar(select(User).where(User.email == body.email)) is not None:
@@ -72,10 +77,15 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
         # round is safe without a lock: its token carries the old
         # token_version, which the request bumps, so it simply stops working.
         db.refresh(user, with_for_update=True)
-        deletion_cancelled = user.deletion_requested_at is not None
-        user.deletion_requested_at = None
-        db.commit()
-        db.refresh(user)
+        if user.deletion_requested_at is not None:
+            if datetime.now(timezone.utc) >= _as_utc(user.deletion_requested_at) + DELETION_GRACE_PERIOD:
+                # Past the grace period the account can no longer be recovered
+                # (3.5), even if the purge job hasn't got to it yet.
+                raise HTTPException(status.HTTP_410_GONE, "Account deletion grace period has passed")
+            user.deletion_requested_at = None
+            deletion_cancelled = True
+            db.commit()
+            db.refresh(user)
 
     return TokenResponse(
         access_token=_issue_access_token(user),
@@ -120,16 +130,22 @@ def request_deletion(
         # expired session.
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Incorrect password")
 
-    # Re-read under a row lock so two concurrent requests can't each stamp
-    # their own timestamp, pushing the purge date out.
+    # Re-read under a row lock, and re-check the token_version that
+    # get_current_user matched the token against before the lock: if a
+    # concurrent request already revoked this token's generation (and a login
+    # may have cancelled that deletion since), this one must not start a
+    # second deletion with a token that is no longer valid.
+    token_version = current_user.token_version
     db.refresh(current_user, with_for_update=True)
-    if current_user.deletion_requested_at is None:
-        current_user.deletion_requested_at = datetime.now(timezone.utc)
-        # Kills every token issued so far for good, even if a later login
-        # cancels the deletion (see get_current_user).
-        current_user.token_version += 1
-        db.commit()
-        db.refresh(current_user)
+    if current_user.token_version != token_version:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
+
+    current_user.deletion_requested_at = datetime.now(timezone.utc)
+    # Kills every token issued so far for good, even if a later login
+    # cancels the deletion (see get_current_user).
+    current_user.token_version += 1
+    db.commit()
+    db.refresh(current_user)
 
     return DeletionResponse(
         deletion_requested_at=current_user.deletion_requested_at,

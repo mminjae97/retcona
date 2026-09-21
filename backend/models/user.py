@@ -31,3 +31,8 @@ class User(Base, TimestampMixin):
     password_hash: Mapped[str | None] = mapped_column(String)
     deletion_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+    @property
+    def has_password(self) -> bool:
+        # False for social-login accounts, which re-authenticate with their provider instead (3.5).
+        return self.password_hash is not None
