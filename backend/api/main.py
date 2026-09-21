@@ -50,15 +50,18 @@ async def _purge_pass() -> None:
 
 
 async def _purge_daily() -> None:
-    for delay in purge_schedule(PURGE_STARTUP_DELAY_SECONDS):
+    schedule = purge_schedule(PURGE_STARTUP_DELAY_SECONDS)
+    while True:
         try:
-            await asyncio.sleep(delay)
+            await asyncio.sleep(next(schedule))
             await _purge_pass()
         except Exception:
             # Anything that would end this task (it is only awaited at shutdown,
-            # so it would die unnoticed and the purge never run again).
+            # so it would die unnoticed and the purge never run again) —
+            # including the schedule itself failing. A generator that raised is
+            # finished, so start a new schedule: the retry delay, then midnights.
             logger.exception("Account purge schedule failed")
-            await asyncio.sleep(PURGE_RETRY_SECONDS)
+            schedule = purge_schedule(PURGE_RETRY_SECONDS)
 
 
 @asynccontextmanager

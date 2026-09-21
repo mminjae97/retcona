@@ -101,7 +101,9 @@ export default function LoginPage() {
       }
       // Back to the page the ended session was on, but only for that same
       // account: someone else signing in there would land on a page that isn't theirs.
-      const sameAccount = expiredUserId === null || signedInUser?.id === expiredUserId;
+      // If a session had ended but whose is unknown (it began before the id was
+      // remembered), it isn't taken back either.
+      const sameAccount = !sessionEnded || (expiredUserId !== null && signedInUser?.id === expiredUserId);
       navigate(sameAccount ? (returnTo ?? "/") : "/");
     } catch (err) {
       setError(describeError(err));

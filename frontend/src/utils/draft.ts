@@ -195,6 +195,18 @@ export function listOtherDrafts(episodeId: string): StoredDraft[] {
   return found.sort((a, b) => b.savedAt - a.savedAt);
 }
 
+// Drops the parsed copies of this episode's other drafts held for the list. Called
+// when the editor is left; the (small) slot and owner records stay, because a
+// save still in flight refers to them when it completes.
+export function releaseDraftCache(episodeId: string): void {
+  const userId = ownerOf(episodeId);
+  if (userId === null) return;
+  const prefix = episodePrefix(userId, episodeId);
+  for (const key of parsedByKey.keys()) {
+    if (key.startsWith(prefix)) parsedByKey.delete(key);
+  }
+}
+
 export function discardDraft(key: string): void {
   if (!key.startsWith(DRAFT_PREFIX)) return;
   storageRemove(key);
