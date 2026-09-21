@@ -6,7 +6,7 @@ import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { login, signup } from "../api/auth";
 import { ApiError, describeError as describeApiError } from "../api/client";
-import { isValidNickname } from "../utils/nickname";
+import { clampNickname, isValidNickname, stripNickname } from "../utils/nickname";
 import "./LoginPage.css";
 
 type Mode = "login" | "signup";
@@ -55,7 +55,7 @@ export default function LoginPage() {
         // Validate against the trimmed length, matching the backend's
         // strip-then-check rule (3.6) — the native minLength attribute
         // checks the raw, untrimmed value and would let e.g. "a " through.
-        const trimmedNickname = nickname.trim();
+        const trimmedNickname = stripNickname(nickname);
         if (!isValidNickname(trimmedNickname)) {
           setError("필명은 공백을 제외하고 2~20자로 입력해주세요.");
           return;
@@ -120,11 +120,8 @@ export default function LoginPage() {
             <input
               type="text"
               value={nickname}
-              onChange={(e) => setNickname(e.target.value)}
+              onChange={(e) => setNickname(clampNickname(e.target.value))}
               required
-              // 20 code points can take up to 40 UTF-16 units, which is what
-              // maxLength counts — the exact 2~20 check is isValidNickname's.
-              maxLength={40}
             />
           </label>
         )}

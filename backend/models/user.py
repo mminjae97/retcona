@@ -4,15 +4,16 @@
 - provider/provider_id: social login identity (3.1)
 - password_hash: bcrypt hash for direct login (3.1)
 - deletion_requested_at: when account deletion was requested; 30-day grace period (3.5)
-- sessions_valid_after: tokens issued before this moment are rejected. Set when
-  deletion is requested and deliberately NOT cleared when a re-login cancels it,
-  so tokens from before the request stay dead for good.
+- token_version: embedded in every token as the `ver` claim; a token is only
+  accepted while it matches. Bumped when deletion is requested and never reset
+  (a re-login that cancels the deletion keeps the new value), so tokens from
+  before the request stay dead for good.
 """
 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String
+from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,4 +30,4 @@ class User(Base, TimestampMixin):
     provider_id: Mapped[str | None] = mapped_column(String)
     password_hash: Mapped[str | None] = mapped_column(String)
     deletion_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    sessions_valid_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")

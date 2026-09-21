@@ -6,7 +6,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { getMe, requestAccountDeletion, updateNickname } from "../api/auth";
 import type { UserPublic } from "../api/auth";
 import { ApiError, describeError } from "../api/client";
-import { isValidNickname } from "../utils/nickname";
+import { clampNickname, isValidNickname, stripNickname } from "../utils/nickname";
 import { createNovel, deleteNovel, listNovels, renameNovel } from "../api/novels";
 import type { NovelPublic } from "../api/novels";
 import "./MyPage.css";
@@ -120,7 +120,7 @@ export default function MyPage() {
     if (savingNickname) return;
     // Validate the trimmed value in code points, matching the backend's
     // strip-then-check rule (3.6).
-    const trimmed = nicknameValue.trim();
+    const trimmed = stripNickname(nicknameValue);
     if (!isValidNickname(trimmed)) {
       setNicknameError("필명은 공백을 제외하고 2~20자로 입력해주세요.");
       return;
@@ -201,10 +201,7 @@ export default function MyPage() {
                   <input
                     type="text"
                     value={nicknameValue}
-                    onChange={(e) => setNicknameValue(e.target.value)}
-                    // 20 code points can take up to 40 UTF-16 units, which is what
-                    // maxLength counts — the exact 2~20 check is isValidNickname's.
-                    maxLength={40}
+                    onChange={(e) => setNicknameValue(clampNickname(e.target.value))}
                     autoFocus
                   />
                   <button type="submit" disabled={savingNickname}>

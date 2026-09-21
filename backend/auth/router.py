@@ -27,6 +27,11 @@ from models.user import User
 
 router = APIRouter()
 
+def _issue_access_token(user: User) -> str:
+    # `ver` ties the token to users.token_version so a deletion request can revoke it.
+    return issue_token(str(user.id), {"ver": user.token_version})
+
+
 # Grace period between a deletion request and permanent deletion (3.5).
 DELETION_GRACE_PERIOD = timedelta(days=30)
 
@@ -45,7 +50,7 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)) -> TokenResponse:
         raise HTTPException(status.HTTP_409_CONFLICT, "Email is already registered")
     db.refresh(user)
 
-    return TokenResponse(access_token=issue_token(str(user.id)), user=UserPublic.model_validate(user))
+    return TokenResponse(access_token=_issue_access_token(user), user=UserPublic.model_validate(user))
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -58,25 +63,25 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     if user is None or user.password_hash is None or not password_ok:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
 
-    # Re-read under a row lock (after the slow password check, so it isn't
-    # held during hashing) so this serializes with request_deletion: either
-    # the deletion committed first and this login cancels it, or the login
-    # committed first and its token predates the deletion and is invalidated
-    # by it — never a token issued for an account that was just marked
-    # pending.
-    db.refresh(user, with_for_update=True)
-    deletion_cancelled = user.deletion_requested_at is not None
-    if deletion_cancelled:
+    deletion_cancelled = False
+    if user.deletion_requested_at is not None:
         # Logging back in during the grace period cancels the deletion (3.5).
+        # Re-checked under a row lock so two concurrent logins can't both
+        # claim the cancellation. Only this path locks; the common login
+        # writes nothing. A login racing a request_deletion the other way
+        # round is safe without a lock: its token carries the old
+        # token_version, which the request bumps, so it simply stops working.
+        db.refresh(user, with_for_update=True)
+        deletion_cancelled = user.deletion_requested_at is not None
         user.deletion_requested_at = None
-    # Snapshot before commit(), which expires the instance and would make the
-    # validation below re-query; commit() (even with nothing to write) also
-    # releases the row lock.
-    access_token = issue_token(str(user.id))
-    user_public = UserPublic.model_validate(user)
-    db.commit()
+        db.commit()
+        db.refresh(user)
 
-    return TokenResponse(access_token=access_token, user=user_public, deletion_cancelled=deletion_cancelled)
+    return TokenResponse(
+        access_token=_issue_access_token(user),
+        user=UserPublic.model_validate(user),
+        deletion_cancelled=deletion_cancelled,
+    )
 
 
 @router.get("/me", response_model=UserPublic)
@@ -119,11 +124,10 @@ def request_deletion(
     # their own timestamp, pushing the purge date out.
     db.refresh(current_user, with_for_update=True)
     if current_user.deletion_requested_at is None:
-        now = datetime.now(timezone.utc)
-        current_user.deletion_requested_at = now
-        # Kills every token issued before this request for good, even if a
-        # later login cancels the deletion (see get_current_user).
-        current_user.sessions_valid_after = now
+        current_user.deletion_requested_at = datetime.now(timezone.utc)
+        # Kills every token issued so far for good, even if a later login
+        # cancels the deletion (see get_current_user).
+        current_user.token_version += 1
         db.commit()
         db.refresh(current_user)
 

@@ -353,7 +353,7 @@ flowchart TD
     N --> CF[contradiction_flags]
 ```
 
-- **users**: 계정 정보 (id, email, `nickname` — 필명, provider, provider_id, password_hash, created_at, `deletion_requested_at` — 회원 탈퇴 접수 시각, 3.5 참고)
+- **users**: 계정 정보 (id, email, `nickname` — 필명, provider, provider_id, password_hash, created_at, `deletion_requested_at` — 회원 탈퇴 접수 시각, 3.5 참고, `token_version` — 토큰에 담기는 `ver` 클레임과 일치해야 토큰이 유효하며, 탈퇴 접수 시 1 증가하고 탈퇴가 취소돼도 되돌리지 않음 — 접수 이전에 발급된 토큰을 영구히 폐기하기 위함)
 - **novels**: 작품 정보 (id, user_id FK, title, created_at, `deleted_at` — 작품 소프트 삭제 시각, 2.6의 작품 삭제 기능에서 사용) — 한 계정이 여러 작품 소유 가능
 - 아래 모든 엔티티 테이블은 `novel_id` FK를 가지며, 모든 조회·쓰기 쿼리는 반드시 `novel_id`로 필터링한다 (애플리케이션 레이어에서 강제)
 

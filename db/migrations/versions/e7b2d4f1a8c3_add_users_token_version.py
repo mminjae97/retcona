@@ -1,4 +1,4 @@
-"""add users.sessions_valid_after
+"""add users.token_version
 
 Revision ID: e7b2d4f1a8c3
 Revises: cd25aa9ab9fa
@@ -15,8 +15,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column('users', sa.Column('sessions_valid_after', sa.DateTime(timezone=True), nullable=True))
+    op.add_column('users', sa.Column('token_version', sa.Integer(), server_default='0', nullable=False))
 
 
 def downgrade() -> None:
-    op.drop_column('users', 'sessions_valid_after')
+    op.drop_column('users', 'token_version')

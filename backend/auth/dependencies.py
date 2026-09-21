@@ -1,7 +1,6 @@
 """FastAPI dependency for resolving the authenticated user from a JWE bearer token (design doc 3.3)."""
 
 import uuid
-from datetime import timezone
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -25,7 +24,8 @@ def get_current_user(
     try:
         claims = decode_token(credentials.credentials)
         user_id = uuid.UUID(claims["sub"])
-        issued_at = int(claims["iat"])
+        # Tokens minted before `ver` existed count as version 0.
+        token_version = int(claims.get("ver", 0))
     except (JWEError, JWTError, ValueError, KeyError) as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token") from exc
 
@@ -35,14 +35,8 @@ def get_current_user(
     if user.deletion_requested_at is not None:
         # Pending deletion (3.5): the account only comes back by logging in again.
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account is scheduled for deletion")
-    # Compared in whole seconds since `iat` has no sub-second part: a token
-    # minted by a re-login in the same second as the deletion request must
-    # still be accepted, at the cost of one issued in the last instant before
-    # the request surviving.
-    valid_after = user.sessions_valid_after
-    if valid_after is not None:
-        if valid_after.tzinfo is None:  # the column is timestamptz; this only guards a driver that drops the zone
-            valid_after = valid_after.replace(tzinfo=timezone.utc)
-        if issued_at < int(valid_after.timestamp()):
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
+    if token_version != user.token_version:
+        # Issued before a deletion request (which bumps the version), even if
+        # that request has since been cancelled by logging in again.
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
     return user
