@@ -13,22 +13,30 @@ def _normalize_email(value: str) -> str:
     return value.lower()
 
 
-# What a pen name may contain (3.6): letters, combining marks, numbers,
-# punctuation, spaces and math/currency/modifier symbols, from the Basic
-# Multilingual Plane only. That leaves out emoji and other pictographs
-# (category "So", or outside the BMP), format and control characters (zero-width
-# joiner, zero-width space, NUL) and rare astral characters. The frontend applies
-# the same rule (utils/nickname.ts). Every allowed character is one UTF-16 unit,
-# so len() here and String.length there agree.
-_NICKNAME_CATEGORIES = {"Mn", "Mc", "Zs", "Sm", "Sc", "Sk"}
-_NICKNAME_CATEGORY_LETTERS = {"L", "N", "P"}
+# What a pen name may contain (3.6): letters, numbers, combining marks and the
+# ordinary space, from the Basic Multilingual Plane only. Everything else is out:
+# emoji and other pictographs, punctuation and symbols, other kinds of space,
+# format and control characters (zero-width joiner, NUL, ...) and rare astral
+# characters. The frontend applies the same rule (utils/nickname.ts). Every
+# allowed character is one UTF-16 unit, so len() here and String.length there
+# agree.
+_NICKNAME_MARK_CATEGORIES = {"Mn", "Mc"}
+# Letters or marks that render as nothing (fillers, joiners, variation
+# selectors); they'd let a name look blank or hide characters.
+_NICKNAME_INVISIBLE = (
+    {chr(code) for code in (0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x180F, 0x3164, 0xFFA0)}
+    | {chr(code) for code in range(0x180B, 0x180E)}
+    | {chr(code) for code in range(0xFE00, 0xFE10)}
+)
 
 
 def _is_allowed_nickname_char(char: str) -> bool:
-    if ord(char) > 0xFFFF:
+    if ord(char) > 0xFFFF or char in _NICKNAME_INVISIBLE:
         return False
+    if char == " ":
+        return True
     category = unicodedata.category(char)
-    return category in _NICKNAME_CATEGORIES or category[0] in _NICKNAME_CATEGORY_LETTERS
+    return category[0] in ("L", "N") or category in _NICKNAME_MARK_CATEGORIES
 
 
 def _strip_nickname(value: str) -> str:
@@ -38,9 +46,12 @@ def _strip_nickname(value: str) -> str:
     if not 2 <= len(value) <= 20:
         raise ValueError("Nickname must be 2-20 characters")
     # Also what keeps NUL out (Postgres text columns reject it: a 500 from the
-    # INSERT/UPDATE instead of a 422 here) along with emoji.
+    # INSERT/UPDATE instead of a 422 here) along with emoji and symbols.
     if not all(_is_allowed_nickname_char(char) for char in value):
-        raise ValueError("Nickname must not contain emoji, special symbols or control characters")
+        raise ValueError("Nickname may only contain letters, numbers and spaces")
+    # Marks only attach to something; a name made of nothing else would render blank.
+    if not any(unicodedata.category(char)[0] in ("L", "N") for char in value):
+        raise ValueError("Nickname must contain at least one letter or number")
     return value
 
 

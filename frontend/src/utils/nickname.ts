@@ -14,21 +14,25 @@ export function stripNickname(value: string): string {
   return value.replace(PY_STRIP, "");
 }
 
-// What a pen name may contain: letters, combining marks, numbers, punctuation,
-// spaces and math/currency/modifier symbols, from the Basic Multilingual Plane
-// only. That leaves out emoji and other pictographs (category "other symbol",
-// or outside the BMP), format and control characters (zero-width joiner,
-// zero-width space, NUL) and rare astral characters. The backend applies the
-// same rule by Unicode category. (Checked against it over every code point:
-// the only differences are characters so new that the server's Python doesn't
-// know them yet and rejects them, where this accepts them.)
+// What a pen name may contain: letters, numbers, combining marks and the
+// ordinary space, from the Basic Multilingual Plane only. Everything else is
+// out: emoji and other pictographs, punctuation and symbols, other kinds of
+// space, format and control characters (zero-width joiner, NUL, ...) and rare
+// astral characters — plus a few letters/marks that render as nothing
+// (fillers, joiners, variation selectors). The backend applies the same rule
+// by Unicode category. (Checked against it over every code point: the only
+// differences are characters so new that the server's Python doesn't know
+// them yet and rejects them, where this accepts them.)
 //
 // Every allowed character is a single UTF-16 unit, so `String.length` here is
 // the same count as the backend's `len()` and the input's native `maxLength`
 // is exact — no code-point bookkeeping needed.
-const DISALLOWED_SOURCE = String.raw`[^\p{L}\p{Mn}\p{Mc}\p{N}\p{P}\p{Zs}\p{Sm}\p{Sc}\p{Sk}]|[\u{10000}-\u{10FFFF}]`;
+const DISALLOWED_SOURCE = String.raw`[^\p{L}\p{N}\p{Mn}\p{Mc} ]|[\u{10000}-\u{10FFFF}]|[\u034F\u115F\u1160\u17B4\u17B5\u180B-\u180D\u180F\u3164\uFFA0\uFE00-\uFE0F]`;
 const DISALLOWED_ALL = new RegExp(DISALLOWED_SOURCE, "gu");
 const DISALLOWED_ANY = new RegExp(DISALLOWED_SOURCE, "u");
+const HAS_LETTER_OR_NUMBER = /[\p{L}\p{N}]/u;
+
+export const NICKNAME_HINT = "글자·숫자·공백만, 2~20자";
 
 export function sanitizeNickname(value: string): string {
   return value.replace(DISALLOWED_ALL, "");
@@ -37,7 +41,9 @@ export function sanitizeNickname(value: string): string {
 // The message to show for a nickname that can't be submitted, or null if it's fine.
 export function getNicknameError(value: string): string | null {
   const stripped = stripNickname(value);
-  if (DISALLOWED_ANY.test(stripped)) return "필명에는 이모지나 특수 기호를 쓸 수 없습니다.";
+  if (DISALLOWED_ANY.test(stripped) || !HAS_LETTER_OR_NUMBER.test(stripped)) {
+    return "필명에는 글자·숫자·공백만 쓸 수 있습니다. 이모지와 특수 기호는 사용할 수 없습니다.";
+  }
   if (stripped.length < NICKNAME_MIN_LENGTH || stripped.length > NICKNAME_MAX_LENGTH) {
     return "필명은 공백을 제외하고 2~20자로 입력해주세요.";
   }
@@ -45,13 +51,14 @@ export function getNicknameError(value: string): string | null {
 }
 
 // Props for a controlled nickname <input>: characters that aren't allowed
-// (typed with an emoji keyboard, or pasted) are dropped as they arrive. While
+// (symbols, or emoji from an emoji keyboard or a paste) are dropped as they arrive. While
 // an IME is composing, the input's value holds an uncommitted syllable and
 // rewriting it can drop or duplicate jamo in some browsers, so it's cleaned
 // when composition ends instead. Length is left to the input's own `maxLength`.
 export function nicknameInputProps(setValue: (value: string) => void) {
   return {
     maxLength: NICKNAME_MAX_LENGTH,
+    placeholder: NICKNAME_HINT,
     onChange: (e: ChangeEvent<HTMLInputElement>) => {
       const composing = (e.nativeEvent as InputEvent).isComposing;
       setValue(composing ? e.target.value : sanitizeNickname(e.target.value));
