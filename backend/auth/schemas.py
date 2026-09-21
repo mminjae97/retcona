@@ -75,7 +75,16 @@ def _strip_nickname(value: str) -> str:
 
 
 # Shared by every request that takes a pen name, so the rule lives in one place.
-Nickname = Annotated[str, Field(min_length=2), AfterValidator(_strip_nickname)]  # 2-20 chars after stripping (3.6)
+# The raw cap is generous (20 characters, each possibly decomposed into jamo or
+# carrying a few marks, plus padding) and only there so an unauthenticated
+# request can't make normalization chew through megabytes before the real 2-20
+# check rejects it.
+_NICKNAME_MAX_RAW_LENGTH = 200
+Nickname = Annotated[
+    str,
+    Field(min_length=2, max_length=_NICKNAME_MAX_RAW_LENGTH),
+    AfterValidator(_strip_nickname),  # 2-20 chars after stripping (3.6)
+]
 
 
 class SignupRequest(BaseModel):

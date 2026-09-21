@@ -92,13 +92,20 @@ def purge_once() -> int:
 
 def run(loop: bool = False, interval: float = 3600.0) -> None:
     logging.basicConfig(level=logging.INFO)
+    if not loop:
+        # A failure here should surface (non-zero exit for cron), and Ctrl-C keeps its default meaning.
+        logger.info("Purged %d account(s)", purge_once())
+        return
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())  # finish the current pass, then exit (10.4.4)
-    while True:
-        logger.info("Purged %d account(s)", purge_once())
-        if not loop or stop.wait(interval):
-            break
+    while not stop.is_set():
+        try:
+            logger.info("Purged %d account(s)", purge_once())
+        except Exception:
+            # e.g. the database is briefly unreachable: a long-lived worker retries next interval.
+            logger.exception("Purge pass failed")
+        stop.wait(interval)
 
 
 if __name__ == "__main__":

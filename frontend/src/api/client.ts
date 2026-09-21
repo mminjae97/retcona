@@ -5,22 +5,34 @@ const BASE_URL = "/api";
 const TOKEN_STORAGE_KEY = "retcona_token";
 
 // Storage can be blocked (site data disabled, some private modes) and then
-// throws on access. Reading treats that as "no token"; this runs while the
-// module loads, where a throw would take the whole app down with it.
+// throws on access. Reading treats that as "no stored token"; this runs while
+// the module loads, where a throw would take the whole app down with it.
 export function getToken(): string | null {
   try {
     return localStorage.getItem(TOKEN_STORAGE_KEY);
   } catch {
-    return null;
+    return memoryToken;
   }
 }
 
+// Only holds a token when storage refused it, so the login that just went
+// through (the server has already acted on it, e.g. cancelled a pending
+// deletion) still gives a session for this page load instead of reporting a
+// failure. Never set while storage works, so another tab's logout isn't undone.
+let memoryToken: string | null = null;
+
 export function setToken(token: string): void {
   sessionSeen = true;
-  localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  try {
+    localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    memoryToken = null;
+  } catch {
+    memoryToken = token;
+  }
 }
 
 export function clearToken(): void {
+  memoryToken = null;
   try {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
   } catch {

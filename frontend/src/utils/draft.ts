@@ -68,13 +68,27 @@ function withSavedAt(draft: DraftInput): Draft {
   return { ...draft, savedAt: draft.savedAt ?? Date.now() };
 }
 
+// Set when the account is put up for deletion, cleared by the next login. While
+// it is there no draft is written, in any tab: an editor still open elsewhere
+// flushes its pending text as it unmounts (the 401 that ends its session
+// routes it away), which would otherwise bring back what was just wiped.
+const WIPED_KEY = "retcona_drafts_wiped";
+
+function draftsWiped(): boolean {
+  try {
+    return localStorage.getItem(WIPED_KEY) !== null;
+  } catch {
+    return true; // storage blocked: nothing could be written anyway
+  }
+}
+
 export function loadDraft(episodeId: string): Draft | null {
   const value = readJson(DRAFT_PREFIX + episodeId);
   return isDraft(value) ? value : null;
 }
 
 export const saveDraft = (episodeId: string, draft: DraftInput): boolean =>
-  writeJson(DRAFT_PREFIX + episodeId, withSavedAt({ writer: TAB_ID, ...draft }));
+  !draftsWiped() && writeJson(DRAFT_PREFIX + episodeId, withSavedAt({ writer: TAB_ID, ...draft }));
 
 export const clearDraft = (episodeId: string): void => remove(DRAFT_PREFIX + episodeId);
 
@@ -89,6 +103,7 @@ export function loadConflictDrafts(episodeId: string): Draft[] {
 }
 
 export function addConflictDraft(episodeId: string, draft: DraftInput): boolean {
+  if (draftsWiped()) return false;
   const drafts = loadConflictDrafts(episodeId);
   if (drafts.some((d) => d.content === draft.content)) return true; // already parked
   if (drafts.length >= MAX_CONFLICT_DRAFTS) return false;
@@ -114,9 +129,22 @@ function draftKeys(): string[] {
   return keys;
 }
 
-// Manuscript text shouldn't outlive the account on a shared machine.
-export function clearAllDrafts(): void {
+// Manuscript text shouldn't outlive the account on a shared machine. Called
+// once the deletion request has gone through; logging in again within the grace
+// period cancels the deletion, but unsaved drafts are not brought back.
+export function discardDraftsForDeletion(): void {
+  // Marker first, so a write racing with the removal below is refused.
+  try {
+    localStorage.setItem(WIPED_KEY, String(Date.now()));
+  } catch {
+    // storage blocked: see draftsWiped()
+  }
   draftKeys().forEach(remove);
+}
+
+// A login starts a fresh session, so drafts are written again.
+export function resumeDrafts(): void {
+  remove(WIPED_KEY);
 }
 
 // Runs the prune once the browser is idle rather than during startup: it has

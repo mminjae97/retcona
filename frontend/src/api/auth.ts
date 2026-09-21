@@ -1,6 +1,7 @@
 // Auth API calls (design doc 3.1, 3.5, 3.6) — email/password signup and login,
 // nickname change, account deletion request.
 
+import { discardDraftsForDeletion, resumeDrafts } from "../utils/draft";
 import { apiFetch, clearToken, setToken } from "./client";
 
 export interface UserPublic {
@@ -24,6 +25,7 @@ export async function signup(email: string, password: string, nickname: string):
     body: JSON.stringify({ email, password, nickname }),
   });
   setToken(res.access_token);
+  resumeDrafts();
   return res.user;
 }
 
@@ -40,6 +42,7 @@ export async function login(email: string, password: string): Promise<LoginResul
     body: JSON.stringify({ email, password }),
   });
   setToken(res.access_token);
+  resumeDrafts();
   return { user: res.user, deletionCancelled: res.deletion_cancelled };
 }
 
@@ -62,11 +65,14 @@ export interface DeletionResult {
 // The backend rejects the old token as soon as the request goes through (a
 // pending-deletion account is only reachable by logging in again, 3.5), so
 // the stored token is dropped here rather than left to fail on the next call.
+// The user was just told their data is being deleted, so unsaved manuscript
+// drafts must not linger in this browser (shared machines) either.
 export async function requestAccountDeletion(password: string): Promise<DeletionResult> {
   const result = await apiFetch<DeletionResult>("/auth/me/deletion", {
     method: "POST",
     body: JSON.stringify({ password }),
   });
+  discardDraftsForDeletion();
   clearToken();
   return result;
 }
