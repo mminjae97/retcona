@@ -9,7 +9,7 @@
 // or earlier loads left are listed on the page and the author loads whichever one they want.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ensureUserId } from "../api/auth";
+import { fetchCurrentUserId } from "../api/auth";
 import { describeError } from "../api/client";
 import { getEpisode, saveEpisode } from "../api/episodes";
 import type { EpisodePublic } from "../api/episodes";
@@ -19,7 +19,6 @@ import {
   discardDraft,
   isDraftEventFor,
   listOtherDrafts,
-  loadDraft,
   saveDraft,
   startDraftSlot,
 } from "../utils/draft";
@@ -114,6 +113,17 @@ export default function EditorPage() {
   const serverContentRef = useRef("");
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftPendingRef = useRef<{ episodeId: string; content: string } | null>(null);
+  // What this session's own draft of each episode holds, so a confirmed save can
+  // be compared against it without reading the whole manuscript back out of storage.
+  const ownDraftRef = useRef(new Map<string, string>());
+
+  // The server's version of the current episode, kept in one place: the refs
+  // are what the debounced writes read, the state is what the page draws from.
+  const setServerVersion = useCallback((updatedAt: string, content: string) => {
+    serverUpdatedAtRef.current = updatedAt;
+    serverContentRef.current = content;
+    setServerUpdatedAt(updatedAt);
+  }, []);
 
   // Re-reads the other sessions' drafts. What the server already holds is
   // nothing left to offer, so it is dropped rather than listed.
@@ -126,16 +136,23 @@ export default function EditorPage() {
     setOtherDrafts(next);
   }, []);
 
-  const refreshOtherDrafts = useCallback(() => {
-    const id = currentEpisodeIdRef.current;
-    if (!id) return;
-    const unsaved = listOtherDrafts(id).filter((d) => {
-      if (d.content !== serverContentRef.current) return true;
-      discardDraft(d.key);
-      return false;
-    });
-    showOtherDrafts(unsaved);
-  }, [showOtherDrafts]);
+  // `serverIsCurrent`: the server's content was just read or written by this tab.
+  // Only then is a draft equal to it deleted; otherwise it is merely left out of
+  // the list, because this tab's copy of the server's content may be stale
+  // (another tab has saved since) and the draft may be unsaved work.
+  const refreshOtherDrafts = useCallback(
+    (serverIsCurrent = false) => {
+      const id = currentEpisodeIdRef.current;
+      if (!id) return;
+      const unsaved = listOtherDrafts(id).filter((d) => {
+        if (d.content !== serverContentRef.current) return true;
+        if (serverIsCurrent) discardDraft(d.key);
+        return false;
+      });
+      showOtherDrafts(unsaved);
+    },
+    [showOtherDrafts],
+  );
 
   const flushDraft = useCallback(() => {
     if (draftTimerRef.current) {
@@ -149,6 +166,8 @@ export default function EditorPage() {
       content: pending.content,
       baseUpdatedAt: serverUpdatedAtRef.current,
     });
+    if (written) ownDraftRef.current.set(pending.episodeId, pending.content);
+    else ownDraftRef.current.delete(pending.episodeId);
     // If the write failed, the copy already in storage is older than what the
     // author has typed. Leaving it would let a later save "rebase" it onto
     // the new server version and offer it as if it were current — no draft
@@ -169,7 +188,7 @@ export default function EditorPage() {
       const id = currentEpisodeIdRef.current;
       if (!id || !isDraftEventFor(id, e.key)) return;
       if (refreshTimer) clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(refreshOtherDrafts, OTHER_DRAFTS_REFRESH_DEBOUNCE_MS);
+      refreshTimer = setTimeout(() => refreshOtherDrafts(), OTHER_DRAFTS_REFRESH_DEBOUNCE_MS);
     };
     window.addEventListener("pagehide", flushDraft);
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -202,23 +221,20 @@ export default function EditorPage() {
           // Before the mounted/seq checks below: whether the local backup is
           // still needed depends only on what the server now holds, even if
           // this component has since moved on to another episode.
-          if (targetEpisodeId === currentEpisodeIdRef.current) {
-            serverUpdatedAtRef.current = updated.updated_at;
-            setServerUpdatedAt(updated.updated_at);
-            serverContentRef.current = updated.content;
-          }
+          if (targetEpisodeId === currentEpisodeIdRef.current) setServerVersion(updated.updated_at, updated.content);
           // Only this session's own draft is touched: another tab's says
           // nothing about which version *its* text was based on.
-          const draft = loadDraft(targetEpisodeId);
-          if (draft) {
-            if (draft.content === updated.content) {
+          const ownContent = ownDraftRef.current.get(targetEpisodeId);
+          if (ownContent !== undefined) {
+            if (ownContent === updated.content) {
               clearDraft(targetEpisodeId);
+              ownDraftRef.current.delete(targetEpisodeId);
             } else {
               // Newer text was typed here while this save was in flight: keep
               // it, now based on the version this save produced. (If this
               // write fails the draft keeps its old base, so loading it later
               // is flagged as older than the server's copy.)
-              saveDraft(targetEpisodeId, { ...draft, baseUpdatedAt: updated.updated_at });
+              saveDraft(targetEpisodeId, { content: ownContent, baseUpdatedAt: updated.updated_at });
             }
           }
           if (targetEpisodeId === currentEpisodeIdRef.current) {
@@ -241,7 +257,7 @@ export default function EditorPage() {
           setSaveState("error");
         });
     },
-    [showOtherDrafts]
+    [showOtherDrafts, setServerVersion]
   );
 
   useEffect(() => {
@@ -265,12 +281,7 @@ export default function EditorPage() {
     setNotice(null);
     showOtherDrafts([]);
     currentEpisodeIdRef.current = episodeId;
-    serverUpdatedAtRef.current = "";
-    setServerUpdatedAt("");
-    serverContentRef.current = "";
-    // This load writes to a slot of its own; drafts an earlier load left stay
-    // in storage and show up in the list.
-    startDraftSlot(episodeId);
+    setServerVersion("", "");
     // Chained after saveChainRef instead of fired directly: a quick
     // A -> B -> A navigation queues a flush save for A (below, on this
     // effect's cleanup) that may still be in flight when this same episode
@@ -280,16 +291,21 @@ export default function EditorPage() {
     // save would silently drop the flushed edit.
     saveChainRef.current
       .catch(() => {})
-      .then(() => ensureUserId()) // drafts are keyed by account
-      .then(() => (cancelled ? null : getEpisode(novelId, episodeId)))
+      .then(() => fetchCurrentUserId()) // drafts are keyed by the account this token is for
+      .then((userId) => {
+        if (cancelled) return null;
+        // This load writes to a slot of its own; drafts an earlier load left
+        // stay in storage and show up in the list.
+        startDraftSlot(episodeId, userId);
+        ownDraftRef.current.delete(episodeId);
+        return getEpisode(novelId, episodeId);
+      })
       .then((ep) => {
         if (cancelled || ep === null) return;
-        serverUpdatedAtRef.current = ep.updated_at;
-        setServerUpdatedAt(ep.updated_at);
-        serverContentRef.current = ep.content;
+        setServerVersion(ep.updated_at, ep.content);
         setEpisode(ep);
         setContent(ep.content);
-        refreshOtherDrafts();
+        refreshOtherDrafts(true);
       })
       .catch((err) => {
         if (cancelled) return;

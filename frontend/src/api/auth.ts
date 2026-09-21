@@ -2,7 +2,7 @@
 // nickname change, account deletion request.
 
 import { discardDraftsForDeletion } from "../utils/draft";
-import { getUserId, setUserId } from "../utils/session";
+import { setUserId } from "../utils/session";
 import { apiFetch, clearToken, setToken } from "./client";
 
 export interface UserPublic {
@@ -49,11 +49,11 @@ export function getMe(): Promise<UserPublic> {
   return apiFetch<UserPublic>("/auth/me");
 }
 
-// The account's id for keying local drafts. Remembered at login; a session that
-// predates that (signed in before the id was stored) fetches it once.
-export async function ensureUserId(): Promise<string | null> {
-  const stored = getUserId();
-  if (stored !== null) return stored;
+// The id of the account the current token belongs to, for keying local drafts.
+// Asked of the server rather than read from what this browser remembers: that
+// is shared by every tab and may name whoever signed in last, not the account
+// this tab's token is for. Also refreshes the remembered id.
+export async function fetchCurrentUserId(): Promise<string | null> {
   try {
     const me = await getMe();
     setUserId(me.id);

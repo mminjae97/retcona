@@ -73,13 +73,23 @@ function newSlotId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-// This page load's slot for each episode it has opened.
+// This page load's slot for each episode it has opened, and the account that
+// session belongs to. The account is fixed when the session starts: the
+// remembered one is shared by every tab, so another tab signing in as someone
+// else must not redirect this session's drafts into that account's storage.
 const slots = new Map<string, string>();
+const owners = new Map<string, string | null>();
 
-// Called when the editor opens an episode: what an earlier session left in
-// storage stays put, and this session writes to a slot of its own.
-export function startDraftSlot(episodeId: string): void {
+// Called when the editor opens an episode, with the account it was opened for
+// (null: unknown, so no drafts). What an earlier session left in storage stays
+// put, and this session writes to a slot of its own.
+export function startDraftSlot(episodeId: string, userId: string | null): void {
   slots.set(episodeId, newSlotId());
+  owners.set(episodeId, userId);
+}
+
+function ownerOf(episodeId: string): string | null {
+  return owners.has(episodeId) ? (owners.get(episodeId) ?? null) : getUserId();
 }
 
 function currentSlot(episodeId: string): string {
@@ -109,7 +119,7 @@ function draftsWiped(userId: string): boolean {
 
 // This session's own draft of the episode.
 export function loadDraft(episodeId: string): Draft | null {
-  const userId = getUserId();
+  const userId = ownerOf(episodeId);
   return userId === null ? null : readDraft(ownKey(userId, episodeId));
 }
 
@@ -123,7 +133,7 @@ const ROOM_RETRY_MS = 30_000;
 const retryRoomAt = new Map<string, number>();
 
 export function saveDraft(episodeId: string, draft: DraftInput): boolean {
-  const userId = getUserId();
+  const userId = ownerOf(episodeId);
   if (userId === null || draftsWiped(userId)) return false;
   const key = ownKey(userId, episodeId);
   if (!slotsWithRoom.has(key)) {
@@ -140,7 +150,7 @@ export function saveDraft(episodeId: string, draft: DraftInput): boolean {
 }
 
 export function clearDraft(episodeId: string): void {
-  const userId = getUserId();
+  const userId = ownerOf(episodeId);
   if (userId !== null) storageRemove(ownKey(userId, episodeId));
 }
 
@@ -165,7 +175,7 @@ function readDraftCached(key: string): Draft | null {
 // Drafts of this episode that other sessions left (another tab, or an earlier
 // load of this one), newest first. This session's own draft is not included.
 export function listOtherDrafts(episodeId: string): StoredDraft[] {
-  const userId = getUserId();
+  const userId = ownerOf(episodeId);
   if (userId === null) return [];
   const own = ownKey(userId, episodeId);
   const prefix = episodePrefix(userId, episodeId);
@@ -210,7 +220,7 @@ function makeRoom(userId: string, episodeId: string): boolean {
 // Whether a storage event is about a draft of this episode (another tab wrote,
 // or removed, one); the editor refreshes its list on those.
 export function isDraftEventFor(episodeId: string, storageKey: string | null): boolean {
-  const userId = getUserId();
+  const userId = ownerOf(episodeId);
   if (userId === null) return false;
   // A storage event with no key means the whole storage was cleared.
   return storageKey === null || storageKey.startsWith(episodePrefix(userId, episodeId));

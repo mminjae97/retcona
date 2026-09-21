@@ -29,7 +29,7 @@ import signal
 import sys
 import threading
 from datetime import datetime, time, timedelta, timezone
-from typing import NamedTuple
+from typing import Iterator, NamedTuple
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, select
@@ -58,6 +58,16 @@ def seconds_until_next_midnight(now: datetime | None = None) -> float:
     # Subtract in UTC: aware datetimes sharing a tzinfo subtract as wall-clock
     # time, which is an hour off across a daylight-saving change.
     return (next_midnight.astimezone(timezone.utc) - local.astimezone(timezone.utc)).total_seconds()
+
+
+def purge_schedule(startup_delay: float) -> Iterator[float]:
+    """Seconds to wait before each pass: `startup_delay` before the first (a
+    pass right after startup catches up on a midnight the process wasn't alive
+    for — scaled to zero, restarted, redeployed), then until every following
+    midnight. Shared by the API server's loop and the standalone worker."""
+    yield startup_delay
+    while True:
+        yield seconds_until_next_midnight()
 
 
 class PurgeResult(NamedTuple):
@@ -131,15 +141,14 @@ def run(loop: bool = False) -> None:
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())  # finish the current pass, then exit (10.4.4)
-    # One pass right away (catching up on a midnight it wasn't running for), then one every midnight.
-    wait_seconds = 0.0
-    while not stop.wait(wait_seconds):
+    for delay in purge_schedule(startup_delay=0.0):
+        if stop.wait(delay):
+            break
         try:
             logger.info("Purged %d account(s), %d failed", *purge_once())
         except Exception:
             # e.g. the database is briefly unreachable: a long-lived worker retries at the next midnight.
             logger.exception("Purge pass failed")
-        wait_seconds = seconds_until_next_midnight()
 
 
 if __name__ == "__main__":

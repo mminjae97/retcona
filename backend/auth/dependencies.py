@@ -15,13 +15,10 @@ from models.user import User
 _bearer = HTTPBearer(auto_error=False)
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
-    db: Session = Depends(get_db),
-) -> User:
+def _token_claims(credentials: HTTPAuthorizationCredentials | None) -> tuple[uuid.UUID, int]:
+    """The user id and token version a bearer token carries, or a 401."""
     if credentials is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer token")
-
     try:
         claims = decode_token(credentials.credentials)
         user_id = uuid.UUID(claims["sub"])
@@ -29,8 +26,11 @@ def get_current_user(
         token_version = int(claims.get("ver", 0))
     except (JWEError, JWTError, ValueError, KeyError, TypeError) as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token") from exc
+    return user_id, token_version
 
-    user = db.get(User, user_id)
+
+def _require_usable(user: User | None, token_version: int) -> User:
+    """The user, if the token's claims still hold for them, else a 401."""
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
     if token_version != user.token_version:
@@ -43,6 +43,14 @@ def get_current_user(
         # the version bump that the deletion request happens to make.
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account is pending deletion")
     return user
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> User:
+    user_id, token_version = _token_claims(credentials)
+    return _require_usable(db.get(User, user_id), token_version)
 
 
 def lock_user(db: Session, user_id: uuid.UUID, *, shared: bool = False) -> User | None:
@@ -60,25 +68,26 @@ def lock_user(db: Session, user_id: uuid.UUID, *, shared: bool = False) -> User 
     )
 
 
-def lock_current_user(db: Session, current_user: User, *, shared: bool = False) -> None:
-    """Lock the caller's row and re-check what get_current_user matched before
-    the lock: if a concurrent request already revoked this token's generation
-    (or put the account up for deletion; a login may have cancelled that since),
-    the token is no longer valid and must not be used to change anything."""
+def lock_current_user(db: Session, current_user: User) -> None:
+    """Lock the caller's row exclusively and re-check what get_current_user
+    matched before the lock: if a concurrent request already revoked this
+    token's generation (or put the account up for deletion; a login may have
+    cancelled that since), the token is no longer valid and must not be used to
+    change anything. For endpoints that change the user row itself; taken after
+    any slow work (the deletion request checks the password first)."""
     # Read before locking: the re-read overwrites current_user in place.
     token_version = current_user.token_version
-    locked = lock_user(db, current_user.id, shared=shared)
-    if locked is None or locked.token_version != token_version or locked.deletion_requested_at is not None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
+    _require_usable(lock_user(db, current_user.id), token_version)
 
 
 def get_current_user_for_write(
-    current_user: User = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),
 ) -> User:
     """get_current_user for endpoints that change the user's data. The plain
     check reads without a lock, so a deletion request committing right after it
     would let the write go through on a token that is already revoked — and it
-    would survive if the user then logged in to cancel the deletion."""
-    lock_current_user(db, current_user, shared=True)
-    return current_user
+    would survive if the user then logged in to cancel the deletion. This reads
+    the row once, under a shared lock, and checks the token against that."""
+    user_id, token_version = _token_claims(credentials)
+    return _require_usable(lock_user(db, user_id, shared=True), token_version)

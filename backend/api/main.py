@@ -15,7 +15,7 @@ from api.episodes import router as episodes_router
 from api.novels import router as novels_router
 from auth.jwe import validate_keys
 from auth.router import router as auth_router
-from workers.purge import purge_once, seconds_until_next_midnight
+from workers.purge import purge_once, purge_schedule, seconds_until_next_midnight
 
 # uvicorn only sets up handlers for its own loggers, so this one is used to have
 # the purge's INFO line show up next to the server's own output.
@@ -34,6 +34,8 @@ def _purge_enabled() -> bool:
 
 # Let startup (migrations, warm-up) settle before the catch-up pass.
 PURGE_STARTUP_DELAY_SECONDS = 60.0
+# After the schedule itself failed, wait this long before carrying on.
+PURGE_RETRY_SECONDS = 3600.0
 
 
 async def _purge_pass() -> None:
@@ -48,15 +50,15 @@ async def _purge_pass() -> None:
 
 
 async def _purge_daily() -> None:
-    # One pass shortly after startup, then one every midnight. The startup pass
-    # is what catches up on a midnight this process wasn't alive for (scaled to
-    # zero, restarted, redeployed); without it a service that keeps being
-    # restarted around then might never purge.
-    await asyncio.sleep(PURGE_STARTUP_DELAY_SECONDS)
-    await _purge_pass()
-    while True:
-        await asyncio.sleep(seconds_until_next_midnight())
-        await _purge_pass()
+    for delay in purge_schedule(PURGE_STARTUP_DELAY_SECONDS):
+        try:
+            await asyncio.sleep(delay)
+            await _purge_pass()
+        except Exception:
+            # Anything that would end this task (it is only awaited at shutdown,
+            # so it would die unnoticed and the purge never run again).
+            logger.exception("Account purge schedule failed")
+            await asyncio.sleep(PURGE_RETRY_SECONDS)
 
 
 @asynccontextmanager
