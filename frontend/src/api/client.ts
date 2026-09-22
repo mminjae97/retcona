@@ -20,9 +20,10 @@ export function setToken(value: string, userId: string): void {
   sessionSeen = true;
   announceSignedIn(userId);
   tokenStore.set(value);
-  // A fresh token means any earlier expiry this page load already announced
-  // no longer applies to what's now stored.
-  lastExpiredToken = NOT_YET_EXPIRED;
+  // A fresh login means any earlier expiry this page load already announced
+  // no longer applies — a future 401 is about this new token, and deserves
+  // its own announcement.
+  expiryAnnounced = false;
 }
 
 export const clearToken = (): void => tokenStore.clear();
@@ -85,12 +86,15 @@ export interface AuthExpiredInfo {
 // request that carried one.
 let sessionSeen = getToken() !== null;
 
-// The token (possibly null, for an unauthenticated request) that the last
-// dispatched auth-expired event was for — so two concurrent requests that
-// both see the same dead token don't each fire their own event. Reset by
-// setToken, so a later expiry of a genuinely new token still fires.
-const NOT_YET_EXPIRED = Symbol("not-yet-expired");
-let lastExpiredToken: string | null | typeof NOT_YET_EXPIRED = NOT_YET_EXPIRED;
+// Whether an auth-expired event has already been dispatched for the current
+// (dead or absent) token, so a second, third, ... 401 — whether it's another
+// concurrent request on the same now-cleared token, or a later request that
+// started only after clearToken() had already run and so carried no token at
+// all — doesn't each fire its own event. Not keyed by the specific token
+// value: once the session is known to be over, every further 401 is the same
+// news, however it's shaped. Reset by setToken, so a later expiry of a
+// genuinely new token still fires.
+let expiryAnnounced = false;
 
 // Fired when an authenticated call comes back 401: the token expired, was
 // revoked (e.g. by an account-deletion request from another device, 3.5), or
@@ -124,12 +128,8 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
   // session is over and the event still needs to fire.
   const currentToken = getToken();
   const supersededByFresherLogin = currentToken !== null && currentToken !== token;
-  // Also skips a second concurrent request that hit 401 on this same (now
-  // dead) token: the first one to get here already cleared it and fired the
-  // event, so this one would otherwise announce the same expiry twice.
-  const alreadyAnnounced = token === lastExpiredToken;
-  if (res.status === 401 && !supersededByFresherLogin && !alreadyAnnounced && !AUTH_ENTRY_PATHS.includes(path)) {
-    lastExpiredToken = token;
+  if (res.status === 401 && !supersededByFresherLogin && !expiryAnnounced && !AUTH_ENTRY_PATHS.includes(path)) {
+    expiryAnnounced = true;
     clearToken();
     window.dispatchEvent(new CustomEvent<AuthExpiredInfo>(AUTH_EXPIRED_EVENT, { detail: { sessionEnded: sessionSeen } }));
   }

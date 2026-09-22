@@ -117,14 +117,14 @@ export default function MyPage() {
   async function handleRename(e: FormEvent, id: string) {
     e.preventDefault();
     if (renameEdit.saving || !renameEdit.value.trim()) return;
-    setError(null);
+    renameEdit.setError(null);
     renameEdit.setSaving(true);
     try {
       const updated = await renameNovel(id, renameEdit.value);
       setNovels((prev) => prev?.map((n) => (n.id === id ? updated : n)) ?? null);
       renameEdit.cancel();
     } catch (err) {
-      setError(describeError(err));
+      renameEdit.setError(describeError(err));
     } finally {
       renameEdit.setSaving(false);
     }
@@ -301,6 +301,7 @@ export default function MyPage() {
                     <button type="button" onClick={renameEdit.cancel}>
                       취소
                     </button>
+                    {renameEdit.error && <p className="mypage-error">{renameEdit.error}</p>}
                   </form>
                 ) : (
                   <>

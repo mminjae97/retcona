@@ -49,7 +49,7 @@ const HAS_LETTER_OR_NUMBER = /[\p{L}\p{N}]/u;
 const MAX_MARKS = nicknameRules.maxMarks;
 const BAD_MARKS = new RegExp(`[\\p{Mn}\\p{Mc}]{${MAX_MARKS + 1},}|(?:^| )[\\p{Mn}\\p{Mc}]`, "u");
 
-export const NICKNAME_HINT = "글자·숫자·공백만, 2~20자";
+export const NICKNAME_HINT = `글자·숫자·공백만, ${NICKNAME_MIN_LENGTH}~${NICKNAME_MAX_LENGTH}자`;
 
 export function sanitizeNickname(value: string): string {
   return value.replace(DISALLOWED_ALL, "");
@@ -58,7 +58,7 @@ export function sanitizeNickname(value: string): string {
 // The message to show for a nickname that can't be submitted, or null if it's fine.
 export function getNicknameError(value: string): string | null {
   const stripped = stripNickname(value);
-  const lengthMessage = "필명은 공백을 제외하고 2~20자로 입력해주세요.";
+  const lengthMessage = `필명은 공백을 제외하고 ${NICKNAME_MIN_LENGTH}~${NICKNAME_MAX_LENGTH}자로 입력해주세요.`;
   // Nothing typed (or only spaces): a length problem, not a character problem.
   if (stripped.length === 0) return lengthMessage;
   if (DISALLOWED_ANY.test(stripped) || !HAS_LETTER_OR_NUMBER.test(stripped) || BAD_MARKS.test(stripped)) {

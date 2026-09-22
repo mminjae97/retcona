@@ -245,15 +245,16 @@ export default function EditorPage() {
         .catch(() => {})
         .then(() => saveEpisode(targetNovelId, targetEpisodeId, nextContent))
         .then((updated) => {
-          // One criterion for "is this response still the one to act on":
-          // seq alone, not episode identity — the load effect already bumps
-          // saveSeqRef.current on every episode change, so seq covers that
-          // case too, and also (unlike the episode check) catches a second
-          // save for the *same* episode resolving out of order, which would
-          // otherwise let this older response's server version clobber the
-          // newer one the second save just set.
-          const isLatestSave = seq === saveSeqRef.current;
-          if (isLatestSave) setServerVersion(updated.updated_at, updated.content);
+          // Episode identity, not seq: saveChainRef fully serializes calls (a
+          // second save's saveEpisode() doesn't even start until this whole
+          // .then() has run), so responses can never arrive out of order —
+          // seq would false-skip this block whenever a next save has already
+          // been *called* (even if still queued behind this one), which is
+          // the common case for back-to-back saves, not a rare race.
+          // Whether the local backup is still needed depends only on what the
+          // server now holds, even if this component has since moved on to
+          // another episode.
+          if (targetEpisodeId === currentEpisodeIdRef.current) setServerVersion(updated.updated_at, updated.content);
           // Only this session's own draft is touched: another tab's says
           // nothing about which version *its* text was based on.
           const ownContent = ownDraftRef.current.get(targetEpisodeId);
@@ -269,7 +270,7 @@ export default function EditorPage() {
               saveDraft(targetEpisodeId, { content: ownContent, baseUpdatedAt: updated.updated_at });
             }
           }
-          if (isLatestSave) {
+          if (targetEpisodeId === currentEpisodeIdRef.current) {
             // Listed drafts the server now holds are nothing left to offer.
             // Judged from the list in memory: rescanning storage on every save
             // would read every parked manuscript back.
@@ -282,7 +283,7 @@ export default function EditorPage() {
               if (removed.length < held.length) refreshOtherDrafts();
             }
           }
-          if (!mountedRef.current || !isLatestSave) return;
+          if (!mountedRef.current || seq !== saveSeqRef.current) return;
           setEpisode(updated);
           setSaveState("saved");
         })

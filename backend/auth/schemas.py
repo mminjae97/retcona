@@ -21,7 +21,21 @@ def _normalize_email(value: str) -> str:
 # categories are allowed) still can't be shared this way — a regex
 # (frontend) and unicodedata.category() (here) are different engines — and is
 # instead kept in sync by hand, cross-checked over every code point.
-_NICKNAME_RULES = json.loads((Path(__file__).resolve().parents[2] / "shared" / "nickname-rules.json").read_text())
+#
+# Falls back to these defaults (kept in sync with shared/nickname-rules.json
+# by hand) instead of failing to import: that file sits outside what
+# pyproject.toml's [tool.setuptools.packages.find] packages, so it exists in
+# a repo checkout (how this app runs today) but not necessarily in a
+# non-editable install (a built wheel, or an image copying only
+# site-packages) — and one missing file shouldn't take the whole API down at
+# import time.
+_NICKNAME_RULES_DEFAULT = {"minLength": 2, "maxLength": 20, "maxRawLength": 200, "maxMarks": 3}
+try:
+    _NICKNAME_RULES = json.loads(
+        (Path(__file__).resolve().parents[2] / "shared" / "nickname-rules.json").read_text()
+    )
+except (OSError, ValueError):
+    _NICKNAME_RULES = _NICKNAME_RULES_DEFAULT
 
 # What a pen name may contain (3.6): letters, numbers, combining marks and the
 # ordinary space, from the Basic Multilingual Plane only. Everything else is out:
