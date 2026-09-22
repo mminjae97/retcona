@@ -87,14 +87,23 @@ export interface AuthExpiredInfo {
 let sessionSeen = getToken() !== null;
 
 // Whether an auth-expired event has already been dispatched for the current
-// (dead or absent) token, so a second, third, ... 401 — whether it's another
+// wave of requests, so a second, third, ... 401 — whether it's another
 // concurrent request on the same now-cleared token, or a later request that
 // started only after clearToken() had already run and so carried no token at
 // all — doesn't each fire its own event. Not keyed by the specific token
-// value: once the session is known to be over, every further 401 is the same
-// news, however it's shaped. Reset by setToken, so a later expiry of a
-// genuinely new token still fires.
+// value: once the session is known to be over, every further 401 in the same
+// wave is the same news, however it's shaped.
+//
+// "Wave" is bounded by requestsInFlight, not a fixed timeout: reset once
+// every request that was in flight when the event fired has settled, not on
+// a guessed delay — a short timeout could still miss a slow straggler
+// (re-triggering the double-navigate/double-dialog bug this exists to
+// prevent), while a long one would swallow a later, genuinely new 401 (e.g.
+// the user retries after declining the first redirect via useBlocker) for
+// too long. Also reset by setToken, so a later expiry of a new session
+// still fires even with nothing in flight at that moment.
 let expiryAnnounced = false;
+let requestsInFlight = 0;
 
 // Fired when an authenticated call comes back 401: the token expired, was
 // revoked (e.g. by an account-deletion request from another device, 3.5), or
@@ -112,36 +121,42 @@ export function onAuthExpired(listener: (info: AuthExpiredInfo) => void): () => 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getToken();
   if (token) sessionSeen = true;
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options?.headers,
-    },
-  });
-  // Skipped only if a *different, still-present* token has shown up since:
-  // another tab logged in again while this request was in flight, and its
-  // fresh token must not be wiped — or its session bounced to /login — by this
-  // stale response. A token that's merely gone (cleared by another tab, or by
-  // this same response's own race with another request) still means the
-  // session is over and the event still needs to fire.
-  const currentToken = getToken();
-  const supersededByFresherLogin = currentToken !== null && currentToken !== token;
-  if (res.status === 401 && !supersededByFresherLogin && !expiryAnnounced && !AUTH_ENTRY_PATHS.includes(path)) {
-    expiryAnnounced = true;
-    clearToken();
-    window.dispatchEvent(new CustomEvent<AuthExpiredInfo>(AUTH_EXPIRED_EVENT, { detail: { sessionEnded: sessionSeen } }));
+  requestsInFlight++;
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options?.headers,
+      },
+    });
+    // Skipped only if a *different, still-present* token has shown up since:
+    // another tab logged in again while this request was in flight, and its
+    // fresh token must not be wiped — or its session bounced to /login — by this
+    // stale response. A token that's merely gone (cleared by another tab, or by
+    // this same response's own race with another request) still means the
+    // session is over and the event still needs to fire.
+    const currentToken = getToken();
+    const supersededByFresherLogin = currentToken !== null && currentToken !== token;
+    if (res.status === 401 && !supersededByFresherLogin && !expiryAnnounced && !AUTH_ENTRY_PATHS.includes(path)) {
+      expiryAnnounced = true;
+      clearToken();
+      window.dispatchEvent(new CustomEvent<AuthExpiredInfo>(AUTH_EXPIRED_EVENT, { detail: { sessionEnded: sessionSeen } }));
+    }
+    if (!res.ok) {
+      const detail = await res
+        .json()
+        .then(extractDetail)
+        .catch(() => undefined);
+      throw new ApiError(res.status, detail ?? `API error: ${res.status}`);
+    }
+    if (res.status === 204) {
+      return undefined as T;
+    }
+    return await res.json();
+  } finally {
+    requestsInFlight--;
+    if (requestsInFlight === 0) expiryAnnounced = false;
   }
-  if (!res.ok) {
-    const detail = await res
-      .json()
-      .then(extractDetail)
-      .catch(() => undefined);
-    throw new ApiError(res.status, detail ?? `API error: ${res.status}`);
-  }
-  if (res.status === 204) {
-    return undefined as T;
-  }
-  return res.json();
 }

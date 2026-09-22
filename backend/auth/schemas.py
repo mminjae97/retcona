@@ -27,14 +27,16 @@ def _normalize_email(value: str) -> str:
 # pyproject.toml's [tool.setuptools.packages.find] packages, so it exists in
 # a repo checkout (how this app runs today) but not necessarily in a
 # non-editable install (a built wheel, or an image copying only
-# site-packages) — and one missing file shouldn't take the whole API down at
-# import time.
+# site-packages) — and one missing (or, e.g. mid-edit, incomplete) file
+# shouldn't take the whole API down at import time. Merged rather than
+# swapped in wholesale, so a file missing just one key still uses the others.
 _NICKNAME_RULES_DEFAULT = {"minLength": 2, "maxLength": 20, "maxRawLength": 200, "maxMarks": 3}
 try:
-    _NICKNAME_RULES = json.loads(
-        (Path(__file__).resolve().parents[2] / "shared" / "nickname-rules.json").read_text()
-    )
-except (OSError, ValueError):
+    _NICKNAME_RULES = {
+        **_NICKNAME_RULES_DEFAULT,
+        **json.loads((Path(__file__).resolve().parents[2] / "shared" / "nickname-rules.json").read_text()),
+    }
+except (OSError, ValueError, TypeError):
     _NICKNAME_RULES = _NICKNAME_RULES_DEFAULT
 
 # What a pen name may contain (3.6): letters, numbers, combining marks and the
