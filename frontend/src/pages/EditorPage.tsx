@@ -8,7 +8,7 @@
 // closed tab. Every tab (every page load) keeps its own draft and rewrites only that one; the drafts other tabs
 // or earlier loads left are listed on the page and the author loads whichever one they want.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useBlocker, useParams } from "react-router-dom";
 import { fetchCurrentUserId } from "../api/auth";
 import { describeError } from "../api/client";
 import { getEpisode, saveEpisode } from "../api/episodes";
@@ -26,7 +26,6 @@ import {
   startDraftSlot,
 } from "../utils/draft";
 import type { StoredDraft } from "../utils/draft";
-import { setNavigationGuard } from "../utils/navigationGuard";
 import "./EditorPage.css";
 
 // The local draft is written this long after typing pauses, not on every key
@@ -66,10 +65,11 @@ export default function EditorPage() {
   // Whether the last local draft write went through. While it didn't, typed
   // text has no copy anywhere until the author saves, and the page says so.
   // Known gap: a non-throwing `localStorage.setItem` (storageSet) is treated
-  // as durable here, but private/incognito windows in current major browsers
-  // accept writes all session and only wipe them on close — there is no
-  // reliable, cross-browser way to detect that from script, so a draft can
-  // silently vanish there with this flag having said "backed up" the whole time.
+  // as durable here, but it isn't always — a private/incognito window in
+  // current major browsers accepts writes all session and only wipes them on
+  // close, and there's no reliable, cross-browser way to detect that from
+  // script. The status line's wording (below) is hedged rather than naming
+  // that case specifically, since it can't be told apart from the normal one.
   const [draftBackupOk, setDraftBackupOk] = useState(true);
   // Tracks in-flight/most-recent save to avoid an out-of-order save response
   // clobbering a newer one's result.
@@ -222,9 +222,17 @@ export default function EditorPage() {
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [atRisk]);
-  // Same guard for a navigation this page doesn't control, e.g. AuthExpiryRedirect
-  // forcing everyone to /login when the session ends (App.tsx).
-  useEffect(() => setNavigationGuard(() => (atRisk ? LEAVE_UNSAVED_CONFIRM : null)), [atRisk]);
+  // Same guard for a navigation within the app: the back-link, an App.tsx
+  // route change, or AuthExpiryRedirect forcing everyone to /login when the
+  // session ends — and, because this runs through the data router, browser
+  // back/forward too, which a Link-only guard can't reach (the URL has
+  // already changed by the time a popstate handler would see it).
+  const blocker = useBlocker(atRisk);
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    if (window.confirm(LEAVE_UNSAVED_CONFIRM)) blocker.proceed();
+    else blocker.reset();
+  }, [blocker]);
 
   const save = useCallback(
     (targetNovelId: string, targetEpisodeId: string, nextContent: string) => {
@@ -407,13 +415,7 @@ export default function EditorPage() {
   return (
     <div className="editor-page">
       <div className="editor-header">
-        <Link
-          className="back-link"
-          to={`/novels/${novelId}/episodes`}
-          onClick={(e) => {
-            if (atRisk && !window.confirm(LEAVE_UNSAVED_CONFIRM)) e.preventDefault();
-          }}
-        >
+        <Link className="back-link" to={`/novels/${novelId}/episodes`}>
           ← 화 목록
         </Link>
         <h1>{episode.episode_index}화 작성</h1>
@@ -472,7 +474,7 @@ export default function EditorPage() {
           {saveState !== "saving" &&
             unsaved &&
             (draftBackupOk
-              ? " · 저장하지 않은 변경이 있습니다 (이 브라우저에 임시저장됨)"
+              ? " · 저장하지 않은 변경이 있습니다 (이 브라우저에 임시저장됨 — 창을 닫으면 사라질 수도 있습니다)"
               : " · 저장하지 않은 변경이 있습니다. 이 브라우저에 임시저장할 수 없으니 저장 버튼을 눌러 주세요")}
         </span>
         <div className="editor-actions">

@@ -1,8 +1,7 @@
 import { useEffect } from "react";
-import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { Outlet, RouterProvider, createBrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import { onAuthExpired } from "./api/client";
 import { getUserId } from "./utils/session";
-import { confirmNavigation } from "./utils/navigationGuard";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import EpisodeListPage from "./pages/EpisodeListPage";
@@ -22,10 +21,10 @@ function AuthExpiryRedirect() {
       onAuthExpired(({ sessionEnded }) => {
         if (location.pathname === "/login") return;
         // The token is already dead (apiFetch cleared it before firing this);
-        // declining here doesn't save it, but it does stop this forced
-        // navigation from tearing down a page (e.g. the editor) that would
-        // otherwise lose visible, unbacked-up text with no warning at all.
-        if (!confirmNavigation()) return;
+        // this navigate() can still be declined by a page's own useBlocker
+        // (e.g. the editor, guarding unsaved/unbacked-up text) — the data
+        // router below is what makes that possible for a forced,
+        // non-Link navigation like this one.
         navigate("/login", {
           replace: true,
           // Who was signed in, when a session did end: only that account is
@@ -38,23 +37,43 @@ function AuthExpiryRedirect() {
   return null;
 }
 
+// A data router (createBrowserRouter, below) rather than plain <BrowserRouter>
+// specifically so pages can use useBlocker (EditorPage, guarding unsaved,
+// unbacked-up text): it needs one to also catch browser back/forward, which a
+// Link-only or popstate-based guard can't — the URL has already changed by
+// the time a popstate handler would see it.
+function RootLayout() {
+  return (
+    <>
+      <AuthExpiryRedirect />
+      <Outlet />
+    </>
+  );
+}
+
 // Screen flow follows design doc 2.1:
 // Login -> Dashboard -> {settings management / manuscript editor} -> run validation -> validation results
 //                     -> My Page -> per-novel relationship graph · timeline
+const router = createBrowserRouter([
+  {
+    element: <RootLayout />,
+    // Relative (no leading "/"): they're joined onto the pathless layout
+    // route above, which is also how nested route paths in this router are
+    // meant to be written — an absolute child path here would only be valid
+    // if it repeated the parent's own path, which this layout doesn't have.
+    children: [
+      { path: "login", element: <LoginPage /> },
+      { index: true, element: <DashboardPage /> },
+      { path: "novels/:novelId/settings", element: <SettingsPage /> },
+      { path: "novels/:novelId/episodes", element: <EpisodeListPage /> },
+      { path: "novels/:novelId/episodes/:episodeId", element: <EditorPage /> },
+      { path: "novels/:novelId/episodes/:episodeId/result", element: <ValidationResultPage /> },
+      { path: "mypage", element: <MyPage /> },
+      { path: "novels/:novelId/graph", element: <GraphPage /> },
+    ],
+  },
+]);
+
 export default function App() {
-  return (
-    <BrowserRouter>
-      <AuthExpiryRedirect />
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/novels/:novelId/settings" element={<SettingsPage />} />
-        <Route path="/novels/:novelId/episodes" element={<EpisodeListPage />} />
-        <Route path="/novels/:novelId/episodes/:episodeId" element={<EditorPage />} />
-        <Route path="/novels/:novelId/episodes/:episodeId/result" element={<ValidationResultPage />} />
-        <Route path="/mypage" element={<MyPage />} />
-        <Route path="/novels/:novelId/graph" element={<GraphPage />} />
-      </Routes>
-    </BrowserRouter>
-  );
+  return <RouterProvider router={router} />;
 }

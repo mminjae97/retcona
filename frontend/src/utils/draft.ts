@@ -282,15 +282,28 @@ export function isDraftsWipedEventFor(episodeId: string, storageKey: string | nu
 // deleted; logging in again within the grace period cancels the deletion, but
 // unsaved drafts are not brought back. Only this account's drafts go: other
 // accounts on the same browser keep theirs.
+// A tab whose saveDraft() reads the marker just before it's set, but writes
+// after this sweep has already passed its key by, would otherwise resurrect a
+// draft here — saveDraft's own re-check after writing (see there) closes most
+// of that window from the writer's side; this resweep closes it again from
+// the deletion's side, after giving that write time to land. Neither one
+// alone is a lock (there is none, across tabs, for any of this storage), but
+// together the surviving window is only a write that lands after both checks
+// have already run — narrow enough that the 30-day prune is an acceptable
+// backstop for it.
+const WIPE_RESWEEP_DELAY_MS = 500;
+
 export function discardDraftsForDeletion(userId: string | null): void {
   if (userId === null) return;
   // Marker first, so a write racing with the removal below is refused.
   const mark = () => storageSet(WIPED_PREFIX + userId, String(Date.now()));
+  const sweep = () => storageKeys(`${DRAFT_PREFIX}${userId}:`).forEach(discardDraft);
   mark();
-  storageKeys(`${DRAFT_PREFIX}${userId}:`).forEach(discardDraft);
+  sweep();
   // Storage that was full refused the marker; the drafts just removed made
   // room. (Blocked storage still fails, but then no draft can be written anyway.)
   if (!draftsWiped(userId)) mark();
+  setTimeout(sweep, WIPE_RESWEEP_DELAY_MS);
 }
 
 // A login starts a fresh session, so this account's drafts are written again.
