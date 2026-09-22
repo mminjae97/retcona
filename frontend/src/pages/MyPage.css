@@ -126,3 +126,14 @@
 .danger-zone {
   border-color: var(--color-danger);
 }
+
+.deletion-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.deletion-form p {
+  flex-basis: 100%;
+  margin: 0;
+}

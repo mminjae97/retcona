@@ -335,7 +335,7 @@ flowchart TD
 
 - **최초 설정**: 자체 회원가입은 가입 폼에서, 소셜 로그인은 최초 로그인 시 별도 화면에서 필명을 입력받는다(3.2 참고) — 소셜 로그인은 프로필에서 이름을 가져오지 않고 항상 직접 입력받아, 실명 대신 필명을 쓰고 싶은 작가의 선택을 보장한다
 - **변경**: 마이페이지(2.6)의 계정 정보 영역에서 언제든 변경 가능
-- **제약**: 2~20자 길이 제한만 두고, 중복은 허용 — 실제 식별자는 이메일/`user_id`이므로 필명 유일성을 강제할 필요는 없음
+- **제약**: 2~20자, 글자(모든 언어)·숫자·일반 공백만 사용 가능 — 이모지, 문장부호·특수 기호, 제로폭 문자 등은 불가. 중복은 허용 — 실제 식별자는 이메일/`user_id`이므로 필명 유일성을 강제할 필요는 없음
 
 ### 4. 데이터 모델
 
@@ -353,7 +353,7 @@ flowchart TD
     N --> CF[contradiction_flags]
 ```
 
-- **users**: 계정 정보 (id, email, `nickname` — 필명, provider, provider_id, password_hash, created_at, `deletion_requested_at` — 회원 탈퇴 접수 시각, 3.5 참고)
+- **users**: 계정 정보 (id, email, `nickname` — 필명, provider, provider_id, password_hash, created_at, `deletion_requested_at` — 회원 탈퇴 접수 시각, 3.5 참고, `token_version` — 토큰에 담기는 `ver` 클레임과 일치해야 토큰이 유효하며, 탈퇴 접수 시 1 증가하고 탈퇴가 취소돼도 되돌리지 않음 — 접수 이전에 발급된 토큰을 영구히 폐기하기 위함)
 - **novels**: 작품 정보 (id, user_id FK, title, created_at, `deleted_at` — 작품 소프트 삭제 시각, 2.6의 작품 삭제 기능에서 사용) — 한 계정이 여러 작품 소유 가능
 - 아래 모든 엔티티 테이블은 `novel_id` FK를 가지며, 모든 조회·쓰기 쿼리는 반드시 `novel_id`로 필터링한다 (애플리케이션 레이어에서 강제)
 

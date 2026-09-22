@@ -64,7 +64,9 @@ def list_novels(db: Session = Depends(get_db), user: User = Depends(get_current_
 
 
 @router.post("", response_model=NovelPublic, status_code=status.HTTP_201_CREATED)
-def create_novel(body: NovelCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Novel:
+def create_novel(
+    body: NovelCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+) -> Novel:
     novel = Novel(user_id=user.id, title=body.title)
     db.add(novel)
     db.commit()
