@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import { onAuthExpired } from "./api/client";
 import { getUserId } from "./utils/session";
+import { confirmNavigation } from "./utils/navigationGuard";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import EpisodeListPage from "./pages/EpisodeListPage";
@@ -20,6 +21,11 @@ function AuthExpiryRedirect() {
     () =>
       onAuthExpired(({ sessionEnded }) => {
         if (location.pathname === "/login") return;
+        // The token is already dead (apiFetch cleared it before firing this);
+        // declining here doesn't save it, but it does stop this forced
+        // navigation from tearing down a page (e.g. the editor) that would
+        // otherwise lose visible, unbacked-up text with no warning at all.
+        if (!confirmNavigation()) return;
         navigate("/login", {
           replace: true,
           // Who was signed in, when a session did end: only that account is

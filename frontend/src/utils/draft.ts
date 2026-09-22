@@ -155,6 +155,17 @@ export function saveDraft(episodeId: string, draft: DraftInput): boolean {
     retryRoomAt.set(key, Date.now() + ROOM_RETRY_MS);
     return false;
   }
+  // Checking draftsWiped() and discardDraftsForDeletion() marking it aren't one
+  // step either: this write can land between the marker being set and the
+  // sweep that removes existing keys, or even after the sweep has already
+  // passed this key by. Re-checking after the write closes most of that
+  // window — by the time discardDraftsForDeletion's mark has committed, this
+  // check sees it and undoes the write instead of leaving deleted-account text
+  // behind on a shared machine.
+  if (draftsWiped(userId)) {
+    storageRemove(key);
+    return false;
+  }
   return true;
 }
 
@@ -253,6 +264,17 @@ export function isDraftEventFor(episodeId: string, storageKey: string | null): b
   if (userId === null) return false;
   // A storage event with no key means the whole storage was cleared.
   return storageKey === null || storageKey.startsWith(episodePrefix(userId, episodeId));
+}
+
+// Whether a storage event is this episode's account having its drafts wiped
+// (by discardDraftsForDeletion, in another tab) — distinct from isDraftEventFor
+// because the marker key isn't under DRAFT_PREFIX. A page with this episode
+// open uses this to notice its own backup is gone without waiting for its next
+// local write to find out.
+export function isDraftsWipedEventFor(episodeId: string, storageKey: string | null): boolean {
+  const userId = ownerOf(episodeId);
+  if (userId === null) return false;
+  return storageKey === null || storageKey === WIPED_PREFIX + userId;
 }
 
 // Manuscript text shouldn't outlive the account on a shared machine. Called

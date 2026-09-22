@@ -24,7 +24,7 @@ from auth.schemas import (
 )
 from auth.security import DUMMY_PASSWORD_HASH, hash_password, verify_password
 from models.db import get_db
-from models.user import DELETION_GRACE_PERIOD, User
+from models.user import User, deletion_grace_cutoff
 
 router = APIRouter()
 
@@ -75,7 +75,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     user = locked
     deletion_cancelled = False
     if user.deletion_requested_at is not None:
-        if datetime.now(timezone.utc) >= user.deletion_requested_at + DELETION_GRACE_PERIOD:
+        if user.deletion_requested_at <= deletion_grace_cutoff():
             # Past the grace period the account can no longer be recovered
             # (3.5), even if the purge job hasn't got to it yet.
             raise HTTPException(status.HTTP_410_GONE, "Account deletion grace period has passed")

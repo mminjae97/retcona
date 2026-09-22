@@ -19,12 +19,14 @@ import {
   discardDraft,
   discardDraftIfContent,
   isDraftEventFor,
+  isDraftsWipedEventFor,
   listOtherDrafts,
   releaseDraftCache,
   saveDraft,
   startDraftSlot,
 } from "../utils/draft";
 import type { StoredDraft } from "../utils/draft";
+import { setNavigationGuard } from "../utils/navigationGuard";
 import "./EditorPage.css";
 
 // The local draft is written this long after typing pauses, not on every key
@@ -63,6 +65,11 @@ export default function EditorPage() {
   const otherDraftsRef = useRef<StoredDraft[]>([]);
   // Whether the last local draft write went through. While it didn't, typed
   // text has no copy anywhere until the author saves, and the page says so.
+  // Known gap: a non-throwing `localStorage.setItem` (storageSet) is treated
+  // as durable here, but private/incognito windows in current major browsers
+  // accept writes all session and only wipe them on close — there is no
+  // reliable, cross-browser way to detect that from script, so a draft can
+  // silently vanish there with this flag having said "backed up" the whole time.
   const [draftBackupOk, setDraftBackupOk] = useState(true);
   // Tracks in-flight/most-recent save to avoid an out-of-order save response
   // clobbering a newer one's result.
@@ -179,7 +186,12 @@ export default function EditorPage() {
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     const onStorage = (e: StorageEvent) => {
       const id = currentEpisodeIdRef.current;
-      if (!id || !isDraftEventFor(id, e.key)) return;
+      if (!id) return;
+      // Another tab just wiped this account's drafts (a deletion request went
+      // through): this tab's own slot is gone too, so its backup is gone right
+      // now, not just as of its next write.
+      if (isDraftsWipedEventFor(id, e.key)) setDraftBackupOk(false);
+      if (!isDraftEventFor(id, e.key)) return;
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => refreshOtherDrafts(), OTHER_DRAFTS_REFRESH_DEBOUNCE_MS);
     };
@@ -210,6 +222,9 @@ export default function EditorPage() {
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [atRisk]);
+  // Same guard for a navigation this page doesn't control, e.g. AuthExpiryRedirect
+  // forcing everyone to /login when the session ends (App.tsx).
+  useEffect(() => setNavigationGuard(() => (atRisk ? LEAVE_UNSAVED_CONFIRM : null)), [atRisk]);
 
   const save = useCallback(
     (targetNovelId: string, targetEpisodeId: string, nextContent: string) => {
@@ -412,7 +427,9 @@ export default function EditorPage() {
             남은 초안입니다. 각 탭은 자기 초안만 다시 저장하므로 서로 덮어쓰지 않습니다. 불러오기를 누르면 지금 화면의
             내용이 그 초안으로 바뀝니다.
           </p>
-          {otherDrafts.length >= MAX_DRAFTS_PER_EPISODE && (
+          {/* otherDrafts excludes this tab's own slot, but the cap counts it, so
+              "full" here means one short of the cap, not equal to it. */}
+          {otherDrafts.length >= MAX_DRAFTS_PER_EPISODE - 1 && (
             <p>
               이 화의 초안이 가득 차(최대 {MAX_DRAFTS_PER_EPISODE}개) 최근에 쓰인 초안이 아닌 것이 없으면 새로 여는 탭은 임시저장이
               꺼집니다. 필요 없는 초안은 버려 주세요.

@@ -106,11 +106,15 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
       ...options?.headers,
     },
   });
-  // Only if the stored token is still the one this request was sent with (or
-  // still absent): in the meantime another tab may have logged in again, and
-  // its fresh token must not be wiped — or its session bounced to /login — by
-  // a stale response.
-  if (res.status === 401 && token === getToken() && !AUTH_ENTRY_PATHS.includes(path)) {
+  // Skipped only if a *different, still-present* token has shown up since:
+  // another tab logged in again while this request was in flight, and its
+  // fresh token must not be wiped — or its session bounced to /login — by this
+  // stale response. A token that's merely gone (cleared by another tab, or by
+  // this same response's own race with another request) still means the
+  // session is over and the event still needs to fire.
+  const currentToken = getToken();
+  const supersededByFresherLogin = currentToken !== null && currentToken !== token;
+  if (res.status === 401 && !supersededByFresherLogin && !AUTH_ENTRY_PATHS.includes(path)) {
     clearToken();
     window.dispatchEvent(new CustomEvent<AuthExpiredInfo>(AUTH_EXPIRED_EVENT, { detail: { sessionEnded: sessionSeen } }));
   }

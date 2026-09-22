@@ -11,7 +11,7 @@
 """
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
@@ -22,6 +22,22 @@ from models.base import Base, TimestampMixin
 
 # Grace period between a deletion request and permanent deletion (3.5).
 DELETION_GRACE_PERIOD = timedelta(days=30)
+
+
+def deletion_grace_cutoff(now: datetime | None = None) -> datetime:
+    """A `deletion_requested_at` at or before this instant is past its grace
+    period.
+
+    The one place this cutoff is computed: auth/router.py's login compares a
+    single user's `deletion_requested_at` against it to decide whether a
+    pending deletion can still be cancelled (410 once past), and
+    workers/purge.py compares every row's against it in one query to pick
+    purge candidates. Kept as one function so the two can't drift apart — a
+    purge run and a login disagreeing on this would either purge an account a
+    login just un-scheduled, or accept a login for an account purge is about
+    to remove.
+    """
+    return (now or datetime.now(timezone.utc)) - DELETION_GRACE_PERIOD
 
 
 class User(Base, TimestampMixin):

@@ -38,7 +38,7 @@ from sqlalchemy.orm import Session
 from models.base import Base
 from models.db import SessionLocal
 from models.novel import Novel
-from models.user import DELETION_GRACE_PERIOD, User
+from models.user import User, deletion_grace_cutoff
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,10 @@ def _purge_user(db: Session, user_id, cutoff: datetime) -> bool:
         db.rollback()
         return False
 
-    novel_ids = select(Novel.id).where(Novel.user_id == user_id)
+    # Resolved once into a literal list: left as a Select, it would be
+    # re-planned and re-executed as a correlated subquery inside every one of
+    # the ~16 DELETEs below instead of being read from the row lock already held.
+    novel_ids = list(db.scalars(select(Novel.id).where(Novel.user_id == user_id)))
     # sorted_tables lists parents before children, so walking it backwards
     # deletes children first and never trips a foreign key. Every table other
     # than users and novels carries novel_id (NovelScopedMixin).
@@ -102,7 +105,7 @@ def _purge_user(db: Session, user_id, cutoff: datetime) -> bool:
 
 def purge_expired_accounts(db: Session, now: datetime | None = None) -> PurgeResult:
     """Purge every account past its grace period; returns how many were removed and how many failed."""
-    cutoff = (now or datetime.now(timezone.utc)) - DELETION_GRACE_PERIOD
+    cutoff = deletion_grace_cutoff(now)
     candidates = list(
         db.scalars(
             select(User.id).where(User.deletion_requested_at.is_not(None), User.deletion_requested_at <= cutoff)
