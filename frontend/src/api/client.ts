@@ -20,6 +20,9 @@ export function setToken(value: string, userId: string): void {
   sessionSeen = true;
   announceSignedIn(userId);
   tokenStore.set(value);
+  // A fresh token means any earlier expiry this page load already announced
+  // no longer applies to what's now stored.
+  lastExpiredToken = NOT_YET_EXPIRED;
 }
 
 export const clearToken = (): void => tokenStore.clear();
@@ -82,6 +85,13 @@ export interface AuthExpiredInfo {
 // request that carried one.
 let sessionSeen = getToken() !== null;
 
+// The token (possibly null, for an unauthenticated request) that the last
+// dispatched auth-expired event was for — so two concurrent requests that
+// both see the same dead token don't each fire their own event. Reset by
+// setToken, so a later expiry of a genuinely new token still fires.
+const NOT_YET_EXPIRED = Symbol("not-yet-expired");
+let lastExpiredToken: string | null | typeof NOT_YET_EXPIRED = NOT_YET_EXPIRED;
+
 // Fired when an authenticated call comes back 401: the token expired, was
 // revoked (e.g. by an account-deletion request from another device, 3.5), or
 // is gone altogether (another tab's session ended, or the page was reached
@@ -114,7 +124,12 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
   // session is over and the event still needs to fire.
   const currentToken = getToken();
   const supersededByFresherLogin = currentToken !== null && currentToken !== token;
-  if (res.status === 401 && !supersededByFresherLogin && !AUTH_ENTRY_PATHS.includes(path)) {
+  // Also skips a second concurrent request that hit 401 on this same (now
+  // dead) token: the first one to get here already cleared it and fired the
+  // event, so this one would otherwise announce the same expiry twice.
+  const alreadyAnnounced = token === lastExpiredToken;
+  if (res.status === 401 && !supersededByFresherLogin && !alreadyAnnounced && !AUTH_ENTRY_PATHS.includes(path)) {
+    lastExpiredToken = token;
     clearToken();
     window.dispatchEvent(new CustomEvent<AuthExpiredInfo>(AUTH_EXPIRED_EVENT, { detail: { sessionEnded: sessionSeen } }));
   }

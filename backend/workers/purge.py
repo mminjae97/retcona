@@ -93,10 +93,12 @@ def _purge_user(db: Session, user_id, cutoff: datetime) -> bool:
     novel_ids = list(db.scalars(select(Novel.id).where(Novel.user_id == user_id)))
     # sorted_tables lists parents before children, so walking it backwards
     # deletes children first and never trips a foreign key. Every table other
-    # than users and novels carries novel_id (NovelScopedMixin).
-    for table in reversed(Base.metadata.sorted_tables):
-        if "novel_id" in table.c:
-            db.execute(delete(table).where(table.c.novel_id.in_(novel_ids)))
+    # than users and novels carries novel_id (NovelScopedMixin). Skipped
+    # outright for an account with no novels, sparing it ~16 no-op DELETEs.
+    if novel_ids:
+        for table in reversed(Base.metadata.sorted_tables):
+            if "novel_id" in table.c:
+                db.execute(delete(table).where(table.c.novel_id.in_(novel_ids)))
     db.execute(delete(Novel).where(Novel.user_id == user_id))
     db.execute(delete(User).where(User.id == user_id))
     db.commit()

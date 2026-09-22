@@ -245,10 +245,15 @@ export default function EditorPage() {
         .catch(() => {})
         .then(() => saveEpisode(targetNovelId, targetEpisodeId, nextContent))
         .then((updated) => {
-          // Before the mounted/seq checks below: whether the local backup is
-          // still needed depends only on what the server now holds, even if
-          // this component has since moved on to another episode.
-          if (targetEpisodeId === currentEpisodeIdRef.current) setServerVersion(updated.updated_at, updated.content);
+          // One criterion for "is this response still the one to act on":
+          // seq alone, not episode identity — the load effect already bumps
+          // saveSeqRef.current on every episode change, so seq covers that
+          // case too, and also (unlike the episode check) catches a second
+          // save for the *same* episode resolving out of order, which would
+          // otherwise let this older response's server version clobber the
+          // newer one the second save just set.
+          const isLatestSave = seq === saveSeqRef.current;
+          if (isLatestSave) setServerVersion(updated.updated_at, updated.content);
           // Only this session's own draft is touched: another tab's says
           // nothing about which version *its* text was based on.
           const ownContent = ownDraftRef.current.get(targetEpisodeId);
@@ -264,7 +269,7 @@ export default function EditorPage() {
               saveDraft(targetEpisodeId, { content: ownContent, baseUpdatedAt: updated.updated_at });
             }
           }
-          if (targetEpisodeId === currentEpisodeIdRef.current) {
+          if (isLatestSave) {
             // Listed drafts the server now holds are nothing left to offer.
             // Judged from the list in memory: rescanning storage on every save
             // would read every parked manuscript back.
@@ -277,7 +282,7 @@ export default function EditorPage() {
               if (removed.length < held.length) refreshOtherDrafts();
             }
           }
-          if (!mountedRef.current || seq !== saveSeqRef.current) return;
+          if (!mountedRef.current || !isLatestSave) return;
           setEpisode(updated);
           setSaveState("saved");
         })
@@ -314,6 +319,11 @@ export default function EditorPage() {
     setDraftBackupOk(true);
     showOtherDrafts([]);
     currentEpisodeIdRef.current = episodeId;
+    // Owner unknown until the account id arrives below: without this, ownerOf()
+    // would fall back to the live getUserId() for storage events that land in
+    // the gap, which can point at a different account by the time it resolves
+    // (another tab signing in as someone else, or this account being deleted).
+    startDraftSlot(episodeId, null);
     setServerVersion("", "");
     // Chained after saveChainRef instead of fired directly: a quick
     // A -> B -> A navigation can come back to A while the save the author
@@ -429,9 +439,12 @@ export default function EditorPage() {
             남은 초안입니다. 각 탭은 자기 초안만 다시 저장하므로 서로 덮어쓰지 않습니다. 불러오기를 누르면 지금 화면의
             내용이 그 초안으로 바뀝니다.
           </p>
-          {/* otherDrafts excludes this tab's own slot, but the cap counts it, so
-              "full" here means one short of the cap, not equal to it. */}
-          {otherDrafts.length >= MAX_DRAFTS_PER_EPISODE - 1 && (
+          {/* otherDrafts excludes this tab's own slot, but the cap counts it:
+              add 1 back only if this tab has actually written its own slot
+              yet (ownDraftRef), since until then otherDrafts.length already
+              *is* the full existing count and needs no adjustment. */}
+          {otherDrafts.length + (episodeId && ownDraftRef.current.has(episodeId) ? 1 : 0) >=
+            MAX_DRAFTS_PER_EPISODE && (
             <p>
               이 화의 초안이 가득 차(최대 {MAX_DRAFTS_PER_EPISODE}개) 최근에 쓰인 초안이 아닌 것이 없으면 새로 여는 탭은 임시저장이
               꺼집니다. 필요 없는 초안은 버려 주세요.
