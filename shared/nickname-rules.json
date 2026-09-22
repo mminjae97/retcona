@@ -1,0 +1,6 @@
+{
+  "minLength": 2,
+  "maxLength": 20,
+  "maxRawLength": 200,
+  "maxMarks": 3
+}

@@ -2,7 +2,7 @@
 // nickname change, account deletion request.
 
 import { announceAccountDeleted, setUserId } from "../utils/session";
-import { apiFetch, clearToken, setToken } from "./client";
+import { apiFetch, clearToken, getToken, setToken } from "./client";
 
 export interface UserPublic {
   id: string;
@@ -52,10 +52,23 @@ export function getMe(): Promise<UserPublic> {
 // Asked of the server rather than read from what this browser remembers: that
 // is shared by every tab and may name whoever signed in last, not the account
 // this tab's token is for. Also refreshes the remembered id.
+//
+// Cached by the exact token value, not just "already fetched once": the token
+// is the actual credential, so unlike the remembered id above, reusing this
+// cache is safe as long as the live token hasn't changed — a login elsewhere
+// (this tab's own, or another tab's via shared storage) always changes it,
+// which invalidates the cache instead of serving a stale account.
+let cached: { token: string; userId: string } | null = null;
+
 export async function fetchCurrentUserId(): Promise<string | null> {
+  const token = getToken();
+  if (token !== null && cached !== null && cached.token === token) {
+    return cached.userId;
+  }
   try {
     const me = await getMe();
     setUserId(me.id);
+    if (token !== null) cached = { token, userId: me.id };
     return me.id;
   } catch {
     return null; // drafts are simply off for this load
