@@ -28,16 +28,9 @@ export function getEpisode(novelId: string, episodeId: string): Promise<EpisodeP
   return apiFetch<EpisodePublic>(`/novels/${novelId}/episodes/${episodeId}`);
 }
 
-// A request sent as the tab closes is cancelled unless it is `keepalive`, which
-// browsers only allow up to 64 KB of body (a chapter is about 15 KB). A longer
-// text is sent without it rather than rejected outright.
-const KEEPALIVE_MAX_BYTES = 60_000;
-
 export function saveEpisode(novelId: string, episodeId: string, content: string): Promise<EpisodePublic> {
-  const body = JSON.stringify({ content });
   return apiFetch<EpisodePublic>(`/novels/${novelId}/episodes/${episodeId}`, {
     method: "PATCH",
-    body,
-    keepalive: new TextEncoder().encode(body).length < KEEPALIVE_MAX_BYTES,
+    body: JSON.stringify({ content }),
   });
 }

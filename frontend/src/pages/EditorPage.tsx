@@ -1,16 +1,16 @@
 // Manuscript editor (design doc 2.2)
-// Autosave (debounced with a max wait, doesn't call the AI pipeline) + explicit save, both hit the same
-// PATCH endpoint — the only difference is what triggers them. "Run validation" (2.2, 8.2)
-// stays disabled: it depends on QueueClient (infra/queue_client.py), which isn't implemented yet.
+// Typing is saved automatically to a local draft (utils/draft.ts, debounced, and flushed when the page is
+// hidden or the editor unmounts); the server only gets the text when the author presses Save (PATCH, doesn't
+// call the AI pipeline). "Run validation" (2.2, 8.2) stays disabled: it depends on QueueClient
+// (infra/queue_client.py), which isn't implemented yet.
 // Editing a submitted episode flips its status back to draft (2.2).
-// Typing is also mirrored to a local draft (utils/draft.ts, debounced, and flushed when the page is hidden or
-// the editor unmounts) until a save confirms it, so text survives an expired session, a network failure or a
+// The draft is dropped once a save confirms it, so it survives an expired session, a network failure or a
 // closed tab. Every tab (every page load) keeps its own draft and rewrites only that one; the drafts other tabs
 // or earlier loads left are listed on the page and the author loads whichever one they want.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { fetchCurrentUserId } from "../api/auth";
-import { ApiError, describeError } from "../api/client";
+import { describeError } from "../api/client";
 import { getEpisode, saveEpisode } from "../api/episodes";
 import type { EpisodePublic } from "../api/episodes";
 import {
@@ -27,40 +27,15 @@ import {
 import type { StoredDraft } from "../utils/draft";
 import "./EditorPage.css";
 
-// Server saves are lazy on purpose: the local draft (below) is written within
-// a fraction of a second, so the network can wait. A chapter is about 5,000
-// characters, so each save is small; what is worth avoiding is a request per
-// pause in typing.
-// - saved once typing has stopped this long;
-// - but never later than this after the first unsaved change, however long the
-//   author keeps typing, so a crash costs at most this much beyond the draft;
-// - and also when the tab is hidden or the author leaves the episode.
-const AUTOSAVE_DEBOUNCE_MS = 8000;
-const AUTOSAVE_MAX_WAIT_MS = 45000;
-// While the local draft can't be written (storage blocked or full, no room for
-// another draft, account unknown) the server save is the only safety net, so
-// it is not left lazy.
-const AUTOSAVE_NO_BACKUP_DEBOUNCE_MS = 2000;
-const AUTOSAVE_NO_BACKUP_MAX_WAIT_MS = 10000;
-// After an autosave failed for a reason that may pass (network, server error),
-// the text is sent again this long afterwards unless something newer came first.
-const AUTOSAVE_RETRY_AFTER_FAILURE_MS = 45000;
-// ...at most this many times in a row (a text the server keeps rejecting would
-// otherwise be sent every 45 s for as long as the page is open); after that it
-// waits for the next edit or the save button.
-const AUTOSAVE_MAX_RETRIES = 5;
-// A save due while one is still in flight waits and re-checks this often, so
-// only the latest text goes out afterwards, not every intermediate version.
-const AUTOSAVE_WHILE_SAVING_RECHECK_MS = 1000;
-// Much shorter than the autosave delay so the local draft is on disk before the
-// server save fires, but coalescing keystrokes: stringifying and storing a long
-// manuscript on every key press would make typing lag.
+// The local draft is written this long after typing pauses, not on every key
+// press: stringifying and storing a long manuscript each time would make typing lag.
 const DRAFT_DEBOUNCE_MS = 300;
 // Another tab typing rewrites its draft every few hundred ms; the list only
 // needs to catch up once that settles.
 const OTHER_DRAFTS_REFRESH_DEBOUNCE_MS = 1000;
 // How long the "draft loaded" notice stays up.
 const NOTICE_DURATION_MS = 6000;
+const LEAVE_UNSAVED_CONFIRM = "저장하지 않은 변경이 있고 이 브라우저에 임시저장되지 않았습니다. 나가면 내용이 사라집니다. 나갈까요?";
 
 // First characters of a draft, counted in code points so an emoji isn't cut in half.
 function previewDraft(content: string): string {
@@ -72,12 +47,6 @@ function previewDraft(content: string): string {
 }
 
 type SaveState = "idle" | "saving" | "saved" | "error";
-
-interface PendingSave {
-  novelId: string;
-  episodeId: string;
-  content: string;
-}
 
 export default function EditorPage() {
   const { novelId, episodeId } = useParams<{ novelId: string; episodeId: string }>();
@@ -92,35 +61,23 @@ export default function EditorPage() {
   const [otherDrafts, setOtherDrafts] = useState<StoredDraft[]>([]);
   // The same list, for code that must look at the current one without waiting for a render.
   const otherDraftsRef = useRef<StoredDraft[]>([]);
-  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Fires the save that is due however long typing goes on (see AUTOSAVE_MAX_WAIT_MS).
-  const autosaveMaxWaitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Saves sent and not yet answered.
-  const savesInFlightRef = useRef(0);
-  // Failed autosaves in a row that have been retried automatically.
-  const autosaveRetriesRef = useRef(0);
-  // Whether the last local draft write went through.
-  const draftBackupOkRef = useRef(true);
-  // Content not yet sent to the API. Flushed directly (bypassing component
-  // state) when the user navigates to a different episode or away from the
-  // editor before the debounce fires — otherwise the leftover timer would
-  // still be live, and its eventual save() response would overwrite this
-  // component's now-unrelated state for whichever episode is on screen next.
-  const pendingRef = useRef<PendingSave | null>(null);
-  // Tracks in-flight/most-recent save to avoid an out-of-order autosave
-  // response clobbering a newer explicit save's result.
+  // Whether the last local draft write went through. While it didn't, typed
+  // text has no copy anywhere until the author saves, and the page says so.
+  const [draftBackupOk, setDraftBackupOk] = useState(true);
+  // Tracks in-flight/most-recent save to avoid an out-of-order save response
+  // clobbering a newer one's result.
   const saveSeqRef = useRef(0);
-  // Chains save requests so a later one (e.g. an explicit save fired right
-  // after an autosave) always waits for the previous request to finish
-  // before sending — otherwise two in-flight PATCHes for the same episode
+  // Chains save requests so a later one (e.g. a save pressed for an episode
+  // reopened while its previous save is still in flight) always waits for the
+  // previous request to finish before sending — otherwise two in-flight PATCHes for the same episode
   // could commit out of order and the older one would silently overwrite
   // the newer content server-side, which seq alone (client-side response
   // ordering only) can't prevent.
   const saveChainRef = useRef<Promise<void>>(Promise.resolve());
   // True only while the component is actually mounted — separate from the
-  // per-episode "cancelled" flag in the load effect below, since the
-  // unmount-flush save is deliberately still sent (and still updates
-  // `episode`/`saveState` if it turns out to be the current episode) but
+  // per-episode "cancelled" flag in the load effect below, since a save still
+  // in flight when the editor is left is deliberately let finish (and still
+  // updates `episode`/`saveState` if it turns out to be the current episode) but
   // must never touch state once React has torn the component down.
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -200,7 +157,7 @@ export default function EditorPage() {
       content: pending.content,
       baseUpdatedAt: serverUpdatedAtRef.current,
     });
-    draftBackupOkRef.current = written;
+    setDraftBackupOk(written);
     if (written) ownDraftRef.current.set(pending.episodeId, pending.content);
     else ownDraftRef.current.delete(pending.episodeId);
     // If the write failed, the copy already in storage is older than what the
@@ -217,7 +174,6 @@ export default function EditorPage() {
     const onVisibilityChange = () => {
       if (document.visibilityState !== "hidden") return;
       flushDraft();
-      autosaveNowRef.current(); // and don't leave unsaved text waiting on the timers while hidden
     };
     // Another tab writing or removing a draft of this episode.
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -244,6 +200,17 @@ export default function EditorPage() {
     return () => clearTimeout(timer);
   }, [notice]);
 
+  // Text the server doesn't have yet. Normally the local draft holds it, so
+  // leaving is safe; without a draft, leaving loses it, so the browser asks first.
+  const unsaved = episode !== null && content !== episode.content;
+  const atRisk = unsaved && !draftBackupOk;
+  useEffect(() => {
+    if (!atRisk) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [atRisk]);
+
   const save = useCallback(
     (targetNovelId: string, targetEpisodeId: string, nextContent: string) => {
       const seq = ++saveSeqRef.current;
@@ -251,7 +218,6 @@ export default function EditorPage() {
         setSaveState("saving");
         setSaveError(null);
       }
-      savesInFlightRef.current++;
       saveChainRef.current = saveChainRef.current
         .catch(() => {})
         .then(() => saveEpisode(targetNovelId, targetEpisodeId, nextContent))
@@ -259,7 +225,6 @@ export default function EditorPage() {
           // Before the mounted/seq checks below: whether the local backup is
           // still needed depends only on what the server now holds, even if
           // this component has since moved on to another episode.
-          autosaveRetriesRef.current = 0;
           if (targetEpisodeId === currentEpisodeIdRef.current) setServerVersion(updated.updated_at, updated.content);
           // Only this session's own draft is touched: another tab's says
           // nothing about which version *its* text was based on.
@@ -297,63 +262,12 @@ export default function EditorPage() {
           if (!mountedRef.current || seq !== saveSeqRef.current) return;
           setSaveError(describeError(err));
           setSaveState("error");
-          // A failure that may pass (a network blip, a server error) is not
-          // left to wait for the next keystroke: the text goes out again
-          // unless newer text is already waiting, and the local draft covers
-          // the time in between. Not for a rejection that retrying can't
-          // change (session ended, episode gone, bad request).
-          const passing = !(err instanceof ApiError) || err.status >= 500;
-          if (
-            passing &&
-            autosaveRetriesRef.current < AUTOSAVE_MAX_RETRIES &&
-            targetEpisodeId === currentEpisodeIdRef.current &&
-            pendingRef.current === null
-          ) {
-            autosaveRetriesRef.current++;
-            pendingRef.current = { novelId: targetNovelId, episodeId: targetEpisodeId, content: nextContent };
-            if (!autosaveTimerRef.current) {
-              autosaveTimerRef.current = setTimeout(() => autosaveNowRef.current(), AUTOSAVE_RETRY_AFTER_FAILURE_MS);
-            }
-          }
-        })
-        .finally(() => {
-          savesInFlightRef.current--;
+          // The text stays in the local draft and on screen; the author presses
+          // Save again when ready. Nothing is sent on its own.
         });
     },
     [showOtherDrafts, setServerVersion, refreshOtherDrafts]
   );
-
-  const clearAutosaveTimers = useCallback(() => {
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    if (autosaveMaxWaitTimerRef.current) clearTimeout(autosaveMaxWaitTimerRef.current);
-    autosaveTimerRef.current = null;
-    autosaveMaxWaitTimerRef.current = null;
-  }, []);
-
-  // Sends text that hasn't reached the server. Never skipped for being equal to
-  // the last text this tab saw on the server: another tab may have saved since,
-  // and then "equal" would silently drop an edit that reverts to the old text.
-  const sendPending = useCallback(
-    (pending: PendingSave) => {
-      flushDraft(); // the draft must be on disk before the save it backs up
-      save(pending.novelId, pending.episodeId, pending.content);
-    },
-    [flushDraft, save],
-  );
-
-  // The autosave that has come due (or is forced early, e.g. when the tab is hidden).
-  const autosaveNowRef = useRef<() => void>(() => {});
-  autosaveNowRef.current = () => {
-    clearAutosaveTimers();
-    const pending = pendingRef.current;
-    if (!pending) return;
-    if (savesInFlightRef.current > 0) {
-      autosaveTimerRef.current = setTimeout(() => autosaveNowRef.current(), AUTOSAVE_WHILE_SAVING_RECHECK_MS);
-      return;
-    }
-    pendingRef.current = null;
-    sendPending(pending);
-  };
 
   useEffect(() => {
     if (!novelId || !episodeId) return;
@@ -374,16 +288,16 @@ export default function EditorPage() {
     setSaveState("idle");
     setSaveError(null);
     setNotice(null);
+    setDraftBackupOk(true);
     showOtherDrafts([]);
     currentEpisodeIdRef.current = episodeId;
     setServerVersion("", "");
     // Chained after saveChainRef instead of fired directly: a quick
-    // A -> B -> A navigation queues a flush save for A (below, on this
-    // effect's cleanup) that may still be in flight when this same episode
-    // is loaded again. Without waiting for it, this GET could race that
-    // PATCH and win, loading pre-edit content over what was just flushed —
-    // the user would then keep editing from a stale baseline and the next
-    // save would silently drop the flushed edit.
+    // A -> B -> A navigation can come back to A while the save the author
+    // pressed there is still in flight. Without waiting for it, this GET could
+    // race that PATCH and win, loading pre-edit content over what was just
+    // saved — the user would then keep editing from a stale baseline and the
+    // next save would silently drop the saved edit.
     saveChainRef.current
       .catch(() => {})
       // Together: the account (drafts are keyed by the one this token is for)
@@ -396,7 +310,6 @@ export default function EditorPage() {
         // stay in storage and show up in the list.
         startDraftSlot(episodeId, userId);
         ownDraftRef.current.delete(episodeId);
-        draftBackupOkRef.current = true;
         setServerVersion(ep.updated_at, ep.content);
         setEpisode(ep);
         setContent(ep.content);
@@ -409,22 +322,11 @@ export default function EditorPage() {
 
     return () => {
       cancelled = true;
-      // Before anything else: this is also what runs when an expired session
-      // routes away from the editor, so the text has to reach storage now.
+      // Nothing goes to the server on leaving: unsaved text stays in the local
+      // draft, which this writes now — it is also what runs when an expired
+      // session routes away from the editor.
       flushDraft();
       releaseDraftCache(episodeId);
-      clearAutosaveTimers();
-      const pending = pendingRef.current;
-      if (pending) {
-        pendingRef.current = null;
-        // Goes through save() (and so through saveChainRef) rather than a
-        // standalone saveEpisode() call, so this flush still serializes with
-        // any save already in flight for the same episode instead of racing
-        // it — the whole reason saveChainRef exists. Its state update is a
-        // no-op once the seq bump below (or unmount) makes it stale. Sent even
-        // while another save is in flight: leaving the episode is the last chance.
-        sendPending(pending);
-      }
     };
   }, [novelId, episodeId]);
 
@@ -434,26 +336,10 @@ export default function EditorPage() {
     draftPendingRef.current = { episodeId, content: next };
     if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
     draftTimerRef.current = setTimeout(flushDraft, DRAFT_DEBOUNCE_MS);
-    pendingRef.current = { novelId, episodeId, content: next };
-    // Debounced: pushed back by every change. The max-wait timer is started by
-    // the first change and left alone until the save goes out.
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    autosaveRetriesRef.current = 0;
-    const backupOk = draftBackupOkRef.current;
-    autosaveTimerRef.current = setTimeout(
-      () => autosaveNowRef.current(),
-      backupOk ? AUTOSAVE_DEBOUNCE_MS : AUTOSAVE_NO_BACKUP_DEBOUNCE_MS,
-    );
-    if (!autosaveMaxWaitTimerRef.current) {
-      autosaveMaxWaitTimerRef.current = setTimeout(
-        () => autosaveNowRef.current(),
-        backupOk ? AUTOSAVE_MAX_WAIT_MS : AUTOSAVE_NO_BACKUP_MAX_WAIT_MS,
-      );
-    }
   }
 
-  // Loading replaces what's on screen with the draft (and, through the usual
-  // paths, saves it). The draft itself stays listed until the server holds the
+  // Loading replaces what's on screen with the draft; it reaches the server when
+  // the author saves. The draft itself stays listed until the server holds the
   // same text, so it can be loaded again or discarded later.
   function loadOtherDraft(draft: StoredDraft) {
     const changedSince = draft.baseUpdatedAt !== serverUpdatedAt;
@@ -483,10 +369,7 @@ export default function EditorPage() {
 
   function handleSaveNow() {
     if (!novelId || !episodeId) return;
-    pendingRef.current = null;
-    clearAutosaveTimers();
-    autosaveRetriesRef.current = 0;
-    flushDraft();
+    flushDraft(); // the draft must be on disk before the save it backs up
     save(novelId, episodeId, content);
   }
 
@@ -509,7 +392,13 @@ export default function EditorPage() {
   return (
     <div className="editor-page">
       <div className="editor-header">
-        <Link className="back-link" to={`/novels/${novelId}/episodes`}>
+        <Link
+          className="back-link"
+          to={`/novels/${novelId}/episodes`}
+          onClick={(e) => {
+            if (atRisk && !window.confirm(LEAVE_UNSAVED_CONFIRM)) e.preventDefault();
+          }}
+        >
           ← 화 목록
         </Link>
         <h1>{episode.episode_index}화 작성</h1>
@@ -525,7 +414,7 @@ export default function EditorPage() {
           </p>
           {otherDrafts.length >= MAX_DRAFTS_PER_EPISODE && (
             <p>
-              이 화의 초안이 가득 차(최대 {MAX_DRAFTS_PER_EPISODE}개) 최근에 쓰인 초안이 아닌 것이 없으면 새로 여는 탭은 자동 백업이
+              이 화의 초안이 가득 차(최대 {MAX_DRAFTS_PER_EPISODE}개) 최근에 쓰인 초안이 아닌 것이 없으면 새로 여는 탭은 임시저장이
               꺼집니다. 필요 없는 초안은 버려 주세요.
             </p>
           )}
@@ -563,6 +452,11 @@ export default function EditorPage() {
           {saveState === "error" && saveError}
           {(saveState === "idle" || saveState === "saved") &&
             `마지막 저장: ${new Date(episode.updated_at).toLocaleTimeString()}`}
+          {saveState !== "saving" &&
+            unsaved &&
+            (draftBackupOk
+              ? " · 저장하지 않은 변경이 있습니다 (이 브라우저에 임시저장됨)"
+              : " · 저장하지 않은 변경이 있습니다. 이 브라우저에 임시저장할 수 없으니 저장 버튼을 눌러 주세요")}
         </span>
         <div className="editor-actions">
           <button type="button" onClick={handleSaveNow} disabled={saveState === "saving"}>

@@ -123,10 +123,6 @@ export function loadDraft(episodeId: string): Draft | null {
   return userId === null ? null : readDraft(ownKey(userId, episodeId));
 }
 
-// Slots this load has already made room for. Writing runs every few hundred ms
-// while typing, and making room means scanning storage, so it is done once per
-// slot per page load — also across saves that clear the slot in between.
-const slotsWithRoom = new Set<string>();
 // A slot that found the episode full isn't retried on every keystroke burst
 // (each try reads other drafts' text back); it looks again after a while.
 const ROOM_RETRY_MS = 30_000;
@@ -136,17 +132,30 @@ export function saveDraft(episodeId: string, draft: DraftInput): boolean {
   const userId = ownerOf(episodeId);
   if (userId === null || draftsWiped(userId)) return false;
   const key = ownKey(userId, episodeId);
-  if (!slotsWithRoom.has(key)) {
+  // Room is checked whenever the slot has to be created — not just the first
+  // time, because a confirmed save removes it and other tabs or loads may have
+  // filled the episode since. Rewriting an existing slot never needs room.
+  const creating = storageGet(key) === null;
+  if (creating) {
     if ((retryRoomAt.get(key) ?? 0) > Date.now()) return false;
-    if (storageGet(key) === null && !makeRoom(userId, episodeId)) {
+    if (!makeRoom(userId, episodeId)) {
       retryRoomAt.set(key, Date.now() + ROOM_RETRY_MS);
       return false;
     }
     retryRoomAt.delete(key);
-    slotsWithRoom.add(key);
   }
   const stored: Draft = { content: draft.content, baseUpdatedAt: draft.baseUpdatedAt, savedAt: Date.now() };
-  return storageSet(key, JSON.stringify(stored));
+  if (!storageSet(key, JSON.stringify(stored))) return false;
+  // Checking for room and writing aren't one step: another tab may have made
+  // its slot in between, both seeing the last free place. Counting again after
+  // the write catches it — the later writer sees both slots and backs out, and
+  // if both wrote before either counted, both back out and look again later.
+  if (creating && storageKeys(episodePrefix(userId, episodeId)).length > MAX_DRAFTS_PER_EPISODE) {
+    storageRemove(key);
+    retryRoomAt.set(key, Date.now() + ROOM_RETRY_MS);
+    return false;
+  }
+  return true;
 }
 
 export function clearDraft(episodeId: string): void {
@@ -224,12 +233,12 @@ export function discardDraft(key: string): void {
 // Frees a slot for a new session's first write when the episode is at its cap,
 // oldest first and never one written to recently. Returns whether there is room.
 function makeRoom(userId: string, episodeId: string): boolean {
-  const others = storageKeys(episodePrefix(userId, episodeId)).map((key) => ({
-    key,
-    savedAt: readDraftCached(key)?.savedAt ?? 0,
-  }));
-  const excess = others.length - MAX_DRAFTS_PER_EPISODE + 1;
+  const keys = storageKeys(episodePrefix(userId, episodeId));
+  // Runs each time a slot is created, so the common case (room to spare) only
+  // counts keys and reads no manuscript text.
+  const excess = keys.length - MAX_DRAFTS_PER_EPISODE + 1;
   if (excess <= 0) return true;
+  const others = keys.map((key) => ({ key, savedAt: readDraftCached(key)?.savedAt ?? 0 }));
   const now = Date.now();
   const stale = others.filter((o) => now - o.savedAt >= STALE_SLOT_MS).sort((a, b) => a.savedAt - b.savedAt);
   if (stale.length < excess) return false;
