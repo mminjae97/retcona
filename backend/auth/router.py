@@ -3,7 +3,6 @@
 Social login (Google/Kakao/Naver) is handled separately in auth/oauth.py.
 """
 
-import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -24,7 +23,7 @@ from auth.schemas import (
 )
 from auth.security import DUMMY_PASSWORD_HASH, hash_password, verify_password
 from models.db import get_db
-from models.user import User, deletion_grace_cutoff
+from models.user import DELETION_GRACE_PERIOD, User, deletion_grace_cutoff
 
 router = APIRouter()
 
