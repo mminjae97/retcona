@@ -1,13 +1,19 @@
 import type { ChangeEvent, CompositionEvent } from "react";
+import nicknameRules from "../../../shared/nickname-rules.json";
 
 // Pen name rules (design doc 3.6), mirroring the backend's `_strip_nickname`.
-export const NICKNAME_MIN_LENGTH = 2;
-export const NICKNAME_MAX_LENGTH = 20;
+// The numbers themselves come from ../../../shared/nickname-rules.json, read
+// by both sides, so they can't drift apart independently — the character-class
+// check below still can't be shared this way (a regex here vs. Python's
+// unicodedata.category() there are different engines) and stays hand-kept in
+// sync, cross-checked over every code point.
+export const NICKNAME_MIN_LENGTH = nicknameRules.minLength;
+export const NICKNAME_MAX_LENGTH = nicknameRules.maxLength;
 // What the input itself accepts, before NFC and strip: the backend's raw cap.
 // The 20 limit applies to the normalized text, which can be a third of the raw
 // length (decomposed Hangul), so cutting the raw text at 20 would truncate a
 // pasted name without any message.
-const NICKNAME_MAX_RAW_LENGTH = 200;
+const NICKNAME_MAX_RAW_LENGTH = nicknameRules.maxRawLength;
 
 // Python's `str.strip()` whitespace set (str.isspace). JS's `trim()` differs
 // from it: it also strips U+FEFF but not U+001C-U+001F or U+0085, so trimming
@@ -40,10 +46,10 @@ const DISALLOWED_ANY = new RegExp(DISALLOWED_SOURCE, "u");
 const HAS_LETTER_OR_NUMBER = /[\p{L}\p{N}]/u;
 // A run of more than MAX_MARKS combining marks (zalgo-style stacking), or a
 // mark with nothing to attach to (at the start, or right after a space).
-const MAX_MARKS = 3;
+const MAX_MARKS = nicknameRules.maxMarks;
 const BAD_MARKS = new RegExp(`[\\p{Mn}\\p{Mc}]{${MAX_MARKS + 1},}|(?:^| )[\\p{Mn}\\p{Mc}]`, "u");
 
-export const NICKNAME_HINT = "글자·숫자·공백만, 2~20자";
+export const NICKNAME_HINT = `글자·숫자·공백만, ${NICKNAME_MIN_LENGTH}~${NICKNAME_MAX_LENGTH}자`;
 
 export function sanitizeNickname(value: string): string {
   return value.replace(DISALLOWED_ALL, "");
@@ -52,7 +58,7 @@ export function sanitizeNickname(value: string): string {
 // The message to show for a nickname that can't be submitted, or null if it's fine.
 export function getNicknameError(value: string): string | null {
   const stripped = stripNickname(value);
-  const lengthMessage = "필명은 공백을 제외하고 2~20자로 입력해주세요.";
+  const lengthMessage = `필명은 공백을 제외하고 ${NICKNAME_MIN_LENGTH}~${NICKNAME_MAX_LENGTH}자로 입력해주세요.`;
   // Nothing typed (or only spaces): a length problem, not a character problem.
   if (stripped.length === 0) return lengthMessage;
   if (DISALLOWED_ANY.test(stripped) || !HAS_LETTER_OR_NUMBER.test(stripped) || BAD_MARKS.test(stripped)) {

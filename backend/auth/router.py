@@ -102,12 +102,15 @@ def update_nickname(
     body: NicknameUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_unlocked),
-) -> User:
+) -> UserPublic:
     lock_current_user(db, current_user)
     current_user.nickname = body.nickname
+    # Snapshot before commit(), as in login(): commit() expires the instance,
+    # so reading it after would force a second round trip to re-fetch fields
+    # already known here.
+    user_public = UserPublic.model_validate(current_user)
     db.commit()
-    db.refresh(current_user)
-    return current_user
+    return user_public
 
 
 @router.post("/me/deletion", response_model=DeletionResponse)
@@ -133,15 +136,20 @@ def request_deletion(
     # this one must not start a second deletion with a token that is no longer valid.
     lock_current_user(db, current_user)
 
-    current_user.deletion_requested_at = datetime.now(timezone.utc)
+    requested_at = datetime.now(timezone.utc)
+    current_user.deletion_requested_at = requested_at
     # Kills every token issued so far for good, even if a later login
     # cancels the deletion (see get_current_user).
     current_user.token_version += 1
-    db.commit()
-    db.refresh(current_user)
 
-    return DeletionResponse(
+    # Snapshot before commit(), as in login(): commit() expires the instance,
+    # so reading it after would force a second round trip to re-fetch fields
+    # already known here.
+    response = DeletionResponse(
         user_id=current_user.id,
-        deletion_requested_at=current_user.deletion_requested_at,
-        purge_after=current_user.deletion_requested_at + DELETION_GRACE_PERIOD,
+        deletion_requested_at=requested_at,
+        purge_after=requested_at + DELETION_GRACE_PERIOD,
     )
+    db.commit()
+
+    return response

@@ -1,8 +1,10 @@
 """Pydantic request/response schemas for the auth endpoints."""
 
+import json
 import unicodedata
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 from typing import Annotated
 
@@ -13,6 +15,30 @@ def _normalize_email(value: str) -> str:
     return value.lower()
 
 
+# The length/mark-count numbers in the pen-name rule (3.6), shared with the
+# frontend (utils/nickname.ts) via this one file so the two can't drift apart
+# on *these* numbers. The character-class check itself (which Unicode
+# categories are allowed) still can't be shared this way — a regex
+# (frontend) and unicodedata.category() (here) are different engines — and is
+# instead kept in sync by hand, cross-checked over every code point.
+#
+# Falls back to these defaults (kept in sync with shared/nickname-rules.json
+# by hand) instead of failing to import: that file sits outside what
+# pyproject.toml's [tool.setuptools.packages.find] packages, so it exists in
+# a repo checkout (how this app runs today) but not necessarily in a
+# non-editable install (a built wheel, or an image copying only
+# site-packages) — and one missing (or, e.g. mid-edit, incomplete) file
+# shouldn't take the whole API down at import time. Merged rather than
+# swapped in wholesale, so a file missing just one key still uses the others.
+_NICKNAME_RULES_DEFAULT = {"minLength": 2, "maxLength": 20, "maxRawLength": 200, "maxMarks": 3}
+try:
+    _NICKNAME_RULES = {
+        **_NICKNAME_RULES_DEFAULT,
+        **json.loads((Path(__file__).resolve().parents[2] / "shared" / "nickname-rules.json").read_text()),
+    }
+except (OSError, ValueError, TypeError):
+    _NICKNAME_RULES = _NICKNAME_RULES_DEFAULT
+
 # What a pen name may contain (3.6): letters, numbers, combining marks and the
 # ordinary space, from the Basic Multilingual Plane only. Everything else is out:
 # emoji and other pictographs, punctuation and symbols, other kinds of space,
@@ -22,7 +48,7 @@ def _normalize_email(value: str) -> str:
 # agree.
 _NICKNAME_MARK_CATEGORIES = {"Mn", "Mc"}
 # Longest run of combining marks allowed on one character; more is zalgo-style stacking.
-_NICKNAME_MAX_MARKS = 3
+_NICKNAME_MAX_MARKS = _NICKNAME_RULES["maxMarks"]
 # Letters or marks that render as nothing (fillers, joiners, variation
 # selectors); they'd let a name look blank or hide characters.
 _NICKNAME_INVISIBLE = (
@@ -61,8 +87,8 @@ def _strip_nickname(value: str) -> str:
     # Then strip before length-checking, so surrounding whitespace can't push
     # a nickname over the limit or hide an all-whitespace value.
     value = unicodedata.normalize("NFC", value).strip()
-    if not 2 <= len(value) <= 20:
-        raise ValueError("Nickname must be 2-20 characters")
+    if not _NICKNAME_RULES["minLength"] <= len(value) <= _NICKNAME_RULES["maxLength"]:
+        raise ValueError(f"Nickname must be {_NICKNAME_RULES['minLength']}-{_NICKNAME_RULES['maxLength']} characters")
     # Also what keeps NUL out (Postgres text columns reject it: a 500 from the
     # INSERT/UPDATE instead of a 422 here) along with emoji and symbols.
     if not all(_is_allowed_nickname_char(char) for char in value):
@@ -79,11 +105,10 @@ def _strip_nickname(value: str) -> str:
 # carrying a few marks, plus padding) and only there so an unauthenticated
 # request can't make normalization chew through megabytes before the real 2-20
 # check rejects it.
-_NICKNAME_MAX_RAW_LENGTH = 200
 Nickname = Annotated[
     str,
-    Field(min_length=2, max_length=_NICKNAME_MAX_RAW_LENGTH),
-    AfterValidator(_strip_nickname),  # 2-20 chars after stripping (3.6)
+    Field(min_length=_NICKNAME_RULES["minLength"], max_length=_NICKNAME_RULES["maxRawLength"]),
+    AfterValidator(_strip_nickname),  # min-max chars after stripping (3.6)
 ]
 
 

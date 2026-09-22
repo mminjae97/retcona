@@ -16,6 +16,31 @@ const DELETION_ERROR_MESSAGES_BY_STATUS: Record<number, string> = {
   501: "소셜 로그인 계정의 탈퇴는 아직 지원되지 않습니다.",
 };
 
+// The editing/value/saving/error state cluster shared by the nickname and
+// novel-rename inline forms below (deletion is its own shape: a confirm
+// dialog gated by a ref, plus per-status error text, not just describeError).
+// `K` is what identifies which thing is being edited — `true` for nickname
+// (a single field, nothing to key on) or a novel id for rename (so only one
+// row edits at a time and the JSX can tell which).
+function useEditableField<K>() {
+  const [target, setTarget] = useState<K | null>(null);
+  const [value, setValue] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function start(key: K, initialValue: string) {
+    setTarget(key);
+    setValue(initialValue);
+    setError(null);
+  }
+  function cancel() {
+    setTarget(null);
+    setError(null);
+  }
+
+  return { target, value, setValue, saving, setSaving, error, setError, start, cancel };
+}
+
 export default function MyPage() {
   const navigate = useNavigate();
   const [user, setUser] = useState<UserPublic | null>(null);
@@ -25,13 +50,8 @@ export default function MyPage() {
   const [error, setError] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [creating, setCreating] = useState(false);
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [renaming, setRenaming] = useState(false);
-  const [editingNickname, setEditingNickname] = useState(false);
-  const [nicknameValue, setNicknameValue] = useState("");
-  const [savingNickname, setSavingNickname] = useState(false);
-  const [nicknameError, setNicknameError] = useState<string | null>(null);
+  const renameEdit = useEditableField<string>();
+  const nicknameEdit = useEditableField<true>();
   const [confirmingDeletion, setConfirmingDeletion] = useState(false);
   const [deletionPassword, setDeletionPassword] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -91,59 +111,51 @@ export default function MyPage() {
   }
 
   function startRename(novel: NovelPublic) {
-    setRenamingId(novel.id);
-    setRenameValue(novel.title);
+    renameEdit.start(novel.id, novel.title);
   }
 
   async function handleRename(e: FormEvent, id: string) {
     e.preventDefault();
-    if (renaming || !renameValue.trim()) return;
-    setError(null);
-    setRenaming(true);
+    if (renameEdit.saving || !renameEdit.value.trim()) return;
+    renameEdit.setError(null);
+    renameEdit.setSaving(true);
     try {
-      const updated = await renameNovel(id, renameValue);
+      const updated = await renameNovel(id, renameEdit.value);
       setNovels((prev) => prev?.map((n) => (n.id === id ? updated : n)) ?? null);
-      setRenamingId(null);
+      renameEdit.cancel();
     } catch (err) {
-      setError(describeError(err));
+      renameEdit.setError(describeError(err));
     } finally {
-      setRenaming(false);
+      renameEdit.setSaving(false);
     }
   }
 
   function startEditNickname() {
     if (!user) return;
-    setNicknameValue(user.nickname);
-    setNicknameError(null);
-    setEditingNickname(true);
+    nicknameEdit.start(true, user.nickname);
   }
 
   async function handleSaveNickname(e: FormEvent) {
     e.preventDefault();
-    if (savingNickname) return;
+    if (nicknameEdit.saving) return;
     // Validate the trimmed value, matching the backend's strip-then-check
     // rule (3.6).
-    const problem = getNicknameError(nicknameValue);
+    const problem = getNicknameError(nicknameEdit.value);
     if (problem) {
-      setNicknameError(problem);
+      nicknameEdit.setError(problem);
       return;
     }
-    const trimmed = stripNickname(nicknameValue);
-    setNicknameError(null);
-    setSavingNickname(true);
+    const trimmed = stripNickname(nicknameEdit.value);
+    nicknameEdit.setError(null);
+    nicknameEdit.setSaving(true);
     try {
       setUser(await updateNickname(trimmed));
-      setEditingNickname(false);
+      nicknameEdit.cancel();
     } catch (err) {
-      setNicknameError(describeError(err));
+      nicknameEdit.setError(describeError(err));
     } finally {
-      setSavingNickname(false);
+      nicknameEdit.setSaving(false);
     }
-  }
-
-  function cancelEditNickname() {
-    setEditingNickname(false);
-    setNicknameError(null);
   }
 
   function cancelDeletion() {
@@ -207,18 +219,18 @@ export default function MyPage() {
           <dl className="account-info">
             <dt>필명</dt>
             <dd>
-              {editingNickname ? (
+              {nicknameEdit.target ? (
                 <form className="rename-form" onSubmit={handleSaveNickname}>
                   <input
                     type="text"
-                    value={nicknameValue}
-                    {...nicknameInputProps(setNicknameValue)}
+                    value={nicknameEdit.value}
+                    {...nicknameInputProps(nicknameEdit.setValue)}
                     autoFocus
                   />
-                  <button type="submit" disabled={savingNickname}>
+                  <button type="submit" disabled={nicknameEdit.saving}>
                     저장
                   </button>
-                  <button type="button" onClick={cancelEditNickname} disabled={savingNickname}>
+                  <button type="button" onClick={nicknameEdit.cancel} disabled={nicknameEdit.saving}>
                     취소
                   </button>
                 </form>
@@ -230,7 +242,7 @@ export default function MyPage() {
                   </button>
                 </>
               )}
-              {nicknameError && <p className="mypage-error">{nicknameError}</p>}
+              {nicknameEdit.error && <p className="mypage-error">{nicknameEdit.error}</p>}
             </dd>
             <dt>이메일</dt>
             <dd>{user.email}</dd>
@@ -274,21 +286,22 @@ export default function MyPage() {
           <ul className="novel-list">
             {novels.map((novel) => (
               <li key={novel.id} className="novel-row">
-                {renamingId === novel.id ? (
+                {renameEdit.target === novel.id ? (
                   <form className="rename-form" onSubmit={(e) => handleRename(e, novel.id)}>
                     <input
                       type="text"
-                      value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
+                      value={renameEdit.value}
+                      onChange={(e) => renameEdit.setValue(e.target.value)}
                       maxLength={200}
                       autoFocus
                     />
-                    <button type="submit" disabled={renaming}>
+                    <button type="submit" disabled={renameEdit.saving}>
                       저장
                     </button>
-                    <button type="button" onClick={() => setRenamingId(null)}>
+                    <button type="button" onClick={renameEdit.cancel}>
                       취소
                     </button>
+                    {renameEdit.error && <p className="mypage-error">{renameEdit.error}</p>}
                   </form>
                 ) : (
                   <>
