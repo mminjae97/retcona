@@ -21,6 +21,7 @@ import {
   isDraftEventFor,
   isDraftsWipedEventFor,
   listOtherDrafts,
+  loadDraft,
   releaseDraftCache,
   saveDraft,
   startDraftSlot,
@@ -192,6 +193,15 @@ export default function EditorPage() {
       // now, not just as of its next write.
       if (isDraftsWipedEventFor(id, e.key)) setDraftBackupOk(false);
       if (!isDraftEventFor(id, e.key)) return;
+      // A removal under this episode's prefix can be another tab's makeRoom()
+      // reclaiming *this* session's own stale slot (evicted for room, not by
+      // anything this tab did) — ownDraftRef wouldn't otherwise learn its
+      // slot is gone until its next write, overcounting the "drafts nearly
+      // full" warning below in the meantime. loadDraft() re-checks storage
+      // directly rather than assuming which key changed.
+      if (e.newValue === null && ownDraftRef.current.has(id) && loadDraft(id) === null) {
+        ownDraftRef.current.delete(id);
+      }
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => refreshOtherDrafts(), OTHER_DRAFTS_REFRESH_DEBOUNCE_MS);
     };

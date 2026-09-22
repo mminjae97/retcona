@@ -18,6 +18,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, TimestampMixin
+from models.nickname_rules import NICKNAME_RULES
 
 
 # Grace period between a deletion request and permanent deletion (3.5).
@@ -45,7 +46,13 @@ class User(Base, TimestampMixin):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    nickname: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Length follows shared/nickname-rules.json (models/nickname_rules.py), but
+    # only at the Python/ORM level: the actual column was created at
+    # VARCHAR(20) by db/migrations/versions/961f54d79f2a_initial_schema.py,
+    # a historical migration that isn't edited retroactively. Raising
+    # maxLength above 20 needs a new migration (ALTER COLUMN) alongside it, or
+    # validation will accept a nickname the database then rejects.
+    nickname: Mapped[str] = mapped_column(String(NICKNAME_RULES["maxLength"]), nullable=False)
     provider: Mapped[str | None] = mapped_column(String)  # google | kakao | naver | None (direct login)
     provider_id: Mapped[str | None] = mapped_column(String)
     password_hash: Mapped[str | None] = mapped_column(String)
