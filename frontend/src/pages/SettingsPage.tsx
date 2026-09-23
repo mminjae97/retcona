@@ -164,38 +164,42 @@ function WorldSettingsSection({ novelId }: { novelId: string }) {
 
   const editor = (
     <form className="setting-card setting-form" onSubmit={handleSave}>
-      <label>
-        분류
-        <select
-          value={form.category}
-          onChange={(e) => setForm({ ...form, category: e.target.value as WorldCategory })}
-        >
-          {Object.entries(WORLD_CATEGORIES).map(([code, label]) => (
-            <option key={code} value={code}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        제목
-        <input
-          type="text"
-          value={form.title}
-          onChange={(e) => setForm({ ...form, title: e.target.value })}
-          maxLength={200}
-          autoFocus
-        />
-      </label>
-      <label>
-        내용
-        <textarea
-          value={form.content}
-          onChange={(e) => setForm({ ...form, content: e.target.value })}
-          maxLength={20000}
-          rows={5}
-        />
-      </label>
+      {/* Locked with the buttons: text typed while a save is in flight would be
+          thrown away when its result closes or reloads the form. */}
+      <fieldset className="form-fields" disabled={busy}>
+        <label>
+          분류
+          <select
+            value={form.category}
+            onChange={(e) => setForm({ ...form, category: e.target.value as WorldCategory })}
+          >
+            {Object.entries(WORLD_CATEGORIES).map(([code, label]) => (
+              <option key={code} value={code}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          제목
+          <input
+            type="text"
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            maxLength={200}
+            autoFocus
+          />
+        </label>
+        <label>
+          내용
+          <textarea
+            value={form.content}
+            onChange={(e) => setForm({ ...form, content: e.target.value })}
+            maxLength={20000}
+            rows={5}
+          />
+        </label>
+      </fieldset>
       {formError && <p className="settings-error">{formError}</p>}
       <div className="form-actions">
         <button type="submit" disabled={busy}>
@@ -420,32 +424,36 @@ function CharactersSection({ novelId }: { novelId: string }) {
 
           {selected !== null && (
             <form className="setting-card setting-form character-form" onSubmit={handleSave}>
-              <label>
-                이름
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  maxLength={100}
-                  autoFocus={selected === "new"}
-                />
-              </label>
-              {SECTIONS.map((section) => (
-                <fieldset key={section.key}>
-                  <legend>{section.title}</legend>
-                  {Object.entries(section.fields).map(([field, label]) => (
-                    <label key={field}>
-                      {label}
-                      <input
-                        type="text"
-                        value={(form[section.key] as Record<string, string>)[field]}
-                        onChange={(e) => setField(section.key, field, e.target.value)}
-                        maxLength={500}
-                      />
-                    </label>
-                  ))}
-                </fieldset>
-              ))}
+              {/* Locked with the buttons: text typed while a save is in flight would be
+                  thrown away when its result closes or reloads the form. */}
+              <fieldset className="form-fields" disabled={busy}>
+                <label>
+                  이름
+                  <input
+                    type="text"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    maxLength={100}
+                    autoFocus={selected === "new"}
+                  />
+                </label>
+                {SECTIONS.map((section) => (
+                  <fieldset key={section.key} className="attr-section">
+                    <legend>{section.title}</legend>
+                    {Object.entries(section.fields).map(([field, label]) => (
+                      <label key={field}>
+                        {label}
+                        <input
+                          type="text"
+                          value={(form[section.key] as Record<string, string>)[field]}
+                          onChange={(e) => setField(section.key, field, e.target.value)}
+                          maxLength={500}
+                        />
+                      </label>
+                    ))}
+                  </fieldset>
+                ))}
+              </fieldset>
               {formError && <p className="settings-error">{formError}</p>}
               <div className="form-actions">
                 <button type="submit" disabled={busy}>
