@@ -63,17 +63,26 @@ export default function LoginPage() {
   const [nickname, setNickname] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  // Signup email verification: whether a code was sent (and when another may
-  // be), the code typed, and the token the right code earned.
-  const [codeSent, setCodeSent] = useState(false);
-  const [resendAt, setResendAt] = useState(0);
+  // Signup email verification. Each record says which address it's for, and
+  // only counts while that's still the address in the field: a code sent (and
+  // when another may be) and a verification earned are for the address they
+  // were requested for. So editing the email — here, in the login tab, or
+  // while a request is still in flight — can't carry them over to another
+  // address, and going back to the first address brings them back.
+  const [codeSentTo, setCodeSentTo] = useState<string | null>(null);
+  const [resendWait, setResendWait] = useState<{ email: string; until: number } | null>(null);
   const [code, setCode] = useState("");
-  const [verificationToken, setVerificationToken] = useState<string | null>(null);
+  const [verified, setVerified] = useState<{ email: string; token: string } | null>(null);
   const [sendingCode, setSendingCode] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [emailStepError, setEmailStepError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const resendIn = Math.max(0, Math.ceil((resendAt - now) / 1000));
+  // As the backend normalizes it (auth/schemas.py lowercases emails).
+  const currentEmail = email.trim().toLowerCase();
+  const codeSent = codeSentTo === currentEmail;
+  const verificationToken = verified?.email === currentEmail ? verified.token : null;
+  const resendIn =
+    resendWait?.email === currentEmail ? Math.max(0, Math.ceil((resendWait.until - now) / 1000)) : 0;
 
   useEffect(() => {
     if (resendIn === 0) return;
@@ -81,36 +90,35 @@ export default function LoginPage() {
     return () => window.clearTimeout(timer);
   }, [resendIn, now]);
 
-  // Also the resend wait: the server limits resends per address, so a
-  // different address can have its code right away (and going back to the
-  // first one inside its cooldown gets the server's 429 message).
+  // After the server turned the verification down (it ran out): start over.
   function resetVerification() {
-    setCodeSent(false);
+    setCodeSentTo(null);
+    setVerified(null);
     setCode("");
-    setVerificationToken(null);
     setEmailStepError(null);
-    setResendAt(0);
   }
 
   function handleEmailChange(value: string) {
     setEmail(value);
-    // A code or a verification is for the address it was sent to.
-    if (codeSent || verificationToken) resetVerification();
+    // The code typed and any message were about the previous address.
+    setCode("");
+    setEmailStepError(null);
   }
 
   async function handleRequestCode() {
     if (sendingCode || resendIn > 0) return;
-    if (!email.trim()) {
+    const target = currentEmail;
+    if (!target) {
       setEmailStepError("이메일을 입력해주세요.");
       return;
     }
     setSendingCode(true);
     setEmailStepError(null);
     try {
-      const sent = await requestSignupCode(email.trim());
-      setCodeSent(true);
+      const sent = await requestSignupCode(target);
+      setCodeSentTo(target);
       setCode("");
-      setResendAt(Date.now() + sent.resend_after * 1000);
+      setResendWait({ email: target, until: Date.now() + sent.resend_after * 1000 });
       setNow(Date.now());
     } catch (err) {
       setEmailStepError(describeByStatus(err, CODE_REQUEST_ERRORS));
@@ -125,10 +133,12 @@ export default function LoginPage() {
       setEmailStepError("6자리 숫자를 입력해주세요.");
       return;
     }
+    const target = currentEmail;
     setVerifying(true);
     setEmailStepError(null);
     try {
-      setVerificationToken(await verifySignupCode(email.trim(), code));
+      const token = await verifySignupCode(target, code);
+      setVerified({ email: target, token });
     } catch (err) {
       setEmailStepError(describeByStatus(err, CODE_VERIFY_ERRORS));
     } finally {
@@ -252,7 +262,6 @@ export default function LoginPage() {
                 type="email"
                 value={email}
                 onChange={(e) => handleEmailChange(e.target.value)}
-                readOnly={verificationToken !== null}
                 required
                 autoComplete="email"
               />
@@ -269,7 +278,7 @@ export default function LoginPage() {
               id="login-email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => handleEmailChange(e.target.value)}
               required
               autoComplete="email"
             />

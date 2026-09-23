@@ -13,11 +13,12 @@ account from it.
   nickname is never taken from the Google profile). This keeps users.nickname
   required, instead of an account existing without one until that screen is
   done.
-- An email already registered with a password is refused (409), not linked:
-  accounts created before signup email verification existed
-  (users.email_verified_at is null) never proved they own the address, so
-  linking by email would let whoever registered someone else's Gmail address
-  first sit in the account that person later opens with Google.
+- An email already registered with a password is refused (409), not linked
+  — every one, verified or not. Accounts created before signup email
+  verification existed (users.email_verified_at is null) never proved they
+  own the address, so linking by email would let whoever registered someone
+  else's Gmail address first sit in the account that person later opens with
+  Google; linking verified ones only would be a separate, deliberate feature.
 
 Configured by GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET /
 GOOGLE_OAUTH_REDIRECT_URI; without them the endpoints answer 503 and the
