@@ -16,6 +16,7 @@ every nickname in the app or crash the API at import time.
 
 import json
 import logging
+import reprlib
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,12 @@ def _validated(raw: dict) -> dict | None:
 def _load() -> dict:
     path = Path(__file__).resolve().parents[2] / "shared" / "nickname-rules.json"
     try:
-        raw = json.loads(path.read_text())
+        # utf-8-sig: read as UTF-8 regardless of the platform's locale
+        # encoding (cp949 on a Korean Windows), with a leading BOM (an
+        # editor's "UTF-8 with BOM") skipped rather than failing — the
+        # frontend's Vite JSON import strips it, so rejecting it here would
+        # put the two sides on different rules.
+        raw = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as exc:
         logger.warning("Could not read %s (%s); using default nickname rules %s", path, exc, _DEFAULT)
         return _DEFAULT
@@ -82,7 +88,10 @@ def _load() -> dict:
         # falls all the way back rather than trying to salvage the rest, so a
         # legitimate intentional change caught in the same edit as a typo is
         # discarded too — logged so that isn't silent.
-        logger.warning("Invalid values in %s: %s; using default nickname rules %s", path, raw, _DEFAULT)
+        # Only the known keys, and reprlib-truncated: raw can hold anything,
+        # at any size, including under those keys.
+        known = reprlib.repr({key: raw.get(key) for key in _DEFAULT})
+        logger.warning("Invalid values in %s: %s; using default nickname rules %s", path, known, _DEFAULT)
         return _DEFAULT
     return validated
 

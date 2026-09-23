@@ -19,9 +19,7 @@ from models.db import check_schema_is_current, engine
 from models.user import check_nickname_column_length
 from workers.purge import purge_once, purge_schedule, seconds_until_next_midnight
 
-# uvicorn only sets up handlers for its own loggers, so this one is used to have
-# the purge's INFO line show up next to the server's own output.
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger(__name__)
 
 # The API server purges accounts past their deletion grace period (3.5) every
 # day at midnight (PURGE_TIMEZONE, see workers/purge.py). Set this to 0 to turn
@@ -66,16 +64,21 @@ async def _purge_daily() -> None:
             schedule = purge_schedule(PURGE_RETRY_SECONDS)
 
 
+def _check_database() -> None:
+    # One connection for both. Migrations first: a database behind them gets
+    # that plain error rather than whatever the nickname check trips over.
+    with engine.connect() as connection:
+        check_schema_is_current(connection)
+        check_nickname_column_length(connection)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_keys()
     # Blocking DB work, off the event loop (nothing else is being served yet,
     # but this still shouldn't set the precedent of blocking it from
-    # lifespan) — same reasoning as the purge pass below. Migrations first:
-    # a database behind them gets that plain error rather than whatever the
-    # nickname check happens to trip over.
-    await asyncio.to_thread(check_schema_is_current, engine)
-    await asyncio.to_thread(check_nickname_column_length, engine)
+    # lifespan) — same reasoning as the purge pass below.
+    await asyncio.to_thread(_check_database)
     purge_task = None
     if _purge_enabled():
         seconds_until_next_midnight()  # a bad PURGE_TIMEZONE fails startup, not the first midnight

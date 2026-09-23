@@ -11,7 +11,11 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
+# db/migrations/env.py -> <repo root>/backend. Two levels up, not one: one
+# level up is db/, and db/backend doesn't exist — which went unnoticed wherever
+# the backend was also installed into the environment (pip install -e), since
+# `import models` then resolved through that instead.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "backend"))
 
 import models  # noqa: E402  (registers every model on Base.metadata as a side effect)
 from models import Base  # noqa: E402
