@@ -36,21 +36,17 @@ def _app_log_level() -> int:
     return uvicorn_error.getEffectiveLevel() if configured else logging.INFO
 
 
-class _LastResortHandler(logging.StreamHandler):
-    """What Python's own last-resort handler is, plus uvicorn's formatting and
-    a level filter that lets the app's INFO through."""
+class _LastResortHandler(logging.Handler):
+    """What Python's own last-resort handler is — a write to sys.stderr as it
+    is at that moment, not as it was at import time, so pytest's capture or
+    anything else that swaps sys.stderr keeps getting these lines instead of a
+    closed stream's "I/O operation on closed file" — plus uvicorn's formatting
+    and a filter that lets the app's INFO through. A plain Handler, not a
+    StreamHandler: there's no stream of its own to set (setStream)."""
 
     def __init__(self) -> None:
-        logging.Handler.__init__(self)
+        super().__init__()
         self.setFormatter(DefaultFormatter("%(levelprefix)s %(name)s: %(message)s"))
-
-    @property
-    def stream(self):
-        # sys.stderr as it is now, not as it was at import time (which
-        # StreamHandler would hold on to): pytest's capture, or anything else
-        # that swaps sys.stderr, keeps getting these lines instead of a
-        # closed stream's "I/O operation on closed file".
-        return sys.stderr
 
     def filter(self, record: logging.LogRecord) -> bool:
         # Below WARNING only for the app's own packages. A library logger
@@ -60,6 +56,29 @@ class _LastResortHandler(logging.StreamHandler):
             return False
         return super().filter(record)
 
+    terminator = "\n"
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # StreamHandler.emit's, against the current sys.stderr: flushed per
+        # record, so a crash right after a line doesn't leave it in a buffer.
+        try:
+            stream = sys.stderr
+            stream.write(self.format(record) + self.terminator)
+            stream.flush()
+        except RecursionError:
+            raise
+        except Exception:  # noqa: BLE001 — the stdlib handlers' own pattern: handleError reports it
+            self.handleError(record)
+
+
+def _is_python_default(handler: logging.Handler | None) -> bool:
+    # logging._defaultLastResort is the handler Python installs; private, so
+    # when a runtime doesn't have it, fall back to recognizing its class.
+    default = getattr(logging, "_defaultLastResort", None)
+    if default is not None:
+        return handler is default
+    return type(handler).__module__ == "logging" and type(handler).__name__ == "_StderrHandler"
+
 
 def configure_app_logging() -> None:
     # Python's last-resort handler (what a record falls back to when neither
@@ -68,10 +87,10 @@ def configure_app_logging() -> None:
     # INFO lines through. Not a handler on the root logger: anything that sets
     # up root itself — a --log-config, logging.basicConfig, the Cloud Logging
     # handler, pytest's caplog — before or after this takes over completely,
-    # with nothing printed twice. Only Python's own is replaced: not one
-    # someone else put there, not None (turned off on purpose), not ours
-    # (both entry packages call this).
-    if type(logging.lastResort).__module__ == "logging":
+    # with nothing printed twice. Only Python's own default is replaced: not
+    # one someone else put there (even another stdlib handler), not None
+    # (turned off on purpose), not ours (both entry packages call this).
+    if _is_python_default(logging.lastResort):
         logging.lastResort = _LastResortHandler()
     # Only this app's packages are lowered to the app level; everything else
     # keeps the root's (WARNING by default), so library INFO chatter stays out.
