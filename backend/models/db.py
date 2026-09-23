@@ -8,11 +8,14 @@ import logging
 import os
 from pathlib import Path
 
+from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from alembic.util import CommandError
 from sqlalchemy import Connection, create_engine, make_url
 from sqlalchemy.orm import sessionmaker
+
+import models  # every model module, registered on Base.metadata (for _missing_schema)
 
 logger = logging.getLogger(__name__)
 
@@ -63,43 +66,88 @@ def get_db():
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "db" / "migrations"
 
 
+def _missing_schema(connection: Connection) -> list[str]:
+    """Tables and columns this code's models declare that the database lacks,
+    found by comparing Base.metadata against the live schema (the comparison
+    `alembic revision --autogenerate` makes). Only what's missing counts:
+    extra tables/columns, or differing types and indexes, don't stop this code
+    from running, while a missing one is a 500 on first use.
+    """
+    diffs = compare_metadata(MigrationContext.configure(connection), models.Base.metadata)
+    missing = []
+    for diff in diffs:
+        # Column modifications come grouped in lists; only the add_* tuples matter.
+        if not isinstance(diff, tuple):
+            continue
+        if diff[0] == "add_table":
+            missing.append(diff[1].name)
+        elif diff[0] == "add_column":
+            missing.append(f"{diff[2]}.{diff[3].name}")
+    return sorted(missing)
+
+
+def _require_schema(connection: Connection, context: str) -> None:
+    missing = _missing_schema(connection)
+    if missing:
+        raise RuntimeError(
+            f"{context}, and the database is missing {missing}, which this code needs — "
+            "run this release's migrations (`alembic upgrade head` from db/) before starting."
+        )
+
+
 def check_schema_is_current(connection: Connection) -> None:
     """Fails loudly at startup if the database is behind the migrations this
     code ships with, instead of starting and then returning 500s
     (UndefinedColumn, UndefinedTable) on whichever request first touches what
     the missing migration would have added.
 
-    A database revision this code doesn't know at all is allowed, with a
-    warning: that's what an older instance sees during a rolling deploy after
-    the new release's migration has already run, and refusing to start there
-    would take the old instances down before the new ones are up.
+    Two cases can't be settled by revision alone, and fall back to checking
+    the schema itself against the models (_missing_schema):
+    - A revision this code doesn't know: what an older instance sees during a
+      rolling deploy after the new release migrated (fine, and refusing would
+      take the old instances down before the new ones are up), but also a
+      revision from a branch that split off before this code's head (missing
+      this code's newer migrations). With no script for it, its ancestry can't
+      be checked, but whether the schema has everything this code needs can.
+    - No db/migrations to compare against (a non-editable install), where the
+      revision check can't run at all.
     """
-    if not _MIGRATIONS_DIR.is_dir():
-        logger.warning("%s not found; skipping the database migration check", _MIGRATIONS_DIR)
-        return
-    script = ScriptDirectory(str(_MIGRATIONS_DIR))
-    expected = set(script.get_heads())
     current = set(MigrationContext.configure(connection).get_current_heads())
-    if current == expected:
-        return
     if not current:
         raise RuntimeError(
             "The database has no migrations applied — run `alembic upgrade head` (from db/), "
             "and check that DATABASE_URL points at the right database."
         )
-    for revision in current:
+    if not _MIGRATIONS_DIR.is_dir():
+        _require_schema(connection, f"{_MIGRATIONS_DIR} not found, so revision {sorted(current)} can't be checked")
+        logger.warning(
+            "%s not found; checked the database schema against the models instead (nothing missing)",
+            _MIGRATIONS_DIR,
+        )
+        return
+    script = ScriptDirectory(str(_MIGRATIONS_DIR))
+    expected = set(script.get_heads())
+    if current == expected:
+        return
+    unknown = []
+    for revision in sorted(current):
         try:
-            known = script.get_revision(revision) is not None
+            if script.get_revision(revision) is None:
+                unknown.append(revision)
         except CommandError:
-            known = False
-        if not known:
-            logger.warning(
-                "The database is at revision %s, which this code doesn't know (expected %s) — "
-                "presumably a newer release's migration; starting anyway",
-                revision,
-                sorted(expected),
-            )
-            return
+            unknown.append(revision)
+    if unknown:
+        _require_schema(
+            connection,
+            f"The database is at revision {unknown}, which this code doesn't know (expected {sorted(expected)})",
+        )
+        logger.warning(
+            "The database is at revision %s, which this code doesn't know (expected %s), but its schema "
+            "has everything this code's models need — presumably a newer release's migration; starting anyway",
+            unknown,
+            sorted(expected),
+        )
+        return
     raise RuntimeError(
         f"The database is at revision {sorted(current)}, behind this code's {sorted(expected)} — "
         "run `alembic upgrade head` (from db/) before starting."
