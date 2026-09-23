@@ -11,15 +11,15 @@
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import DateTime, Engine, Integer, String, inspect
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.exc import NoSuchTableError
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, TimestampMixin
 from models.nickname_rules import NICKNAME_RULES
-
 
 # Grace period between a deletion request and permanent deletion (3.5).
 DELETION_GRACE_PERIOD = timedelta(days=30)
@@ -38,7 +38,7 @@ def deletion_grace_cutoff(now: datetime | None = None) -> datetime:
     login just un-scheduled, or accept a login for an account purge is about
     to remove.
     """
-    return (now or datetime.now(timezone.utc)) - DELETION_GRACE_PERIOD
+    return (now or datetime.now(UTC)) - DELETION_GRACE_PERIOD
 
 
 class User(Base, TimestampMixin):
@@ -67,7 +67,7 @@ class User(Base, TimestampMixin):
 
 def check_nickname_column_length(engine: Engine) -> None:
     """Fails loudly at startup if the *actual* users.nickname column (reflected
-    from the live database) doesn't match NICKNAME_RULES["maxLength"].
+    from the live database) is narrower than NICKNAME_RULES["maxLength"].
 
     Comparing against User.nickname's declared SQLAlchemy type wouldn't catch
     anything — that type is derived from the same NICKNAME_RULES value above,
@@ -76,15 +76,29 @@ def check_nickname_column_length(engine: Engine) -> None:
     migration (ALTER COLUMN), this is what stands between that and a 500 on
     the first nickname past the old, still-actual length.
     """
-    columns = {c["name"]: c for c in inspect(engine).get_columns("users")}
+    try:
+        columns = {c["name"]: c for c in inspect(engine).get_columns("users")}
+        nickname_column = columns["nickname"]
+    except (NoSuchTableError, KeyError) as exc:
+        # Usually a fresh database that migrations haven't been run against
+        # (the app never creates tables itself), but possibly DATABASE_URL
+        # pointing at the wrong database — say so plainly rather than surface
+        # a raw KeyError/NoSuchTableError that looks like a bug in this check.
+        raise RuntimeError(
+            "Could not find users.nickname to check its length — has `alembic upgrade head` "
+            "been run, and does DATABASE_URL point at the right database?"
+        ) from exc
     # getattr, not a direct .length: reflection returns a generic TypeEngine,
     # and while this column is a VARCHAR today (so it does carry .length),
     # nothing statically guarantees that stays true.
-    actual_length = getattr(columns["nickname"]["type"], "length", None)
+    # None means unbounded (TEXT, or VARCHAR with no length). Only a column
+    # narrower than maxLength breaks anything; a wider one just holds names
+    # that can no longer be that long, so it isn't worth refusing to start.
+    actual_length = getattr(nickname_column["type"], "length", None)
     expected_length = NICKNAME_RULES["maxLength"]
-    if actual_length != expected_length:
+    if actual_length is not None and actual_length < expected_length:
         raise RuntimeError(
-            f"users.nickname is VARCHAR({actual_length}) in the database, but "
-            f"shared/nickname-rules.json's maxLength is {expected_length}. "
+            f"users.nickname is VARCHAR({actual_length}) in the database, narrower than "
+            f"shared/nickname-rules.json's maxLength of {expected_length}. "
             "Write a migration to ALTER the column (or fix the JSON) before starting."
         )
