@@ -143,8 +143,10 @@
 }
 
 /* The theme's input colors override the browser's own disabled look, so a
-   field locked during a save would otherwise look editable. */
-.form-fields :disabled {
+   field locked during a save would otherwise look editable. Controls only: a
+   nested fieldset (the character sections) counts as :disabled too, and
+   dimming it as well would dim the fields inside it twice. */
+.form-fields :is(input, select, textarea):disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

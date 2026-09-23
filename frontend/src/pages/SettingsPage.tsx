@@ -84,14 +84,17 @@ function useList<T>(load: () => Promise<T[]>) {
 
 // Disabling the form's fieldset while a save runs takes keyboard focus away
 // from the field being typed in; this puts it back once the lock lifts, if
-// that field is still on screen (a world card's editor closes on success).
+// that field is still on screen (a world card's editor closes on success) and
+// focus hasn't gone anywhere since — the lock drops it on <body>, and a field
+// the user has moved to meanwhile (the other tab's form) keeps it.
 function useRestoreFocusAfter(busy: boolean) {
   const focused = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (busy) return;
     const element = focused.current;
     focused.current = null;
-    if (element?.isConnected) element.focus();
+    const focusLost = document.activeElement === null || document.activeElement === document.body;
+    if (element?.isConnected && focusLost) element.focus();
   }, [busy]);
   return () => {
     focused.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
