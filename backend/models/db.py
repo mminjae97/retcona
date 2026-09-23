@@ -28,12 +28,20 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg://retcona:retc
 # new pooled connection. This applies to all of them, not only startup — a
 # connection that can't be made in this long fails with OperationalError.
 #
-# Only a default: a connect_timeout already in DATABASE_URL or in libpq's
-# PGCONNECT_TIMEOUT wins (an explicit connect argument would override the
-# latter), and it's only passed to the libpq-based drivers, which are the ones
-# that accept it.
+# Only a default: a connect_timeout already in DATABASE_URL, or a positive
+# libpq PGCONNECT_TIMEOUT, wins (an explicit connect argument would override
+# the latter). An empty or 0 PGCONNECT_TIMEOUT means "no timeout" to libpq —
+# the indefinite hang this exists to prevent, and more likely a blank line in
+# an env file than a decision — so it doesn't; `?connect_timeout=0` in
+# DATABASE_URL still turns the timeout off on purpose. It's only passed to the
+# libpq-based drivers, which are the ones that accept it.
 DB_CONNECT_TIMEOUT_SECONDS = 10
 _LIBPQ_DRIVERS = {"psycopg", "psycopg2"}
+
+
+def _positive_env_timeout() -> bool:
+    value = os.environ.get("PGCONNECT_TIMEOUT", "").strip()
+    return value.isdigit() and int(value) > 0
 
 
 def _connect_args(url: str) -> dict:
@@ -42,7 +50,7 @@ def _connect_args(url: str) -> dict:
         parsed.get_backend_name() != "postgresql"
         or parsed.get_driver_name() not in _LIBPQ_DRIVERS
         or "connect_timeout" in parsed.query
-        or "PGCONNECT_TIMEOUT" in os.environ
+        or _positive_env_timeout()
     ):
         return {}
     return {"connect_timeout": DB_CONNECT_TIMEOUT_SECONDS}

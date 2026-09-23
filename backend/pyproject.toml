@@ -37,4 +37,5 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
+# Adding a top-level package? Also add it to infra/app_logging.py's APP_PACKAGES.
 include = ["api*", "auth*", "pipeline*", "models*", "ai*", "workers*", "infra*"]
