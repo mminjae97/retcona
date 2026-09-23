@@ -73,8 +73,13 @@ def _config() -> _Config | None:
     if not all(values):
         return None
     config = _Config(*values)
-    redirect = urllib.parse.urlsplit(config.redirect_uri)
-    if redirect.scheme not in ("http", "https") or not redirect.netloc:
+    try:
+        redirect = urllib.parse.urlsplit(config.redirect_uri)
+        _ = redirect.port  # raises for a port that isn't a number in 0-65535
+        valid = redirect.scheme in ("http", "https") and bool(redirect.hostname) and " " not in config.redirect_uri
+    except ValueError:
+        valid = False
+    if not valid:
         # Google needs the absolute URL of the callback page, and the frontend
         # compares its origin with its own: a relative path or a typo would
         # only fail later, in the browser. Off (the button disabled) instead.

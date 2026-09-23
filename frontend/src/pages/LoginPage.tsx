@@ -8,6 +8,7 @@ import { getGoogleConfig, login, requestSignupCode, signup, verifySignupCode } f
 import type { GoogleConfig, UserPublic } from "../api/auth";
 import { ApiError, describeError as describeApiError } from "../api/client";
 import { startGoogleLogin } from "../utils/googleAuth";
+import type { GoogleLoginStartFailure } from "../utils/googleAuth";
 import { destinationAfterLogin, getRedirectState } from "../utils/loginRedirect";
 import { getNicknameError, nicknameInputProps, stripNickname } from "../utils/nickname";
 import "./LoginPage.css";
@@ -164,7 +165,13 @@ export default function LoginPage() {
     if (!googleConfig?.enabled || leavingForGoogle) return;
     setError(null);
     setLeavingForGoogle(true);
-    const failure = await startGoogleLogin(googleConfig, redirect);
+    let failure: GoogleLoginStartFailure | null;
+    try {
+      failure = await startGoogleLogin(googleConfig, redirect);
+    } catch {
+      // It isn't meant to throw; whatever did, the button mustn't stay stuck.
+      failure = { reason: "config" };
+    }
     if (failure === null) return; // on its way to Google
     setLeavingForGoogle(false);
     setError(
@@ -172,7 +179,9 @@ export default function LoginPage() {
         ? `구글 로그인은 ${failure.origin} 주소에서 사용할 수 있습니다. 이 주소로 접속해 다시 시도해주세요.`
         : failure.reason === "insecure"
           ? "구글 로그인은 HTTPS 또는 localhost 주소에서만 사용할 수 있습니다."
-          : "브라우저 저장소를 사용할 수 없어 구글 로그인을 시작할 수 없습니다.",
+          : failure.reason === "storage"
+            ? "브라우저 저장소를 사용할 수 없어 구글 로그인을 시작할 수 없습니다."
+            : "구글 로그인 설정에 문제가 있어 시작할 수 없습니다. 잠시 후 다시 시도해주세요.",
     );
   }
 
