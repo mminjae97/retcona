@@ -20,6 +20,12 @@
   gap: 12px;
 }
 
+.episode-list-page .section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .episode-list-page h1 {
   margin: 0;
   font-size: 22px;
