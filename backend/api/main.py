@@ -14,6 +14,7 @@ from fastapi import FastAPI
 
 from api.episodes import router as episodes_router
 from api.novels import router as novels_router
+from api.settings import router as settings_router
 from auth.jwe import validate_keys
 from auth.router import router as auth_router
 from models.db import check_database
@@ -93,5 +94,6 @@ def health() -> dict:
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(novels_router, prefix="/novels", tags=["novels"])
 app.include_router(episodes_router, prefix="/novels", tags=["episodes"])
+app.include_router(settings_router, prefix="/novels", tags=["settings"])
 
 # TODO: register remaining routers (design doc 2.4 validation results, etc.)

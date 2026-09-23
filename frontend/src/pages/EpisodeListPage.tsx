@@ -84,9 +84,14 @@ export default function EpisodeListPage() {
       </Link>
       <div className="section-header">
         <h1>화 목록</h1>
-        <button type="button" onClick={handleCreate} disabled={creating}>
-          {creating ? "생성 중..." : "+ 새 화 작성"}
-        </button>
+        <div className="section-actions">
+          <Link className="link-button" to={`/novels/${novelId}/settings`}>
+            설정 관리
+          </Link>
+          <button type="button" onClick={handleCreate} disabled={creating}>
+            {creating ? "생성 중..." : "+ 새 화 작성"}
+          </button>
+        </div>
       </div>
 
       {error && (

@@ -310,6 +310,9 @@ export default function MyPage() {
                       <Link className="link-button" to={`/novels/${novel.id}/episodes`}>
                         열기
                       </Link>
+                      <Link className="link-button" to={`/novels/${novel.id}/settings`}>
+                        설정
+                      </Link>
                       <Link className="link-button" to={`/novels/${novel.id}/graph`}>
                         관계도·타임라인
                       </Link>
