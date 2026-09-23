@@ -47,10 +47,12 @@ async function codeChallenge(verifier: string): Promise<string> {
 // - insecure: the page isn't a secure context (plain http on anything but
 //   localhost), where the browser offers no crypto.subtle for PKCE.
 // - storage: sessionStorage is blocked.
+// - config: the redirect URI the server gave isn't a URL the browser accepts.
 export type GoogleLoginStartFailure =
   | { reason: "wrong-origin"; origin: string }
   | { reason: "insecure" }
-  | { reason: "storage" };
+  | { reason: "storage" }
+  | { reason: "config" };
 
 // Leaves the app for Google's sign-in page, or says why it can't. Never
 // throws, and saves nothing unless it's actually leaving.
@@ -58,7 +60,14 @@ export async function startGoogleLogin(
   config: Extract<GoogleConfig, { enabled: true }>,
   context: LoginRedirectState,
 ): Promise<GoogleLoginStartFailure | null> {
-  const callbackOrigin = new URL(config.redirect_uri).origin;
+  let callbackOrigin: string;
+  try {
+    callbackOrigin = new URL(config.redirect_uri).origin;
+  } catch {
+    // The backend checks the setting too, but it can't catch every value
+    // the browser's URL parser rejects (an out-of-range port, say).
+    return { reason: "config" };
+  }
   if (callbackOrigin !== window.location.origin) {
     return { reason: "wrong-origin", origin: callbackOrigin };
   }
