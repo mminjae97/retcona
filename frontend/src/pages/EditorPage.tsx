@@ -1,8 +1,9 @@
 // Manuscript editor (design doc 2.2)
 // Typing is saved automatically to a local draft (utils/draft.ts, debounced, and flushed when the page is
 // hidden or the editor unmounts); the server only gets the text when the author presses Save (PATCH, doesn't
-// call the AI pipeline). "Run validation" (2.2, 8.2) stays disabled: it depends on QueueClient
-// (infra/queue_client.py), which isn't implemented yet.
+// call the AI pipeline). "Run validation" (2.2) saves unsaved text first, then asks the server to validate
+// what's saved; a worker does it in the background while the author keeps writing, and the page polls the run
+// (utils/validationRun.ts) and shows what it found — or that a later save has made it out of date.
 // Editing a submitted episode flips its status back to draft (2.2).
 // The draft is dropped once a save confirms it, so it survives an expired session, a network failure or a
 // closed tab. Every tab (every page load) keeps its own draft and rewrites only that one; the drafts other tabs
@@ -12,7 +13,7 @@ import { Link, useBlocker, useParams } from "react-router-dom";
 import { fetchCurrentUserId } from "../api/auth";
 import { describeError } from "../api/client";
 import { getEpisode, saveEpisode } from "../api/episodes";
-import type { EpisodePublic } from "../api/episodes";
+import type { EpisodePublic, ValidationRun } from "../api/episodes";
 import {
   MAX_DRAFTS_PER_EPISODE,
   clearDraft,
@@ -27,6 +28,7 @@ import {
   startDraftSlot,
 } from "../utils/draft";
 import type { StoredDraft } from "../utils/draft";
+import { describeRunError, isRunOutdated, useValidationRun } from "../utils/validationRun";
 import "./EditorPage.css";
 
 // The local draft is written this long after typing pauses, not on every key
@@ -81,7 +83,7 @@ export default function EditorPage() {
   // could commit out of order and the older one would silently overwrite
   // the newer content server-side, which seq alone (client-side response
   // ordering only) can't prevent.
-  const saveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
   // True only while the component is actually mounted — separate from the
   // per-episode "cancelled" flag in the load effect below, since a save still
   // in flight when the editor is left is deliberately let finish (and still
@@ -249,20 +251,23 @@ export default function EditorPage() {
   // back/forward too, which a Link-only guard can't reach (the URL has
   // already changed by the time a popstate handler would see it).
   const blocker = useBlocker(atRisk);
+  const validation = useValidationRun(novelId, episodeId);
   useEffect(() => {
     if (blocker.state !== "blocked") return;
     if (window.confirm(LEAVE_UNSAVED_CONFIRM)) blocker.proceed();
     else blocker.reset();
   }, [blocker]);
 
+  // Resolves to whether the server took the text (for "run validation", which
+  // validates only what's saved); never rejects.
   const save = useCallback(
-    (targetNovelId: string, targetEpisodeId: string, nextContent: string) => {
+    (targetNovelId: string, targetEpisodeId: string, nextContent: string): Promise<boolean> => {
       const seq = ++saveSeqRef.current;
       if (mountedRef.current) {
         setSaveState("saving");
         setSaveError(null);
       }
-      saveChainRef.current = saveChainRef.current
+      const saved = saveChainRef.current
         .catch(() => {})
         .then(() => saveEpisode(targetNovelId, targetEpisodeId, nextContent))
         .then((updated) => {
@@ -304,17 +309,21 @@ export default function EditorPage() {
               if (removed.length < held.length) refreshOtherDrafts();
             }
           }
-          if (!mountedRef.current || seq !== saveSeqRef.current) return;
+          if (!mountedRef.current || seq !== saveSeqRef.current) return true;
           setEpisode(updated);
           setSaveState("saved");
+          return true;
         })
         .catch((err) => {
-          if (!mountedRef.current || seq !== saveSeqRef.current) return;
+          if (!mountedRef.current || seq !== saveSeqRef.current) return false;
           setSaveError(describeError(err));
           setSaveState("error");
           // The text stays in the local draft and on screen; the author presses
           // Save again when ready. Nothing is sent on its own.
+          return false;
         });
+      saveChainRef.current = saved;
+      return saved;
     },
     [showOtherDrafts, setServerVersion, refreshOtherDrafts]
   );
@@ -428,6 +437,17 @@ export default function EditorPage() {
     save(novelId, episodeId, content);
   }
 
+  function handleValidate() {
+    if (!novelId || !episodeId) return;
+    const saveFirst = unsaved
+      ? () => {
+          flushDraft();
+          return save(novelId, episodeId, content);
+        }
+      : undefined;
+    validation.start(saveFirst);
+  }
+
   if (loadError) {
     return (
       <div className="editor-page">
@@ -516,11 +536,89 @@ export default function EditorPage() {
           <button type="button" onClick={handleSaveNow} disabled={saveState === "saving"}>
             저장
           </button>
-          <button type="button" disabled title="검증 실행은 준비 중입니다">
-            검증 실행
+          <button
+            type="button"
+            onClick={handleValidate}
+            disabled={saveState === "saving" || validation.requesting || validation.active || content.trim() === ""}
+            title={content.trim() === "" ? "원고를 입력한 뒤 검증할 수 있습니다" : undefined}
+          >
+            {validation.requesting ? "검증 요청 중..." : validation.active ? "검증 중..." : "검증 실행"}
           </button>
         </div>
       </div>
+
+      <ValidationStatus
+        run={validation.run}
+        requestError={validation.requestError}
+        episodeUpdatedAt={episode.updated_at}
+        settingsPath={`/novels/${novelId}/settings`}
+      />
+    </div>
+  );
+}
+
+// What the latest run found, or where it is. Contradiction judgment comes in
+// the next stage; for now a run extracts claims and registers new characters
+// and locations (7.4), which is what this reports.
+function ValidationStatus({
+  run,
+  requestError,
+  episodeUpdatedAt,
+  settingsPath,
+}: {
+  run: ValidationRun | null;
+  requestError: string | null;
+  episodeUpdatedAt: string;
+  settingsPath: string;
+}) {
+  return (
+    <>
+      {/* A request that failed leaves the previous run's result in place below it. */}
+      {requestError && (
+        <p className="editor-validation editor-error" role="alert">
+          {requestError}
+        </p>
+      )}
+      {run && <RunStatus run={run} episodeUpdatedAt={episodeUpdatedAt} settingsPath={settingsPath} />}
+    </>
+  );
+}
+
+function RunStatus({ run, episodeUpdatedAt, settingsPath }: { run: ValidationRun; episodeUpdatedAt: string; settingsPath: string }) {
+  if (run.status === "queued" || run.status === "running") {
+    return (
+      <p className="editor-validation" role="status">
+        {run.status === "queued" ? "검증을 기다리는 중입니다..." : "원고를 분석하는 중입니다..."} 계속 작성해도 됩니다.
+      </p>
+    );
+  }
+  if (run.status === "failed") {
+    return (
+      <p className="editor-validation editor-error" role="alert">
+        {describeRunError(run.error)}
+      </p>
+    );
+  }
+  const { claims = 0, new_characters: characters = [], new_locations: locations = [] } = run.summary;
+  const finishedAt = run.finished_at ? new Date(run.finished_at).toLocaleString() : "";
+  return (
+    <div className="editor-validation" role="status">
+      <p>
+        검증 완료{finishedAt && ` · ${finishedAt}`}: 설정과 대조할 서술 {claims}개를 찾았습니다.
+      </p>
+      {characters.length > 0 && (
+        <p>
+          새로 등록된 인물: {characters.join(", ")} · <Link to={settingsPath}>설정에서 확인하기</Link>
+        </p>
+      )}
+      {locations.length > 0 && <p>새로 등록된 장소: {locations.join(", ")}</p>}
+      {characters.length === 0 && locations.length === 0 && <p>새로 등록된 인물·장소는 없습니다.</p>}
+      {isRunOutdated(run, episodeUpdatedAt) && (
+        <p className="editor-validation-outdated">
+          이 결과 이후 원고가 수정되어 최신 상태가 아닙니다. 다시 검증하려면 검증 실행을 눌러 주세요.
+        </p>
+      )}
+      <p className="editor-validation-note">설정 모순 탐지는 다음 업데이트에서 제공됩니다.</p>
     </div>
   );
 }

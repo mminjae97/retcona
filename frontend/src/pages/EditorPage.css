@@ -92,3 +92,28 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.editor-validation {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  font-size: 13px;
+}
+
+.editor-validation p {
+  margin: 0;
+}
+
+.editor-validation p + p {
+  margin-top: 4px;
+}
+
+.editor-validation-outdated {
+  font-weight: 600;
+}
+
+.editor-validation-note {
+  color: var(--color-text-muted);
+}
