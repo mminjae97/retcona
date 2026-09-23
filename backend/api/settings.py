@@ -20,12 +20,13 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from api.deps import get_owned_novel as _get_owned_novel
 from auth.dependencies import get_current_user
 from models.character import Character, CharacterStateHistory
+from models.claim import Claim
 from models.db import get_db
 from models.relation import Relation
 from models.story_event import EventParticipant
@@ -327,6 +328,12 @@ def delete_character(
             Relation.entity_kind == "character",
             or_(Relation.from_entity_id == character_id, Relation.to_entity_id == character_id),
         )
+    )
+    # Claims about it stay (they're the episode's), named but no longer linked.
+    db.execute(
+        update(Claim)
+        .where(Claim.novel_id == novel_id, Claim.subject_kind == "character", Claim.subject_id == character_id)
+        .values(subject_id=None)
     )
     db.delete(character)
     db.commit()

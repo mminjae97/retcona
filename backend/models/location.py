@@ -13,6 +13,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, NovelScopedMixin, TimestampMixin
 
+# geo_attrs keys claim extraction fills in (7.4): the geographic features the
+# manuscript describes. Distances/connections live in relations (8.1).
+GEO_ATTR_KEYS = ("features",)
+
 
 class Location(Base, NovelScopedMixin, TimestampMixin):
     __tablename__ = "locations"
