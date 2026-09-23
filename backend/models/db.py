@@ -40,13 +40,18 @@ DB_CONNECT_TIMEOUT_SECONDS = 10
 _LIBPQ_DRIVERS = {"psycopg", "psycopg2"}
 
 
-def _positive_env_timeout() -> bool:
-    # Parsed the way psycopg 3 parses it (int(float(...)), so "+5" and "5.0"
-    # count), and never raising: this runs at import time.
+def _positive_env_timeout(driver: str) -> bool:
+    # Parsed the way the driver that will read it does, so a value only the
+    # other driver accepts doesn't skip the default and then fail every
+    # connection: psycopg 3 does int(float(...)) ("5.0" and "+5" count),
+    # psycopg2 leaves it to libpq, which wants an integer ("5.0" is an
+    # "invalid integer value"). Never raising: this runs at import time.
+    value = os.environ.get("PGCONNECT_TIMEOUT", "")
     try:
-        return int(float(os.environ.get("PGCONNECT_TIMEOUT", ""))) > 0
+        timeout = int(float(value)) if driver == "psycopg" else int(value)
     except (ValueError, OverflowError):
         return False
+    return timeout > 0
 
 
 def _connect_args(url: str) -> dict:
@@ -55,7 +60,7 @@ def _connect_args(url: str) -> dict:
         parsed.get_backend_name() != "postgresql"
         or parsed.get_driver_name() not in _LIBPQ_DRIVERS
         or "connect_timeout" in parsed.query
-        or _positive_env_timeout()
+        or _positive_env_timeout(parsed.get_driver_name())
     ):
         return {}
     return {"connect_timeout": DB_CONNECT_TIMEOUT_SECONDS}
@@ -167,13 +172,17 @@ def check_schema_is_current(connection: Connection) -> None:
     )
 
 
-def check_database() -> None:
+def check_database(*, nickname_column: bool = True) -> None:
     """The startup checks, over one connection: every entry point that talks
     to the database (the API server's lifespan, the standalone purge worker)
     runs this before doing anything else. Migrations first: a database behind
     them gets that plain error rather than whatever the nickname check trips
-    over. Blocking — the API server runs it in a thread.
+    over — check_nickname_column_length relies on that ordering. The purge
+    worker leaves the nickname check out (nickname_column=False): a column
+    too narrow for signups has nothing to do with deleting accounts. Blocking
+    — the API server runs it in a thread.
     """
     with engine.connect() as connection:
         check_schema_is_current(connection)
-        check_nickname_column_length(connection)
+        if nickname_column:
+            check_nickname_column_length(connection)
