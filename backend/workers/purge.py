@@ -33,6 +33,7 @@ from typing import Iterator, NamedTuple
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from models.base import Base
@@ -48,6 +49,10 @@ logger = logging.getLogger("workers.purge")
 # The purge runs once a day at midnight in this time zone (an IANA name).
 PURGE_TIMEZONE_ENV = "PURGE_TIMEZONE"
 DEFAULT_PURGE_TIMEZONE = "Asia/Seoul"
+
+# How long the standalone --loop worker waits between attempts at its startup
+# schema check while the database can't be reached.
+SCHEMA_CHECK_RETRY_SECONDS = 60.0
 
 
 def seconds_until_next_midnight(now: datetime | None = None) -> float:
@@ -137,18 +142,19 @@ def purge_once() -> PurgeResult:
         return purge_expired_accounts(db)
 
 
-def run(loop: bool = False) -> None:
-    logging.basicConfig(level=logging.INFO)
-    # The schema check below goes through alembic, whose INFO lines ("Will
-    # assume transactional DDL", ...) are just noise here.
-    logging.getLogger("alembic").setLevel(logging.WARNING)
+def _check_schema() -> None:
     # The same check the API server runs at startup (api/main.py), so a
     # database behind this code's migrations fails here plainly instead of
     # partway through a pass. Not in purge_once: the API server's own passes
     # already ran it at startup.
     with engine.connect() as connection:
         check_schema_is_current(connection)
+
+
+def run(loop: bool = False) -> None:
+    logging.basicConfig(level=logging.INFO)
     if not loop:
+        _check_schema()
         # A failure should surface as a non-zero exit (cron, Cloud Scheduler), and Ctrl-C keeps its default meaning.
         result = purge_once()
         logger.info("Purged %d account(s), %d failed", *result)
@@ -158,6 +164,22 @@ def run(loop: bool = False) -> None:
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())  # finish the current pass, then exit (10.4.4)
+    # A worker started while the database is still coming up (a compose
+    # start, a Cloud SQL restart) retries the check shortly instead of exiting,
+    # or of idling until the next midnight's pass. A schema mismatch
+    # (RuntimeError) still ends it — that needs a migration, not a retry.
+    while True:
+        try:
+            _check_schema()
+            break
+        except OperationalError as exc:
+            logger.warning(
+                "Could not reach the database for the schema check (%s); retrying in %d s",
+                exc.orig or exc,
+                SCHEMA_CHECK_RETRY_SECONDS,
+            )
+            if stop.wait(SCHEMA_CHECK_RETRY_SECONDS):
+                return
     for delay in purge_schedule(startup_delay=0.0):
         if stop.wait(delay):
             break

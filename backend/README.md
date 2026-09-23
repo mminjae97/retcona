@@ -18,11 +18,13 @@ Follows the code structure from design doc section 6.2 as-is. Each module's resp
 The API server (and `python -m workers.purge`) refuses to start, with an error saying what to do, when:
 
 - the database is behind the migrations in `db/migrations` (including one with none applied) — run `alembic upgrade head` from `db/`;
-- `users.nickname` is narrower than `maxLength` in `shared/nickname-rules.json` (API server only).
+- `users.nickname` is narrower than `maxLength` in `shared/nickname-rules.json`, or not a string column at all (API server only; a wider one only logs a warning).
 
 A database at a revision this code doesn't know (a newer release migrated it during a rolling deploy), or an install without `db/migrations`, is checked against the models instead: it starts, with a warning, if nothing this code needs is missing. The checks live in `models/db.py` (`check_schema_is_current`) and `models/user.py` (`check_nickname_column_length`).
 
 Database connections time out after 10 seconds by default (see `.env.example`).
+
+Logging: the app's own packages (`infra/app_logging.py`) log at uvicorn's `--log-level` (INFO when run without uvicorn), through the root logger. A handler with uvicorn's format is added to root only if nothing else configured one, so a `--log-config` that sets up root keeps receiving the app's logs.
 
 ## Design principles (must follow)
 
