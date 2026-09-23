@@ -7,6 +7,7 @@ Run: uvicorn api.main:app --reload
 import asyncio
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
@@ -17,7 +18,7 @@ from auth.jwe import validate_keys
 from auth.router import router as auth_router
 from models.db import check_database
 from workers.purge import (
-    PASS_RETRY_SECONDS,
+    SCHEDULE_FAILURE_DELAY_SECONDS,
     PassSchedule,
     purge_pass,
     seconds_until_next_midnight,
@@ -40,7 +41,7 @@ def _purge_enabled() -> bool:
 PURGE_STARTUP_DELAY_SECONDS = 60.0
 
 
-async def _purge_daily() -> None:
+async def _purge_daily(stop: threading.Event) -> None:
     schedule = PassSchedule()
     delay = PURGE_STARTUP_DELAY_SECONDS
     while True:
@@ -49,14 +50,16 @@ async def _purge_daily() -> None:
             # Blocking DB work, off the event loop. Safe alongside other
             # instances running the same loop: see workers/purge.py. The pass
             # and what comes after it (the next midnight, or a retry after a
-            # failed pass) are the standalone worker's too.
-            delay = schedule.after(await asyncio.to_thread(purge_pass))
+            # failed pass) are the standalone worker's too. `stop` ends the
+            # pass between accounts at shutdown: cancelling this task can't
+            # stop the thread.
+            delay = schedule.after(await asyncio.to_thread(purge_pass, stop.is_set))
         except Exception:
             # Anything that would end this task (it is only awaited at shutdown,
             # so it would die unnoticed and the purge never run again) — e.g.
             # working out the next midnight failing.
             logger.exception("Account purge schedule failed")
-            delay = PASS_RETRY_SECONDS
+            delay = SCHEDULE_FAILURE_DELAY_SECONDS
 
 
 @asynccontextmanager
@@ -67,11 +70,13 @@ async def lifespan(app: FastAPI):
     # lifespan) — same reasoning as the purge pass below.
     await asyncio.to_thread(check_database)
     purge_task = None
+    purge_stop = threading.Event()
     if _purge_enabled():
         seconds_until_next_midnight()  # a bad PURGE_TIMEZONE fails startup, not the first midnight
-        purge_task = asyncio.create_task(_purge_daily())
+        purge_task = asyncio.create_task(_purge_daily(purge_stop))
     yield
     if purge_task is not None:
+        purge_stop.set()
         purge_task.cancel()
         with suppress(asyncio.CancelledError):
             await purge_task
