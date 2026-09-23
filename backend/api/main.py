@@ -69,7 +69,10 @@ async def _purge_daily() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_keys()
-    check_nickname_column_length(engine)
+    # Blocking DB work, off the event loop (nothing else is being served yet,
+    # but this still shouldn't set the precedent of blocking it from
+    # lifespan) — same reasoning as the purge pass below.
+    await asyncio.to_thread(check_nickname_column_length, engine)
     purge_task = None
     if _purge_enabled():
         seconds_until_next_midnight()  # a bad PURGE_TIMEZONE fails startup, not the first midnight

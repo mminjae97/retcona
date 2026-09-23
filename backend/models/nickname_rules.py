@@ -47,7 +47,10 @@ def _load() -> dict:
     except (OSError, ValueError) as exc:
         logger.warning("Could not read %s (%s); using default nickname rules %s", path, exc, _DEFAULT)
         return _DEFAULT
-    merged = {**_DEFAULT, **raw} if isinstance(raw, dict) else _DEFAULT
+    if not isinstance(raw, dict):
+        logger.warning("%s is valid JSON but not an object (got %r); using default nickname rules %s", path, raw, _DEFAULT)
+        return _DEFAULT
+    merged = {**_DEFAULT, **raw}
     validated = _validated(merged)
     if validated is None:
         # All-or-nothing: even one bad key (or an inverted min/max) falls all

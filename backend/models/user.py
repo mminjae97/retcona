@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import DateTime, Engine, Integer, String, inspect
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.exc import NoSuchTableError
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, TimestampMixin
@@ -76,11 +77,21 @@ def check_nickname_column_length(engine: Engine) -> None:
     migration (ALTER COLUMN), this is what stands between that and a 500 on
     the first nickname past the old, still-actual length.
     """
-    columns = {c["name"]: c for c in inspect(engine).get_columns("users")}
+    try:
+        columns = {c["name"]: c for c in inspect(engine).get_columns("users")}
+        nickname_column = columns["nickname"]
+    except (NoSuchTableError, KeyError) as exc:
+        # A fresh database before `alembic upgrade head` — this check runs at
+        # every startup, including one that's about to create the table for
+        # the first time, and should say that plainly rather than surface a
+        # raw KeyError/NoSuchTableError that looks like a bug in this check.
+        raise RuntimeError(
+            "Could not find users.nickname to check its length — has `alembic upgrade head` been run?"
+        ) from exc
     # getattr, not a direct .length: reflection returns a generic TypeEngine,
     # and while this column is a VARCHAR today (so it does carry .length),
     # nothing statically guarantees that stays true.
-    actual_length = getattr(columns["nickname"]["type"], "length", None)
+    actual_length = getattr(nickname_column["type"], "length", None)
     expected_length = NICKNAME_RULES["maxLength"]
     if actual_length != expected_length:
         raise RuntimeError(
