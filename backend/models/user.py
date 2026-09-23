@@ -79,8 +79,8 @@ def check_nickname_column_length(connection: Connection) -> None:
     migration (ALTER COLUMN), this is what stands between that and a 500 on
     the first nickname past the old, still-actual length.
 
-    Runs after check_schema_is_current (api/main.py), which has already made
-    sure users.nickname exists — either the database is at this code's
+    Runs after check_schema_is_current (models.db.check_database, which
+    every entry point calls), which has already made sure users.nickname exists — either the database is at this code's
     migration head, or its schema was compared against the models.
     """
     try:

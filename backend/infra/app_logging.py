@@ -12,6 +12,7 @@ time (models.nickname_rules warns about a bad shared/nickname-rules.json).
 """
 
 import logging
+import sys
 
 from uvicorn.logging import DefaultFormatter
 
@@ -35,22 +36,43 @@ def _app_log_level() -> int:
     return uvicorn_error.getEffectiveLevel() if configured else logging.INFO
 
 
+class _LastResortHandler(logging.StreamHandler):
+    """What Python's own last-resort handler is, plus uvicorn's formatting and
+    a level filter that lets the app's INFO through."""
+
+    def __init__(self) -> None:
+        logging.Handler.__init__(self)
+        self.setFormatter(DefaultFormatter("%(levelprefix)s %(name)s: %(message)s"))
+
+    @property
+    def stream(self):
+        # sys.stderr as it is now, not as it was at import time (which
+        # StreamHandler would hold on to): pytest's capture, or anything else
+        # that swaps sys.stderr, keeps getting these lines instead of a
+        # closed stream's "I/O operation on closed file".
+        return sys.stderr
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Below WARNING only for the app's own packages. A library logger
+        # someone lowered to DEBUG/INFO without giving it a handler stays as
+        # quiet as Python's default last-resort handler (WARNING) keeps it.
+        if record.levelno < logging.WARNING and record.name.split(".", 1)[0] not in APP_PACKAGES:
+            return False
+        return super().filter(record)
+
+
 def configure_app_logging() -> None:
     # Python's last-resort handler (what a record falls back to when neither
-    # its logger nor any ancestor has a handler), with uvicorn's formatter so
-    # these lines look like the server's own ("WARNING:  models.db: ..."), and
-    # no level of its own, so the app's INFO lines get through too. Not a
-    # handler on the root logger: anything that sets up root itself — a
-    # --log-config, logging.basicConfig, the Cloud Logging handler, pytest's
-    # caplog — before or after this takes over completely, with nothing
-    # printed twice.
-    if isinstance(logging.lastResort, logging.StreamHandler) and not getattr(
-        logging.lastResort, "_app_logging", False
-    ):
-        handler = logging.StreamHandler()
-        handler.setFormatter(DefaultFormatter("%(levelprefix)s %(name)s: %(message)s"))
-        handler._app_logging = True  # both entry packages call this
-        logging.lastResort = handler
+    # its logger nor any ancestor has a handler), replaced with one in
+    # uvicorn's format ("WARNING:  models.db: ...") that also lets the app's
+    # INFO lines through. Not a handler on the root logger: anything that sets
+    # up root itself — a --log-config, logging.basicConfig, the Cloud Logging
+    # handler, pytest's caplog — before or after this takes over completely,
+    # with nothing printed twice. Only Python's own is replaced: not one
+    # someone else put there, not None (turned off on purpose), not ours
+    # (both entry packages call this).
+    if type(logging.lastResort).__module__ == "logging":
+        logging.lastResort = _LastResortHandler()
     # Only this app's packages are lowered to the app level; everything else
     # keeps the root's (WARNING by default), so library INFO chatter stays out.
     # A level a --log-config already set on one of them is left alone.

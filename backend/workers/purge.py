@@ -16,11 +16,13 @@ as a long-lived worker that does the same daily pass:
     python -m workers.purge                      # one pass now
     python -m workers.purge --loop               # one pass now, then one every midnight
 
-Either way it first runs the same startup check as the API server
-(models.db.check_database) and exits non-zero on a schema mismatch. With
+Either way it first runs the API server's startup check
+(models.db.check_database, without the nickname column part) and exits
+non-zero on a schema mismatch. With
 --loop, a database that can't be reached yet is retried every minute for up
-to 10 minutes (CHECK_RETRY_SECONDS, CHECK_MAX_WAIT_SECONDS) before giving up,
-and a failed pass is retried after an hour, like the API server's loop.
+to 10 minutes (CHECK_RETRY_SECONDS, CHECK_MAX_WAIT_SECONDS) before giving up
+— so run it under a restart policy — and a failed pass is retried after an
+hour, like the API server's loop.
 
 It is idempotent and safe to run concurrently (several API instances, a
 separate worker): each account is purged in its own transaction, under a row
@@ -34,9 +36,9 @@ import os
 import signal
 import sys
 import threading
-from datetime import datetime, time, timedelta, timezone
+from datetime import UTC, datetime, time, timedelta
 from time import monotonic
-from typing import Iterator, NamedTuple
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, select
@@ -68,7 +70,10 @@ PASS_RETRY_SECONDS = 3600.0
 # a missing database or host — psycopg gives no SQLSTATE at connect time, and a
 # starting server also answers FATAL), so past that the worker exits non-zero
 # and the misconfiguration shows up as a failing process instead of a
-# healthy-looking one that never purges.
+# healthy-looking one that never purges. So run the --loop worker under a
+# restart policy (compose `restart: unless-stopped`, a Kubernetes Deployment,
+# systemd Restart=on-failure): a database that takes longer than this to come
+# up then just costs a restart, instead of stopping the purge for good.
 CHECK_RETRY_SECONDS = 60.0
 CHECK_MAX_WAIT_SECONDS = 600.0
 
@@ -79,22 +84,18 @@ def seconds_until_next_midnight(now: datetime | None = None) -> float:
     Always the *next* one: at exactly midnight it is a full day away, so a pass
     that finishes early can't run twice in the same minute."""
     tz = ZoneInfo(os.environ.get(PURGE_TIMEZONE_ENV) or DEFAULT_PURGE_TIMEZONE)
-    local = (now or datetime.now(timezone.utc)).astimezone(tz)
+    local = (now or datetime.now(UTC)).astimezone(tz)
     next_midnight = datetime.combine(local.date() + timedelta(days=1), time.min, tzinfo=tz)
     # Subtract in UTC: aware datetimes sharing a tzinfo subtract as wall-clock
     # time, which is an hour off across a daylight-saving change.
-    return (next_midnight.astimezone(timezone.utc) - local.astimezone(timezone.utc)).total_seconds()
+    return (next_midnight.astimezone(UTC) - local.astimezone(UTC)).total_seconds()
 
 
-def purge_schedule(startup_delay: float) -> Iterator[float]:
-    """Seconds to wait before each pass: `startup_delay` before the first (a
-    pass right after startup catches up on a midnight the process wasn't alive
-    for — scaled to zero, restarted, redeployed), then until every following
-    midnight. Shared by the API server's loop and the standalone worker."""
-    yield startup_delay
-    while True:
-        yield seconds_until_next_midnight()
-
+def delay_after_pass(succeeded: bool) -> float:
+    """Seconds until the next pass: the next midnight, or PASS_RETRY_SECONDS
+    after a failed one. Shared by the API server's loop and the standalone
+    worker, which differ only in how they wait (asyncio vs a thread)."""
+    return seconds_until_next_midnight() if succeeded else PASS_RETRY_SECONDS
 
 class PurgeResult(NamedTuple):
     purged: int
@@ -160,13 +161,34 @@ def purge_once() -> PurgeResult:
         return purge_expired_accounts(db)
 
 
+def purge_pass() -> bool:
+    """One scheduled pass, logged; whether it fully succeeded. A pass where
+    some accounts failed counts as failed too, not only one that raised: the
+    database going away partway (a maintenance restart) fails each remaining
+    account on its own, and the pass itself returns normally. So does an
+    account that fails every time — retried, and logged, every
+    PASS_RETRY_SECONDS until it's fixed."""
+    try:
+        purged, failed = purge_once()
+    except Exception:
+        logger.exception("Purge pass failed; retrying in %d s", PASS_RETRY_SECONDS)
+        return False
+    if failed:
+        logger.warning("Purged %d account(s), %d failed; retrying in %d s", purged, failed, PASS_RETRY_SECONDS)
+        return False
+    logger.info("Purged %d account(s) past the deletion grace period", purged)
+    return True
+
+
 def run(loop: bool = False) -> None:
     # The same startup check as the API server's (not in purge_once: the API
     # server's own passes already ran it at its startup), so a database behind
     # this code's migrations fails here plainly instead of partway through a
-    # pass. Logging needs no setup here: workers/__init__.py did it.
+    # pass — minus the nickname column check, which has nothing to do with
+    # purging and shouldn't stop it. Logging needs no setup here:
+    # workers/__init__.py did it.
     if not loop:
-        check_database()
+        check_database(nickname_column=False)
         # A failure should surface as a non-zero exit (cron, Cloud Scheduler), and Ctrl-C keeps its default meaning.
         result = purge_once()
         logger.info("Purged %d account(s), %d failed", *result)
@@ -176,15 +198,16 @@ def run(loop: bool = False) -> None:
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())  # finish the current pass, then exit (10.4.4)
+    # A bad PURGE_TIMEZONE fails here, not after the first pass when the first
+    # midnight is worked out — as the API server's startup does (api/main.py).
+    seconds_until_next_midnight()
     started = monotonic()
     checked = False
-    schedule = purge_schedule(startup_delay=0.0)
-    # A new schedule after a failure (the retry delay, then midnights), like
-    # the API server's loop (api/main.py).
-    while not stop.wait(next(schedule)):
+    delay = 0.0
+    while not stop.wait(delay):
         if not checked:
             try:
-                check_database()
+                check_database(nickname_column=False)
             except OperationalError as exc:
                 # A schema mismatch (RuntimeError) isn't caught: that needs a
                 # migration, not a retry.
@@ -195,15 +218,10 @@ def run(loop: bool = False) -> None:
                     exc.orig or exc,
                     CHECK_RETRY_SECONDS,
                 )
-                schedule = purge_schedule(CHECK_RETRY_SECONDS)
+                delay = CHECK_RETRY_SECONDS
                 continue
             checked = True
-        try:
-            logger.info("Purged %d account(s), %d failed", *purge_once())
-        except Exception:
-            # e.g. the database is briefly unreachable (a maintenance restart).
-            logger.exception("Purge pass failed; retrying in %d s", PASS_RETRY_SECONDS)
-            schedule = purge_schedule(PASS_RETRY_SECONDS)
+        delay = delay_after_pass(purge_pass())
 
 
 if __name__ == "__main__":
