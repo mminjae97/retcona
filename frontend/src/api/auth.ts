@@ -176,3 +176,23 @@ export async function requestAccountDeletion(password: string): Promise<Deletion
   clearToken();
   return result;
 }
+
+// A Google account's deletion, confirmed by a fresh Google sign-in (the code
+// from the callback page) instead of a password. The same afterwards as above.
+export async function requestGoogleAccountDeletion(code: string, codeVerifier: string): Promise<DeletionResult> {
+  const result = await apiFetch<DeletionResult>("/auth/google/deletion", {
+    method: "POST",
+    body: JSON.stringify({ code, code_verifier: codeVerifier }),
+  });
+  announceAccountDeleted(result.user_id);
+  clearToken();
+  return result;
+}
+
+// What to tell the user once a deletion is in (both kinds). The server
+// refuses the login that would cancel it from exactly this moment on, so the
+// exact time is shown, not just the date.
+export function deletionAcceptedMessage(result: DeletionResult): string {
+  const deadline = new Date(result.purge_after).toLocaleString("ko-KR");
+  return `탈퇴가 접수되었습니다.\n${deadline}까지 다시 로그인하면 탈퇴가 취소됩니다. 이 시각이 지나면 취소할 수 없으며, 이후 계정과 모든 데이터가 영구 삭제됩니다.`;
+}

@@ -17,9 +17,15 @@ import type { LoginRedirectState } from "./loginRedirect";
 const STORAGE_KEY = "retcona_google_login";
 const AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 
+// What the round trip to Google is for: signing in, or confirming a Google
+// account's deletion (3.5 — the re-authentication a password is for an email
+// account). The callback page does the one this tab asked for.
+export type GooglePurpose = "login" | "delete-account";
+
 export interface PendingGoogleLogin extends LoginRedirectState {
   state: string;
   codeVerifier: string;
+  purpose: GooglePurpose;
 }
 
 function randomUrlSafe(bytes: number): string {
@@ -59,6 +65,7 @@ export type GoogleLoginStartFailure =
 export async function startGoogleLogin(
   config: Extract<GoogleConfig, { enabled: true }>,
   context: LoginRedirectState,
+  purpose: GooglePurpose = "login",
 ): Promise<GoogleLoginStartFailure | null> {
   let callbackOrigin: string;
   try {
@@ -73,6 +80,7 @@ export async function startGoogleLogin(
   }
   const pending: PendingGoogleLogin = {
     ...context,
+    purpose,
     state: randomUrlSafe(32),
     codeVerifier: randomUrlSafe(48), // 64 characters, within PKCE's 43-128
   };
@@ -120,5 +128,19 @@ export function takePendingGoogleLogin(state: string | null): PendingGoogleLogin
     return pending.state === state ? pending : null;
   } catch {
     return null;
+  }
+}
+
+// What to tell the user when startGoogleLogin couldn't leave for Google.
+export function describeGoogleStartFailure(failure: GoogleLoginStartFailure): string {
+  switch (failure.reason) {
+    case "wrong-origin":
+      return `구글 로그인은 ${failure.origin} 주소에서 사용할 수 있습니다. 이 주소로 접속해 다시 시도해주세요.`;
+    case "insecure":
+      return "구글 로그인은 HTTPS 또는 localhost 주소에서만 사용할 수 있습니다.";
+    case "storage":
+      return "브라우저 저장소를 사용할 수 없어 구글 로그인을 시작할 수 없습니다.";
+    default:
+      return "구글 로그인 설정에 문제가 있어 시작할 수 없습니다. 관리자에게 문의해주세요.";
   }
 }

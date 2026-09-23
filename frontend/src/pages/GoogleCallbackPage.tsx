@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { googleLogin, googleSignup } from "../api/auth";
+import { deletionAcceptedMessage, googleLogin, googleSignup, requestGoogleAccountDeletion } from "../api/auth";
 import { ApiError, describeError } from "../api/client";
 import { takePendingGoogleLogin } from "../utils/googleAuth";
 import type { PendingGoogleLogin } from "../utils/googleAuth";
@@ -15,7 +15,7 @@ import "./LoginPage.css";
 
 type Step =
   | { kind: "working" }
-  | { kind: "failed"; message: string }
+  | { kind: "failed"; message: string; backTo?: "mypage" }
   | { kind: "nickname"; signupToken: string; email: string; pending: PendingGoogleLogin };
 
 const LOGIN_ERRORS: Record<number, string> = {
@@ -23,6 +23,17 @@ const LOGIN_ERRORS: Record<number, string> = {
   403: "이메일 인증이 완료된 구글 계정만 사용할 수 있습니다.",
   409: "이 이메일은 이미 이메일·비밀번호로 가입되어 있습니다. 이메일과 비밀번호로 로그인해주세요.",
   410: "탈퇴 유예기간이 지나 삭제 예정인 계정입니다. 복구할 수 없습니다.",
+  502: "구글에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.",
+  503: "구글 로그인이 설정되지 않았습니다.",
+};
+
+const DELETION_ERRORS: Record<number, string> = {
+  // 401 isn't here: on this authenticated call it means the session ended,
+  // which the app handles by itself (a sign-in again; the backend answers 400
+  // when it's Google that turned the code down).
+  400: "구글 본인 확인에 실패했습니다. 마이페이지에서 다시 시도해주세요.",
+  403: "이 계정에 연결된 구글 계정이 아닙니다. 연결된 구글 계정을 선택해 다시 시도해주세요.",
+  409: "이 계정은 비밀번호로 탈퇴를 확인합니다. 마이페이지에서 다시 시도해주세요.",
   502: "구글에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.",
   503: "구글 로그인이 설정되지 않았습니다.",
 };
@@ -62,6 +73,16 @@ export default function GoogleCallbackPage() {
     }
     if (pending === null || code === null) {
       setStep({ kind: "failed", message: "로그인 요청을 확인하지 못했습니다. 로그인 화면에서 다시 시도해주세요." });
+      return;
+    }
+    if (pending.purpose === "delete-account") {
+      // Back from confirming a Google account's deletion (MyPage).
+      requestGoogleAccountDeletion(code, pending.codeVerifier)
+        .then((result) => {
+          window.alert(deletionAcceptedMessage(result));
+          navigate("/login", { replace: true });
+        })
+        .catch((err) => setStep({ kind: "failed", message: messageFor(err, DELETION_ERRORS), backTo: "mypage" }));
       return;
     }
     googleLogin(code, pending.codeVerifier)
@@ -127,6 +148,11 @@ export default function GoogleCallbackPage() {
           <h1>Retcona</h1>
           {step.kind === "working" ? (
             <p>구글 계정을 확인하는 중...</p>
+          ) : step.backTo === "mypage" ? (
+            <>
+              <p className="login-error">{step.message}</p>
+              <Link to="/mypage">마이페이지로</Link>
+            </>
           ) : (
             <>
               <p className="login-error">{step.message}</p>

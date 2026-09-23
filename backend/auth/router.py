@@ -156,17 +156,22 @@ def request_deletion(
 ) -> DeletionResponse:
     """Schedule account deletion after the grace period (3.5).
 
-    Identity is re-confirmed with the password first. Social-login accounts
-    have no password and are meant to re-authenticate with their provider
-    instead, which isn't implemented yet (auth/oauth.py).
+    Identity is re-confirmed with the password first. A Google account has no
+    password and re-authenticates with Google instead
+    (POST /auth/google/deletion, auth/oauth.py).
     """
     if current_user.password_hash is None:
-        raise HTTPException(status.HTTP_501_NOT_IMPLEMENTED, "Re-authentication for social accounts is not supported yet")
+        raise HTTPException(status.HTTP_409_CONFLICT, "This account confirms deletion with Google")
     if not verify_password(body.password, current_user.password_hash):
         # 403, not 401: the bearer token is fine, and a 401 would read as an
         # expired session.
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Incorrect password")
+    return schedule_deletion(db, current_user)
 
+
+def schedule_deletion(db: Session, current_user: User) -> DeletionResponse:
+    """Put the account up for deletion once its owner has been re-confirmed
+    (password, or Google): shared by both deletion endpoints."""
     # A concurrent request may already have revoked this token's generation;
     # this one must not start a second deletion with a token that is no longer valid.
     lock_current_user(db, current_user)
