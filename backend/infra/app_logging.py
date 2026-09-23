@@ -72,12 +72,10 @@ class _LastResortHandler(logging.Handler):
 
 
 def _is_python_default(handler: logging.Handler | None) -> bool:
-    # logging._defaultLastResort is the handler Python installs; private, so
-    # when a runtime doesn't have it, fall back to recognizing its class.
-    default = getattr(logging, "_defaultLastResort", None)
-    if default is not None:
-        return handler is default
-    return type(handler).__module__ == "logging" and type(handler).__name__ == "_StderrHandler"
+    # logging._defaultLastResort is the handler Python installs (in CPython
+    # since 3.2, private but stable). Identity, not class: a separate
+    # instance someone installed on purpose is theirs, not the default.
+    return handler is not None and handler is getattr(logging, "_defaultLastResort", None)
 
 
 def configure_app_logging() -> None:

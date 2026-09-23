@@ -18,7 +18,7 @@ from auth.router import router as auth_router
 from models.db import check_database
 from workers.purge import (
     PASS_RETRY_SECONDS,
-    delay_after_pass,
+    PassSchedule,
     purge_pass,
     seconds_until_next_midnight,
 )
@@ -41,6 +41,7 @@ PURGE_STARTUP_DELAY_SECONDS = 60.0
 
 
 async def _purge_daily() -> None:
+    schedule = PassSchedule()
     delay = PURGE_STARTUP_DELAY_SECONDS
     while True:
         try:
@@ -49,7 +50,7 @@ async def _purge_daily() -> None:
             # instances running the same loop: see workers/purge.py. The pass
             # and what comes after it (the next midnight, or a retry after a
             # failed pass) are the standalone worker's too.
-            delay = delay_after_pass(await asyncio.to_thread(purge_pass))
+            delay = schedule.after(await asyncio.to_thread(purge_pass))
         except Exception:
             # Anything that would end this task (it is only awaited at shutdown,
             # so it would die unnoticed and the purge never run again) — e.g.
