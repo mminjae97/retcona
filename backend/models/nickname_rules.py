@@ -20,19 +20,21 @@ from pathlib import Path
 _DEFAULT = {"minLength": 2, "maxLength": 20, "maxRawLength": 200, "maxMarks": 3}
 
 
+def _is_plain_int(value: object) -> bool:
+    # bool is a subclass of int (isinstance(True, int) is True), so it's
+    # excluded explicitly — a stray `true`/`false` in the JSON (e.g.
+    # "maxMarks": true) would otherwise pass as a value of 1/0.
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _validated(rules: dict) -> dict | None:
-    try:
-        return (
-            rules
-            if (
-                all(isinstance(rules.get(key), int) for key in _DEFAULT)
-                and 0 < rules["minLength"] <= rules["maxLength"] <= rules["maxRawLength"]
-                and rules["maxMarks"] >= 0
-            )
-            else None
-        )
-    except TypeError:
+    if not all(_is_plain_int(rules.get(key)) for key in _DEFAULT):
         return None
+    if not (0 < rules["minLength"] <= rules["maxLength"] <= rules["maxRawLength"]):
+        return None
+    if rules["maxMarks"] < 0:
+        return None
+    return rules
 
 
 def _load() -> dict:
