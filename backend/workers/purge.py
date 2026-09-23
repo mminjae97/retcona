@@ -42,7 +42,7 @@ from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, select
-from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.orm import Session
 
 from models.base import Base
@@ -135,15 +135,26 @@ def _purge_user(db: Session, user_id, cutoff: datetime) -> bool:
     return True
 
 
-# SQLSTATE classes where the database as a whole, not one account, is the
-# problem — every remaining account in the pass would fail the same way:
-# 08 connection exception; 57P operator intervention (admin/crash shutdown,
-# "cannot connect now" — but not 57014 query_canceled, which is one
-# statement); 53 insufficient resources (disk full, too many connections);
-# 42 undefined table/column, insufficient privilege (e.g. a rolling deploy's
-# migration renamed a table this code deletes from); 3D/3F no such
-# database/schema; 28 authentication.
-_DATABASE_WIDE_SQLSTATES = ("08", "57P", "53", "42", "3D", "3F", "28")
+# SQLSTATEs known to be about one account's statements, not the database:
+# 40 transaction rollback (deadlock, serialization failure); 57014
+# query_canceled (statement_timeout); 55P03 lock_not_available; 23 integrity
+# constraint violation; 22 data exception. Anything else the server reports
+# is treated as the database's problem — safer than listing those instead,
+# since a code missing from that list (a read-only node after a failover,
+# 25006; I/O errors, 58; corruption, XX) would fail every remaining account
+# one by one and still end the pass as a success.
+_PER_ACCOUNT_SQLSTATES = ("40", "57014", "55P03", "23", "22")
+# Timeouts and lock waits are per-account on their own, but the same one on
+# this many accounts in a row means something shared — a migration holding a
+# lock on a table every account's DELETE touches, an overloaded server — so
+# the pass stops instead of waiting out a timeout for every account.
+_CONTENTION_SQLSTATES = ("57014", "55P03")
+CONTENTION_LIMIT = 3
+
+
+def _sqlstate(exc: Exception) -> str | None:
+    orig = getattr(exc, "orig", None)
+    return getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)  # psycopg 3 / psycopg2
 
 
 def _is_database_wide(exc: Exception) -> bool:
@@ -159,15 +170,27 @@ def _is_database_wide(exc: Exception) -> bool:
         return False
     if exc.connection_invalidated:
         return True
-    orig = exc.orig
-    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)  # psycopg 3 / psycopg2
+    sqlstate = _sqlstate(exc)
     if sqlstate is None:
         # No error code from the server: it couldn't be reached, or the
         # connection went away mid-statement ("server closed the connection
         # unexpectedly"; psycopg2's "connection already closed" is an
-        # InterfaceError).
-        return isinstance(exc, (OperationalError, InterfaceError))
-    return sqlstate.startswith(_DATABASE_WIDE_SQLSTATES)
+        # InterfaceError) — or the driver refused the statement itself, which
+        # every account would hit too.
+        return True
+    return not sqlstate.startswith(_PER_ACCOUNT_SQLSTATES)
+
+
+class PurgePassAborted(Exception):
+    """A pass stopped partway at a database-wide failure (the __cause__).
+    Carries what it had done by then: those deletes are committed and can't
+    be undone, so whoever logs the failure reports them with it."""
+
+    def __init__(self, purged: int, failed: int, not_attempted: int) -> None:
+        super().__init__(f"{purged} purged, {failed} failed, {not_attempted} not attempted")
+        self.purged = purged
+        self.failed = failed
+        self.not_attempted = not_attempted
 
 
 def purge_expired_accounts(db: Session, now: datetime | None = None) -> PurgeResult:
@@ -181,27 +204,29 @@ def purge_expired_accounts(db: Session, now: datetime | None = None) -> PurgeRes
     db.rollback()  # end the read transaction; each purge below is its own
 
     purged = failed = 0
-    for user_id in candidates:
+    contention = 0  # accounts in a row that failed with the same timeout/lock SQLSTATE
+    last_sqlstate = None
+    for index, user_id in enumerate(candidates):
         try:
             if _purge_user(db, user_id, cutoff):
                 purged += 1
+            contention = 0
         except Exception as exc:
-            if _is_database_wide(exc):
+            sqlstate = _sqlstate(exc)
+            if sqlstate in _CONTENTION_SQLSTATES and sqlstate == last_sqlstate:
+                contention += 1
+            else:
+                contention = 1 if sqlstate in _CONTENTION_SQLSTATES else 0
+            last_sqlstate = sqlstate
+            if _is_database_wide(exc) or contention >= CONTENTION_LIMIT:
                 # Every remaining account would fail the same way, each after
-                # its own connect timeout and with its own traceback. So the
-                # pass stops here, and the caller treats it as one failed pass
-                # (retried after PASS_RETRY_SECONDS by the loops). What was
-                # already purged is committed and can't be undone, so it's
-                # reported here — the caller only sees the exception.
-                logger.error(
-                    "Stopping the purge pass: the database failed, not account %s. "
-                    "%d account(s) purged and %d failed before it; %d not attempted",
-                    user_id,
-                    purged,
-                    failed,
-                    len(candidates) - purged - failed - 1,
-                )
-                raise
+                # its own timeout and with its own traceback. So the pass stops
+                # here, and the caller treats it as one failed pass (retried
+                # after PASS_RETRY_SECONDS by the loops), reporting what had
+                # been done by then. By position, not purged/failed: accounts
+                # skipped along the way (a login cancelled the deletion,
+                # another instance holds the lock) are neither.
+                raise PurgePassAborted(purged, failed, len(candidates) - index - 1) from exc
             # One account failing must not stop the rest; it stays pending and is retried next run.
             db.rollback()
             failed += 1
@@ -228,6 +253,20 @@ def _log_result(result: PurgeResult, *, log_nothing: bool) -> None:
         logger.info("Purged %d account(s) past the deletion grace period", result.purged)
 
 
+def _log_aborted(exc: PurgePassAborted, then: str) -> None:
+    # One record per aborted pass, with the counts and the database error's
+    # traceback together.
+    logger.error(
+        "Purge pass stopped partway (the database failed, or kept timing out): %d account(s) purged, %d failed, "
+        "%d not attempted; %s",
+        exc.purged,
+        exc.failed,
+        exc.not_attempted,
+        then,
+        exc_info=exc.__cause__,
+    )
+
+
 def purge_pass() -> bool:
     """One scheduled pass, logged; False if the pass itself failed — the
     database unreachable, or failing as a whole partway (purge_expired_accounts
@@ -241,6 +280,9 @@ def purge_pass() -> bool:
     instance runs one every night)."""
     try:
         result = purge_once()
+    except PurgePassAborted as exc:
+        _log_aborted(exc, f"retrying in {PASS_RETRY_SECONDS:.0f} s")
+        return False
     except Exception:
         logger.exception("Purge pass failed; retrying in %d s", PASS_RETRY_SECONDS)
         return False
@@ -258,7 +300,11 @@ def run(loop: bool = False) -> None:
     if not loop:
         check_database(nickname_column=False)
         # A failure should surface as a non-zero exit (cron, Cloud Scheduler), and Ctrl-C keeps its default meaning.
-        result = purge_once()
+        try:
+            result = purge_once()
+        except PurgePassAborted as exc:
+            _log_aborted(exc, "exiting")
+            sys.exit(1)
         _log_result(result, log_nothing=True)  # a one-off run always says what it did
         if result.failed:
             sys.exit(1)
