@@ -8,13 +8,19 @@ makes the scope a single path: user -> novels -> novel_id.
 
 It runs on a schedule by itself: the API server starts a background loop
 (api/main.py) that does one pass shortly after startup and then one every
-day at midnight (PURGE_TIMEZONE, Asia/Seoul unless set), so a plain deployment
-needs nothing extra. It can also
-be run on its own — once from cron or Cloud Scheduler, or as a long-lived
-worker that does the same daily pass:
+day at midnight (PURGE_TIMEZONE, Asia/Seoul unless set), retrying a failed
+pass after an hour (PASS_RETRY_SECONDS), so a plain deployment needs nothing
+extra. It can also be run on its own — once from cron or Cloud Scheduler, or
+as a long-lived worker that does the same daily pass:
 
     python -m workers.purge                      # one pass now
     python -m workers.purge --loop               # one pass now, then one every midnight
+
+Either way it first runs the same startup check as the API server
+(models.db.check_database) and exits non-zero on a schema mismatch. With
+--loop, a database that can't be reached yet is retried every minute for up
+to 10 minutes (CHECK_RETRY_SECONDS, CHECK_MAX_WAIT_SECONDS) before giving up,
+and a failed pass is retried after an hour, like the API server's loop.
 
 It is idempotent and safe to run concurrently (several API instances, a
 separate worker): each account is purged in its own transaction, under a row
@@ -29,6 +35,7 @@ import signal
 import sys
 import threading
 from datetime import datetime, time, timedelta, timezone
+from time import monotonic
 from typing import Iterator, NamedTuple
 from zoneinfo import ZoneInfo
 
@@ -37,7 +44,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from models.base import Base
-from models.db import SessionLocal, check_schema_is_current, engine
+from models.db import SessionLocal, check_database
 from models.novel import Novel
 from models.user import User, deletion_grace_cutoff
 
@@ -50,9 +57,20 @@ logger = logging.getLogger("workers.purge")
 PURGE_TIMEZONE_ENV = "PURGE_TIMEZONE"
 DEFAULT_PURGE_TIMEZONE = "Asia/Seoul"
 
-# How long the standalone --loop worker waits between attempts at its startup
-# schema check while the database can't be reached.
-SCHEMA_CHECK_RETRY_SECONDS = 60.0
+# A failed pass is retried after this long rather than at the next midnight,
+# by both the API server's loop (api/main.py) and the standalone --loop worker.
+PASS_RETRY_SECONDS = 3600.0
+
+# The standalone --loop worker's startup check. While the database can't be
+# reached (still coming up: a compose start, a Cloud SQL restart), it's
+# retried every CHECK_RETRY_SECONDS, but only for CHECK_MAX_WAIT_SECONDS: a
+# connection error can't be told apart from a permanent one (a wrong password,
+# a missing database or host — psycopg gives no SQLSTATE at connect time, and a
+# starting server also answers FATAL), so past that the worker exits non-zero
+# and the misconfiguration shows up as a failing process instead of a
+# healthy-looking one that never purges.
+CHECK_RETRY_SECONDS = 60.0
+CHECK_MAX_WAIT_SECONDS = 600.0
 
 
 def seconds_until_next_midnight(now: datetime | None = None) -> float:
@@ -142,19 +160,13 @@ def purge_once() -> PurgeResult:
         return purge_expired_accounts(db)
 
 
-def _check_schema() -> None:
-    # The same check the API server runs at startup (api/main.py), so a
-    # database behind this code's migrations fails here plainly instead of
-    # partway through a pass. Not in purge_once: the API server's own passes
-    # already ran it at startup.
-    with engine.connect() as connection:
-        check_schema_is_current(connection)
-
-
 def run(loop: bool = False) -> None:
-    logging.basicConfig(level=logging.INFO)
+    # The same startup check as the API server's (not in purge_once: the API
+    # server's own passes already ran it at its startup), so a database behind
+    # this code's migrations fails here plainly instead of partway through a
+    # pass. Logging needs no setup here: workers/__init__.py did it.
     if not loop:
-        _check_schema()
+        check_database()
         # A failure should surface as a non-zero exit (cron, Cloud Scheduler), and Ctrl-C keeps its default meaning.
         result = purge_once()
         logger.info("Purged %d account(s), %d failed", *result)
@@ -164,34 +176,45 @@ def run(loop: bool = False) -> None:
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())  # finish the current pass, then exit (10.4.4)
-    # A worker started while the database is still coming up (a compose
-    # start, a Cloud SQL restart) retries the check shortly instead of exiting,
-    # or of idling until the next midnight's pass. A schema mismatch
-    # (RuntimeError) still ends it — that needs a migration, not a retry.
-    while True:
-        try:
-            _check_schema()
-            break
-        except OperationalError as exc:
-            logger.warning(
-                "Could not reach the database for the schema check (%s); retrying in %d s",
-                exc.orig or exc,
-                SCHEMA_CHECK_RETRY_SECONDS,
-            )
-            if stop.wait(SCHEMA_CHECK_RETRY_SECONDS):
-                return
-    for delay in purge_schedule(startup_delay=0.0):
-        if stop.wait(delay):
-            break
+    started = monotonic()
+    checked = False
+    schedule = purge_schedule(startup_delay=0.0)
+    # A new schedule after a failure (the retry delay, then midnights), like
+    # the API server's loop (api/main.py).
+    while not stop.wait(next(schedule)):
+        if not checked:
+            try:
+                check_database()
+            except OperationalError as exc:
+                # A schema mismatch (RuntimeError) isn't caught: that needs a
+                # migration, not a retry.
+                if monotonic() - started > CHECK_MAX_WAIT_SECONDS:
+                    raise
+                logger.warning(
+                    "Could not reach the database for the startup check (%s); retrying in %d s",
+                    exc.orig or exc,
+                    CHECK_RETRY_SECONDS,
+                )
+                schedule = purge_schedule(CHECK_RETRY_SECONDS)
+                continue
+            checked = True
         try:
             logger.info("Purged %d account(s), %d failed", *purge_once())
         except Exception:
-            # e.g. the database is briefly unreachable: a long-lived worker retries at the next midnight.
-            logger.exception("Purge pass failed")
+            # e.g. the database is briefly unreachable (a maintenance restart).
+            logger.exception("Purge pass failed; retrying in %d s", PASS_RETRY_SECONDS)
+            schedule = purge_schedule(PASS_RETRY_SECONDS)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Permanently delete accounts past their deletion grace period.")
-    parser.add_argument("--loop", action="store_true", help="keep running: a pass now, then one every midnight")
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        help=(
+            "keep running: a pass now, then one every midnight (a failed pass is retried after an hour; "
+            "an unreachable database at startup is retried for up to 10 minutes)"
+        ),
+    )
     args = parser.parse_args()
     run(loop=args.loop)

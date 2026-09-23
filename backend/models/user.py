@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import Connection, DateTime, Integer, String, inspect
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.exc import NoSuchTableError
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, TimestampMixin
@@ -82,15 +83,21 @@ def check_nickname_column_length(connection: Connection) -> None:
     sure users.nickname exists — either the database is at this code's
     migration head, or its schema was compared against the models.
     """
-    nickname_column = next(
-        (c for c in inspect(connection).get_columns("users") if c["name"] == "nickname"), None
-    )
+    try:
+        columns = inspect(connection).get_columns("users")
+    except NoSuchTableError:
+        columns = []
+    nickname_column = next((c for c in columns if c["name"] == "nickname"), None)
     if nickname_column is None:
-        # Only if that guarantee broke (a database stamped at head without
-        # actually having its schema). A plain error rather than StopIteration,
-        # which asyncio.to_thread would turn into an unrelated-looking
-        # "coroutine raised StopIteration".
-        raise RuntimeError("users.nickname not found in the database — is its schema really at the stamped revision?")
+        # Only if that guarantee broke: a database stamped at head without
+        # actually having its schema, or DATABASE_URL pointing somewhere else.
+        # A plain error rather than NoSuchTableError / StopIteration (which
+        # asyncio.to_thread would turn into an unrelated-looking "coroutine
+        # raised StopIteration").
+        raise RuntimeError(
+            "users.nickname not found in the database — is its schema really at the stamped "
+            "revision, and does DATABASE_URL point at the right database?"
+        )
     column_type = nickname_column["type"]
     if not isinstance(column_type, String):
         # RuntimeError like every other startup check, not TypeError: it's the

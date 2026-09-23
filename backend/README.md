@@ -10,7 +10,7 @@ Follows the code structure from design doc section 6.2 as-is. Each module's resp
 | `models/` | DB models (users, novels, characters, locations ...) | Chapter 4 |
 | `ai/` | Embedding · reranker · NLI · LLM client wrappers | Chapter 5 |
 | `workers/` | cpu_worker / gpu_worker entry points (branch via `WORKER_TYPE`) | Section 10.4 |
-| `workers/purge.py` | Account purge job: permanently deletes accounts (and all their novels' data) whose deletion request is past the 30-day grace period. Runs by itself inside the API server shortly after startup and then every day at midnight (`PURGE_TIMEZONE`, default `Asia/Seoul`; `PURGE_ENABLED=0` turns it off); also runnable alone: `python -m workers.purge [--loop]` | Section 3.5 |
+| `workers/purge.py` | Account purge job: permanently deletes accounts (and all their novels' data) whose deletion request is past the 30-day grace period. Runs by itself inside the API server shortly after startup and then every day at midnight (`PURGE_TIMEZONE`, default `Asia/Seoul`; `PURGE_ENABLED=0` turns it off), retrying a failed pass after an hour; also runnable alone: `python -m workers.purge [--loop]` | Section 3.5 |
 | `infra/` | QueueClient · StorageClient · InferenceClient · LLMClient etc. cloud abstraction layer | Section 10.4.3 |
 
 ## Startup checks
@@ -18,13 +18,15 @@ Follows the code structure from design doc section 6.2 as-is. Each module's resp
 The API server (and `python -m workers.purge`) refuses to start, with an error saying what to do, when:
 
 - the database is behind the migrations in `db/migrations` (including one with none applied) — run `alembic upgrade head` from `db/`;
-- `users.nickname` is narrower than `maxLength` in `shared/nickname-rules.json`, or not a string column at all (API server only; a wider one only logs a warning).
+- `users.nickname` is narrower than `maxLength` in `shared/nickname-rules.json`, or not a string column at all (a wider one only logs a warning).
 
-A database at a revision this code doesn't know (a newer release migrated it during a rolling deploy), or an install without `db/migrations`, is checked against the models instead: it starts, with a warning, if nothing this code needs is missing. The checks live in `models/db.py` (`check_schema_is_current`) and `models/user.py` (`check_nickname_column_length`).
+A database at a revision this code doesn't know (a newer release migrated it during a rolling deploy), or an install without `db/migrations`, is checked against the models instead: it starts, with a warning, if nothing this code needs is missing. Both entry points run them through `models/db.py`'s `check_database` (`check_schema_is_current` there, `check_nickname_column_length` in `models/user.py`).
 
 Database connections time out after 10 seconds by default (see `.env.example`).
 
-Logging: the app's own packages (`infra/app_logging.py`) log at uvicorn's `--log-level` (INFO when run without uvicorn), through the root logger. A handler with uvicorn's format is added to root only if nothing else configured one, so a `--log-config` that sets up root keeps receiving the app's logs.
+`python -m workers.purge --loop` retries the startup check every minute while the database can't be reached, for up to 10 minutes (then it exits non-zero: a wrong password or host looks the same as a database still starting), and retries a failed pass after an hour instead of waiting for the next midnight.
+
+Logging: the app's own packages (`infra/app_logging.py`) log at uvicorn's `--log-level` (INFO when run without uvicorn), unless a `--log-config` set their level itself. With no logging configured, they print in uvicorn's format through Python's last-resort handler; anything that configures the root logger (a `--log-config`, `logging.basicConfig`, Cloud Logging) takes over completely, with nothing printed twice.
 
 ## Design principles (must follow)
 
