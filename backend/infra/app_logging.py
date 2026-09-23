@@ -56,13 +56,29 @@ class _LastResortHandler(logging.Handler):
             return False
         return super().filter(record)
 
+    terminator = "\n"
+
     def emit(self, record: logging.LogRecord) -> None:
+        # StreamHandler.emit's, against the current sys.stderr: flushed per
+        # record, so a crash right after a line doesn't leave it in a buffer.
         try:
-            sys.stderr.write(self.format(record) + "\n")
+            stream = sys.stderr
+            stream.write(self.format(record) + self.terminator)
+            stream.flush()
         except RecursionError:
             raise
         except Exception:  # noqa: BLE001 — the stdlib handlers' own pattern: handleError reports it
             self.handleError(record)
+
+
+def _is_python_default(handler: logging.Handler | None) -> bool:
+    # logging._defaultLastResort is the handler Python installs; private, so
+    # when a runtime doesn't have it, fall back to recognizing its class.
+    default = getattr(logging, "_defaultLastResort", None)
+    if default is not None:
+        return handler is default
+    return type(handler).__module__ == "logging" and type(handler).__name__ == "_StderrHandler"
+
 
 def configure_app_logging() -> None:
     # Python's last-resort handler (what a record falls back to when neither
@@ -74,7 +90,7 @@ def configure_app_logging() -> None:
     # with nothing printed twice. Only Python's own default is replaced: not
     # one someone else put there (even another stdlib handler), not None
     # (turned off on purpose), not ours (both entry packages call this).
-    if logging.lastResort is not None and logging.lastResort is getattr(logging, "_defaultLastResort", None):
+    if _is_python_default(logging.lastResort):
         logging.lastResort = _LastResortHandler()
     # Only this app's packages are lowered to the app level; everything else
     # keeps the root's (WARNING by default), so library INFO chatter stays out.

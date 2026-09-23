@@ -45,6 +45,7 @@ _LIBPQ_DRIVERS = {"psycopg", "psycopg2"}
 # around it): plain ASCII digits with an optional sign — stricter than
 # Python's int(), which also takes "5_000" and non-ASCII digits.
 _LIBPQ_INT = re.compile(r"\s*[+-]?[0-9]+\s*", re.ASCII)
+_C_INT_MAX = 2**31 - 1
 
 
 def _positive_env_timeout(driver: str) -> bool:
@@ -54,8 +55,9 @@ def _positive_env_timeout(driver: str) -> bool:
     # psycopg2 leaves it to libpq ("5.0" is an "invalid integer value").
     # Never raising: this runs at import time.
     value = os.environ.get("PGCONNECT_TIMEOUT", "")
-    if driver != "psycopg" and not _LIBPQ_INT.fullmatch(value):
-        return False
+    if driver != "psycopg":
+        # libpq also rejects what doesn't fit a C int.
+        return bool(_LIBPQ_INT.fullmatch(value)) and 0 < int(value) <= _C_INT_MAX
     try:
         return int(float(value)) > 0
     except (ValueError, OverflowError):

@@ -42,7 +42,7 @@ from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, select
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 from sqlalchemy.orm import Session
 
 from models.base import Base
@@ -59,7 +59,7 @@ logger = logging.getLogger("workers.purge")
 PURGE_TIMEZONE_ENV = "PURGE_TIMEZONE"
 DEFAULT_PURGE_TIMEZONE = "Asia/Seoul"
 
-# A failed pass (one that couldn't reach the database, or lost it partway) is
+# A failed pass (the database unreachable, or failing as a whole partway) is
 # retried after this long rather than at the next midnight, by both the API
 # server's loop (api/main.py) and the standalone --loop worker. Accounts that
 # failed on their own wait for the next midnight (see purge_pass).
@@ -135,6 +135,41 @@ def _purge_user(db: Session, user_id, cutoff: datetime) -> bool:
     return True
 
 
+# SQLSTATE classes where the database as a whole, not one account, is the
+# problem — every remaining account in the pass would fail the same way:
+# 08 connection exception; 57P operator intervention (admin/crash shutdown,
+# "cannot connect now" — but not 57014 query_canceled, which is one
+# statement); 53 insufficient resources (disk full, too many connections);
+# 42 undefined table/column, insufficient privilege (e.g. a rolling deploy's
+# migration renamed a table this code deletes from); 3D/3F no such
+# database/schema; 28 authentication.
+_DATABASE_WIDE_SQLSTATES = ("08", "57P", "53", "42", "3D", "3F", "28")
+
+
+def _is_database_wide(exc: Exception) -> bool:
+    """Whether a failure while purging one account is really the database's
+    (stop the pass) rather than that account's (count it, go on). Not by
+    exception class: psycopg makes per-statement errors — statement_timeout
+    (57014), deadlocks (40P01), serialization failures — OperationalErrors
+    too, and one account that always times out must not block every account
+    after it. Not only by connection_invalidated either: SQLAlchemy's psycopg
+    dialect sets it for an open connection that broke, not for failing to
+    open the next one after a database restart."""
+    if not isinstance(exc, DBAPIError):
+        return False
+    if exc.connection_invalidated:
+        return True
+    orig = exc.orig
+    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)  # psycopg 3 / psycopg2
+    if sqlstate is None:
+        # No error code from the server: it couldn't be reached, or the
+        # connection went away mid-statement ("server closed the connection
+        # unexpectedly"; psycopg2's "connection already closed" is an
+        # InterfaceError).
+        return isinstance(exc, (OperationalError, InterfaceError))
+    return sqlstate.startswith(_DATABASE_WIDE_SQLSTATES)
+
+
 def purge_expired_accounts(db: Session, now: datetime | None = None) -> PurgeResult:
     """Purge every account past its grace period; returns how many were removed and how many failed."""
     cutoff = deletion_grace_cutoff(now)
@@ -150,15 +185,23 @@ def purge_expired_accounts(db: Session, now: datetime | None = None) -> PurgeRes
         try:
             if _purge_user(db, user_id, cutoff):
                 purged += 1
-        except OperationalError:
-            # The database itself (a restart, a dropped connection), not this
-            # account: every remaining one would fail the same way, each after
-            # its own connect timeout and with its own traceback. So the pass
-            # stops here, and the caller treats it as one failed pass (retried
-            # after PASS_RETRY_SECONDS by the loops). Also covers the rarer
-            # per-statement OperationalErrors, e.g. a deadlock — fine to retry.
-            raise
-        except Exception:
+        except Exception as exc:
+            if _is_database_wide(exc):
+                # Every remaining account would fail the same way, each after
+                # its own connect timeout and with its own traceback. So the
+                # pass stops here, and the caller treats it as one failed pass
+                # (retried after PASS_RETRY_SECONDS by the loops). What was
+                # already purged is committed and can't be undone, so it's
+                # reported here — the caller only sees the exception.
+                logger.error(
+                    "Stopping the purge pass: the database failed, not account %s. "
+                    "%d account(s) purged and %d failed before it; %d not attempted",
+                    user_id,
+                    purged,
+                    failed,
+                    len(candidates) - purged - failed - 1,
+                )
+                raise
             # One account failing must not stop the rest; it stays pending and is retried next run.
             db.rollback()
             failed += 1
@@ -187,9 +230,10 @@ def _log_result(result: PurgeResult, *, log_nothing: bool) -> None:
 
 def purge_pass() -> bool:
     """One scheduled pass, logged; False if the pass itself failed — the
-    database unreachable, or lost partway (purge_expired_accounts stops at a
-    connection error instead of failing each remaining account on its own) —
-    which the loops retry after PASS_RETRY_SECONDS. Accounts that failed on
+    database unreachable, or failing as a whole partway (purge_expired_accounts
+    stops at a database-wide error instead of failing each remaining account
+    on its own; see _is_database_wide) — which the loops retry after
+    PASS_RETRY_SECONDS. Accounts that failed on
     their own are an account-specific problem that retrying within the hour
     wouldn't fix: they're reported and left for the next midnight's pass, so
     one account that always fails doesn't put every instance on hourly passes
