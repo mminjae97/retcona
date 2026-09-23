@@ -1,0 +1,5 @@
+# Every text file is LF, in the repository and in working copies, whatever
+# the platform's core.autocrlf says. Without this, a Windows checkout with
+# autocrlf=true mixes CRLF (files git checked out) and LF (files written by
+# tools) in the same tree, and git warns about each LF file on every commit.
+* text=auto eol=lf
