@@ -6,6 +6,7 @@ and Cloud SQL (10.5.4).
 
 import logging
 import os
+import re
 from pathlib import Path
 
 from alembic.autogenerate import compare_metadata
@@ -40,18 +41,25 @@ DB_CONNECT_TIMEOUT_SECONDS = 10
 _LIBPQ_DRIVERS = {"psycopg", "psycopg2"}
 
 
+# libpq's integer syntax for connection options (strtol, whitespace allowed
+# around it): plain ASCII digits with an optional sign — stricter than
+# Python's int(), which also takes "5_000" and non-ASCII digits.
+_LIBPQ_INT = re.compile(r"\s*[+-]?[0-9]+\s*", re.ASCII)
+
+
 def _positive_env_timeout(driver: str) -> bool:
     # Parsed the way the driver that will read it does, so a value only the
     # other driver accepts doesn't skip the default and then fail every
     # connection: psycopg 3 does int(float(...)) ("5.0" and "+5" count),
-    # psycopg2 leaves it to libpq, which wants an integer ("5.0" is an
-    # "invalid integer value"). Never raising: this runs at import time.
+    # psycopg2 leaves it to libpq ("5.0" is an "invalid integer value").
+    # Never raising: this runs at import time.
     value = os.environ.get("PGCONNECT_TIMEOUT", "")
+    if driver != "psycopg" and not _LIBPQ_INT.fullmatch(value):
+        return False
     try:
-        timeout = int(float(value)) if driver == "psycopg" else int(value)
+        return int(float(value)) > 0
     except (ValueError, OverflowError):
         return False
-    return timeout > 0
 
 
 def _connect_args(url: str) -> dict:
