@@ -97,15 +97,18 @@ function WorldSettingsSection({ novelId }: { novelId: string }) {
   const [form, setForm] = useState<WorldSettingInput>(EMPTY_WORLD);
   const [initial, setInitial] = useState<WorldSettingInput>(EMPTY_WORLD);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const dirty = editing !== null && JSON.stringify(form) !== JSON.stringify(initial);
+  // While a save or delete is in flight, nothing else can be started: its
+  // result closes the editor (or removes the card), which would otherwise
+  // take a form opened meanwhile with it.
+  const busy = saving || deleting;
 
-  // While a save is in flight, nothing else can be opened: its result closes
-  // the editor, which would otherwise take a form opened meanwhile with it.
   function startEdit(key: string, values: WorldSettingInput) {
-    if (saving || !confirmDiscard(dirty)) return;
+    if (busy || !confirmDiscard(dirty)) return;
     setEditing(key);
     setForm(values);
     setInitial(values);
@@ -120,7 +123,7 @@ function WorldSettingsSection({ novelId }: { novelId: string }) {
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
-    if (saving || editing === null) return;
+    if (busy || editing === null) return;
     const input = { ...form, title: form.title.trim(), content: form.content.trim() };
     if (!input.title || !input.content) {
       setFormError("제목과 내용을 입력해주세요.");
@@ -145,14 +148,17 @@ function WorldSettingsSection({ novelId }: { novelId: string }) {
   }
 
   async function handleDelete(setting: WorldSettingPublic) {
-    if (!window.confirm(`"${setting.title}" 설정을 삭제하시겠습니까?`)) return;
+    if (busy || !window.confirm(`"${setting.title}" 설정을 삭제하시겠습니까?`)) return;
+    setDeleting(true);
     setActionError(null);
     try {
       await deleteWorldSetting(novelId, setting.id);
       setItems((prev) => prev?.filter((s) => s.id !== setting.id) ?? null);
-      if (editing === setting.id) setEditing(null);
+      setEditing((current) => (current === setting.id ? null : current));
     } catch (err) {
       setActionError(describeError(err));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -192,10 +198,10 @@ function WorldSettingsSection({ novelId }: { novelId: string }) {
       </label>
       {formError && <p className="settings-error">{formError}</p>}
       <div className="form-actions">
-        <button type="submit" disabled={saving}>
+        <button type="submit" disabled={busy}>
           {saving ? "저장 중..." : "저장"}
         </button>
-        <button type="button" onClick={cancel} disabled={saving}>
+        <button type="button" onClick={cancel} disabled={busy}>
           취소
         </button>
       </div>
@@ -206,7 +212,7 @@ function WorldSettingsSection({ novelId }: { novelId: string }) {
     <section className="settings-section">
       <div className="section-header">
         <h2>세계관 설정</h2>
-        <button type="button" onClick={() => startEdit("new", EMPTY_WORLD)} disabled={items === null || saving}>
+        <button type="button" onClick={() => startEdit("new", EMPTY_WORLD)} disabled={items === null || busy}>
           + 항목 추가
         </button>
       </div>
@@ -235,7 +241,7 @@ function WorldSettingsSection({ novelId }: { novelId: string }) {
                     <div className="card-actions">
                       <button
                         type="button"
-                        disabled={saving}
+                        disabled={busy}
                         onClick={() =>
                           startEdit(setting.id, {
                             category: setting.category,
@@ -246,7 +252,7 @@ function WorldSettingsSection({ novelId }: { novelId: string }) {
                       >
                         수정
                       </button>
-                      <button type="button" onClick={() => handleDelete(setting)} disabled={saving}>
+                      <button type="button" onClick={() => handleDelete(setting)} disabled={busy}>
                         삭제
                       </button>
                     </div>
@@ -303,15 +309,17 @@ function CharactersSection({ novelId }: { novelId: string }) {
   const [form, setForm] = useState<CharacterForm>(() => characterForm());
   const [initial, setInitial] = useState<CharacterForm>(() => characterForm());
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const dirty = selected !== null && JSON.stringify(form) !== JSON.stringify(initial);
+  // While a save or delete is in flight, the selection can't change: a save's
+  // result is loaded into the form, and a delete closes it, either of which
+  // would otherwise overwrite or close a card opened meanwhile.
+  const busy = saving || deleting;
 
-  // While a save is in flight, the selection can't change: its result is
-  // loaded into the form, which would otherwise overwrite a card opened
-  // meanwhile.
   function select(key: string | null, character?: CharacterPublic) {
-    if (saving || key === selected || !confirmDiscard(dirty)) return;
+    if (busy || key === selected || !confirmDiscard(dirty)) return;
     const values = characterForm(character);
     setSelected(key);
     setForm(values);
@@ -325,7 +333,7 @@ function CharactersSection({ novelId }: { novelId: string }) {
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
-    if (saving || selected === null) return;
+    if (busy || selected === null) return;
     const input: CharacterInput = { ...form, name: form.name.trim() };
     if (!input.name) {
       setFormError("이름을 입력해주세요.");
@@ -356,7 +364,7 @@ function CharactersSection({ novelId }: { novelId: string }) {
 
   async function handleDelete() {
     const character = items?.find((c) => c.id === selected);
-    if (!character) return;
+    if (busy || !character) return;
     if (
       !window.confirm(
         `"${character.name}" 캐릭터를 삭제하시겠습니까? 이 캐릭터의 상태 기록과 관계 정보도 함께 삭제됩니다.`,
@@ -364,13 +372,16 @@ function CharactersSection({ novelId }: { novelId: string }) {
     ) {
       return;
     }
+    setDeleting(true);
     setFormError(null);
     try {
       await deleteCharacter(novelId, character.id);
       setItems((prev) => prev?.filter((c) => c.id !== character.id) ?? null);
-      setSelected(null);
+      setSelected((current) => (current === character.id ? null : current));
     } catch (err) {
       setFormError(describeError(err));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -378,7 +389,7 @@ function CharactersSection({ novelId }: { novelId: string }) {
     <section className="settings-section">
       <div className="section-header">
         <h2>캐릭터 설정</h2>
-        <button type="button" onClick={() => select("new")} disabled={items === null || saving}>
+        <button type="button" onClick={() => select("new")} disabled={items === null || busy}>
           + 캐릭터 추가
         </button>
       </div>
@@ -398,7 +409,7 @@ function CharactersSection({ novelId }: { novelId: string }) {
                   type="button"
                   className={character.id === selected ? "character-item selected" : "character-item"}
                   onClick={() => select(character.id, character)}
-                  disabled={saving}
+                  disabled={busy}
                 >
                   {character.name}
                   {character.source === "auto_detected" && <span className="source-badge">자동 생성</span>}
@@ -437,14 +448,14 @@ function CharactersSection({ novelId }: { novelId: string }) {
               ))}
               {formError && <p className="settings-error">{formError}</p>}
               <div className="form-actions">
-                <button type="submit" disabled={saving}>
+                <button type="submit" disabled={busy}>
                   {saving ? "저장 중..." : "저장"}
                 </button>
-                <button type="button" onClick={() => select(null)} disabled={saving}>
+                <button type="button" onClick={() => select(null)} disabled={busy}>
                   닫기
                 </button>
                 {selected !== "new" && (
-                  <button type="button" className="danger" onClick={handleDelete} disabled={saving}>
+                  <button type="button" className="danger" onClick={handleDelete} disabled={busy}>
                     삭제
                   </button>
                 )}
