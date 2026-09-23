@@ -16,6 +16,7 @@ from sqlalchemy import Connection, create_engine, make_url
 from sqlalchemy.orm import sessionmaker
 
 import models  # every model module, registered on Base.metadata (for _missing_schema)
+from models.user import check_nickname_column_length
 
 logger = logging.getLogger(__name__)
 
@@ -30,18 +31,22 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg://retcona:retc
 #
 # Only a default: a connect_timeout already in DATABASE_URL, or a positive
 # libpq PGCONNECT_TIMEOUT, wins (an explicit connect argument would override
-# the latter). An empty or 0 PGCONNECT_TIMEOUT means "no timeout" to libpq —
-# the indefinite hang this exists to prevent, and more likely a blank line in
-# an env file than a decision — so it doesn't; `?connect_timeout=0` in
-# DATABASE_URL still turns the timeout off on purpose. It's only passed to the
-# libpq-based drivers, which are the ones that accept it.
+# the latter). A PGCONNECT_TIMEOUT that's empty, 0 or not a number doesn't:
+# at best it means no timeout (psycopg2) or psycopg 3's own 130 s fallback, at
+# worst a connect-time "bad value" error — more likely a blank line in an env
+# file than a decision. It's only passed to the libpq-based drivers, which are
+# the ones that accept it.
 DB_CONNECT_TIMEOUT_SECONDS = 10
 _LIBPQ_DRIVERS = {"psycopg", "psycopg2"}
 
 
 def _positive_env_timeout() -> bool:
-    value = os.environ.get("PGCONNECT_TIMEOUT", "").strip()
-    return value.isdigit() and int(value) > 0
+    # Parsed the way psycopg 3 parses it (int(float(...)), so "+5" and "5.0"
+    # count), and never raising: this runs at import time.
+    try:
+        return int(float(os.environ.get("PGCONNECT_TIMEOUT", ""))) > 0
+    except (ValueError, OverflowError):
+        return False
 
 
 def _connect_args(url: str) -> dict:
@@ -160,3 +165,15 @@ def check_schema_is_current(connection: Connection) -> None:
         f"The database is at revision {sorted(current)}, behind this code's {sorted(expected)} — "
         "run `alembic upgrade head` (from db/) before starting."
     )
+
+
+def check_database() -> None:
+    """The startup checks, over one connection: every entry point that talks
+    to the database (the API server's lifespan, the standalone purge worker)
+    runs this before doing anything else. Migrations first: a database behind
+    them gets that plain error rather than whatever the nickname check trips
+    over. Blocking — the API server runs it in a thread.
+    """
+    with engine.connect() as connection:
+        check_schema_is_current(connection)
+        check_nickname_column_length(connection)
