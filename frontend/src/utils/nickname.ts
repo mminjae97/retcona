@@ -1,5 +1,5 @@
 import type { ChangeEvent, CompositionEvent } from "react";
-import nicknameRules from "../../../shared/nickname-rules.json";
+import rawNicknameRules from "../../../shared/nickname-rules.json";
 
 // Pen name rules (design doc 3.6), mirroring the backend's `_strip_nickname`.
 // The numbers themselves come from ../../../shared/nickname-rules.json, read
@@ -7,6 +7,30 @@ import nicknameRules from "../../../shared/nickname-rules.json";
 // check below still can't be shared this way (a regex here vs. Python's
 // unicodedata.category() there are different engines) and stays hand-kept in
 // sync, cross-checked over every code point.
+//
+// Validated the same way backend/models/nickname_rules.py validates its copy
+// (matching NICKNAME_RULES_DEFAULT there), and for the same reason: the file
+// is hand-edited, and a typo or an inverted min/max shouldn't be trusted
+// as-is. Without this, a bad edit that the backend safely falls back from
+// could still reach this side raw — e.g. a negative maxMarks turns
+// BAD_MARKS below into a pattern that matches every nickname, silently
+// locking out signup/nickname-change client-side while the backend (on its
+// own validated defaults) would have accepted the same input.
+const NICKNAME_RULES_DEFAULT = { minLength: 2, maxLength: 20, maxRawLength: 200, maxMarks: 3 };
+
+function validatedNicknameRules(rules: typeof rawNicknameRules): typeof NICKNAME_RULES_DEFAULT {
+  const { minLength, maxLength, maxRawLength, maxMarks } = rules;
+  const allInts = [minLength, maxLength, maxRawLength, maxMarks].every(
+    (n) => typeof n === "number" && Number.isInteger(n),
+  );
+  if (!allInts) return NICKNAME_RULES_DEFAULT;
+  if (!(minLength > 0 && minLength <= maxLength && maxLength <= maxRawLength)) return NICKNAME_RULES_DEFAULT;
+  if (maxMarks < 0) return NICKNAME_RULES_DEFAULT;
+  return rules;
+}
+
+const nicknameRules = validatedNicknameRules(rawNicknameRules);
+
 export const NICKNAME_MIN_LENGTH = nicknameRules.minLength;
 export const NICKNAME_MAX_LENGTH = nicknameRules.maxLength;
 // What the input itself accepts, before NFC and strip: the backend's raw cap.

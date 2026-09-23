@@ -15,7 +15,10 @@ every nickname in the app or crash the API at import time.
 """
 
 import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT = {"minLength": 2, "maxLength": 20, "maxRawLength": 200, "maxMarks": 3}
 
@@ -38,12 +41,22 @@ def _validated(rules: dict) -> dict | None:
 
 
 def _load() -> dict:
+    path = Path(__file__).resolve().parents[2] / "shared" / "nickname-rules.json"
     try:
-        raw = json.loads((Path(__file__).resolve().parents[2] / "shared" / "nickname-rules.json").read_text())
-    except (OSError, ValueError):
+        raw = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        logger.warning("Could not read %s (%s); using default nickname rules %s", path, exc, _DEFAULT)
         return _DEFAULT
     merged = {**_DEFAULT, **raw} if isinstance(raw, dict) else _DEFAULT
-    return _validated(merged) or _DEFAULT
+    validated = _validated(merged)
+    if validated is None:
+        # All-or-nothing: even one bad key (or an inverted min/max) falls all
+        # the way back rather than trying to salvage the rest, so a
+        # legitimate intentional change caught in the same edit as a typo is
+        # discarded too — logged so that isn't silent.
+        logger.warning("Invalid values in %s: %s; using default nickname rules %s", path, merged, _DEFAULT)
+        return _DEFAULT
+    return validated
 
 
 NICKNAME_RULES = _load()
