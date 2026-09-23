@@ -7,6 +7,7 @@ import { deletionAcceptedMessage, getGoogleConfig, getMe, requestAccountDeletion
 import type { UserPublic } from "../api/auth";
 import { ApiError, describeError } from "../api/client";
 import { describeGoogleStartFailure, startGoogleLogin } from "../utils/googleAuth";
+import { useOnPageRestore } from "../utils/pageRestore";
 import { getNicknameError, nicknameInputProps, stripNickname } from "../utils/nickname";
 import { createNovel, deleteNovel, listNovels, renameNovel } from "../api/novels";
 import type { NovelPublic } from "../api/novels";
@@ -194,6 +195,10 @@ export default function MyPage() {
 
   // A Google account confirms with a fresh Google sign-in instead of a
   // password (3.5): off to Google, and the callback page finishes it.
+  // Back from Google's screen without finishing the deletion: the page may
+  // be restored with the button still showing "구글로 이동 중...".
+  useOnPageRestore(() => setDeleting(false));
+
   async function handleGoogleDeletion() {
     if (deleting || !window.confirm(DELETION_WARNING)) return;
     setDeletionError(null);

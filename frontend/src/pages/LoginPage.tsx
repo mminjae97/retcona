@@ -10,6 +10,7 @@ import { ApiError, describeError as describeApiError } from "../api/client";
 import { describeGoogleStartFailure, startGoogleLogin } from "../utils/googleAuth";
 import type { GoogleLoginStartFailure } from "../utils/googleAuth";
 import { destinationAfterLogin, getRedirectState } from "../utils/loginRedirect";
+import { useOnPageRestore } from "../utils/pageRestore";
 import { getNicknameError, nicknameInputProps, stripNickname } from "../utils/nickname";
 import "./LoginPage.css";
 
@@ -153,6 +154,8 @@ export default function LoginPage() {
   // Google login isn't configured on the server.
   const [googleConfig, setGoogleConfig] = useState<GoogleConfig | null>(null);
   const [leavingForGoogle, setLeavingForGoogle] = useState(false);
+  // Back from Google's screen: the page may be restored still "leaving".
+  useOnPageRestore(() => setLeavingForGoogle(false));
 
   useEffect(() => {
     let active = true;
