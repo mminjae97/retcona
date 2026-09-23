@@ -9,8 +9,8 @@ makes the scope a single path: user -> novels -> novel_id.
 It runs on a schedule by itself: the API server starts a background loop
 (api/main.py) that does one pass shortly after startup and then one every
 day at midnight (PURGE_TIMEZONE, Asia/Seoul unless set), retrying a failed
-pass after an hour (PASS_RETRY_SECONDS, up to QUICK_RETRIES times in a row),
-so a plain deployment needs nothing extra. It can also be run on its own — once from cron or Cloud Scheduler, or
+pass after an hour (PASS_RETRY_SECONDS, up to QUICK_RETRIES times a day), so
+a plain deployment needs nothing extra. It can also be run on its own — once from cron or Cloud Scheduler, or
 as a long-lived worker that does the same daily pass:
 
     python -m workers.purge                      # one pass now
@@ -33,15 +33,17 @@ another purge run) holds it.
 import argparse
 import logging
 import os
+import random
 import signal
 import sys
 import threading
+from collections.abc import Callable
 from datetime import UTC, datetime, time, timedelta
 from time import monotonic
 from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 from sqlalchemy.orm import Session
 
@@ -61,12 +63,16 @@ DEFAULT_PURGE_TIMEZONE = "Asia/Seoul"
 
 # A failed pass (see purge_pass) is retried after PASS_RETRY_SECONDS rather
 # than at the next midnight — by both the API server's loop (api/main.py) and
-# the standalone --loop worker — but only QUICK_RETRIES times in a row. A
-# failure that outlasts that (an outage of hours, a shared cause that needs a
-# fix) settles back into one attempt a day, instead of every instance running
-# a pass every hour for good.
+# the standalone --loop worker — up to QUICK_RETRIES times after each
+# midnight's pass. A failure that outlasts that (an outage of hours) settles
+# back into the midnight schedule, where the next failure gets its own quick
+# retries again: at most QUICK_RETRIES extra passes a day per process.
 PASS_RETRY_SECONDS = 3600.0
 QUICK_RETRIES = 3
+# If working out the next midnight itself fails (e.g. time zone data gone at
+# runtime), the API server's loop waits this long instead — a day, not
+# PASS_RETRY_SECONDS, so a broken schedule doesn't turn into a pass an hour.
+SCHEDULE_FAILURE_DELAY_SECONDS = 86400.0
 
 # The standalone --loop worker's startup check. While the database can't be
 # reached (still coming up: a compose start, a Cloud SQL restart), it's
@@ -97,38 +103,37 @@ def seconds_until_next_midnight(now: datetime | None = None) -> float:
 
 
 class PassSchedule:
-    """When the next pass runs, given how the last ones went: the next
-    midnight after a success; PASS_RETRY_SECONDS after a failure, for up to
-    QUICK_RETRIES failures in a row, then the next midnight again. Shared by
+    """When the next pass runs, given how the last one went: the next
+    midnight after a success; PASS_RETRY_SECONDS after a failure, up to
+    QUICK_RETRIES times, then the next midnight — with the count starting
+    over, so a later, unrelated failure gets its quick retries too. Shared by
     the API server's loop and the standalone worker, which differ only in how
-    they wait (asyncio vs a thread)."""
+    they wait (asyncio vs a thread). The next attempt is logged at INFO: the
+    failed pass already logged its own ERROR, and one alert per failure is
+    enough."""
 
     def __init__(self) -> None:
-        self.failed_in_a_row = 0
+        self.quick_retries_used = 0
 
     def after(self, succeeded: bool) -> float:
-        if succeeded:
-            self.failed_in_a_row = 0
-            return seconds_until_next_midnight()
-        self.failed_in_a_row += 1
-        if self.failed_in_a_row <= QUICK_RETRIES:
-            logger.warning(
-                "Retrying the purge pass in %d s (%d failed in a row)", PASS_RETRY_SECONDS, self.failed_in_a_row
+        if not succeeded and self.quick_retries_used < QUICK_RETRIES:
+            self.quick_retries_used += 1
+            logger.info(
+                "Retrying the purge pass in %d s (quick retry %d of %d)",
+                PASS_RETRY_SECONDS,
+                self.quick_retries_used,
+                QUICK_RETRIES,
             )
             return PASS_RETRY_SECONDS
-        logger.warning(
-            "The purge pass has failed %d times in a row; next attempt at the next midnight", self.failed_in_a_row
-        )
+        if not succeeded:
+            logger.info("Quick retries used up; next purge pass at the next midnight")
+        self.quick_retries_used = 0
         return seconds_until_next_midnight()
 
 
 class PurgeResult(NamedTuple):
     purged: int
     failed: int  # left pending, retried on the next pass
-    # Set when nothing was purged and every failure (two or more) had this one
-    # SQLSTATE: the accounts aren't the problem, something they share is (a
-    # lock on a table every DELETE touches, a newer schema's foreign key).
-    shared_sqlstate: str | None = None
 
 
 def _purge_user(db: Session, user_id, cutoff: datetime) -> bool:
@@ -162,20 +167,26 @@ def _purge_user(db: Session, user_id, cutoff: datetime) -> bool:
 
 
 # SQLSTATE classes/codes where the database itself can't take the pass right
-# now, whichever account is being purged — every remaining one would fail the
-# same way, each after its own timeout and with its own traceback: 08
-# connection exception; 57P operator intervention (admin/crash shutdown,
-# "cannot connect now" — not 57014 query_canceled, which is one statement);
-# 53 insufficient resources (disk full, too many connections); 58 system
-# error (I/O); XX internal error (corruption); 25006 read-only transaction (a
-# standby after a failover); 42 undefined table/column, insufficient
-# privilege (a newer migration renamed a table this code deletes from); 3D/3F
-# no such database/schema; 28 authentication. Only these stop a pass early.
-# Anything else — deadlocks, timeouts, constraint and data errors, codes not
-# listed — is counted against the account and the pass goes on, so no account
-# can keep the ones after it from ever being purged; a cause they all share
-# shows up at the end instead (PurgeResult.shared_sqlstate).
+# now, whichever account is being purged: 08 connection exception; 57P
+# operator intervention (admin/crash shutdown, "cannot connect now" — not
+# 57014 query_canceled, which is one statement); 53 insufficient resources
+# (disk full, too many connections); 58 system error (I/O); XX internal error
+# (corruption); 25006 read-only transaction (a standby after a failover); 42
+# undefined table/column, insufficient privilege (a newer migration renamed a
+# table this code deletes from); 3D/3F no such database/schema; 28
+# authentication. Anything else the server reports is counted against the
+# account.
 _DATABASE_WIDE_SQLSTATES = ("08", "57P", "53", "58", "XX", "25006", "42", "3D", "3F", "28")
+# Timeouts and lock waits: per-account on their own, but this many of the
+# same one in a pass (not necessarily in a row: accounts with no novels skip
+# the novel-scoped tables and succeed in between) means something shared — a
+# migration's lock on a table every DELETE touches, an overloaded server — so
+# the pass stops instead of waiting out a timeout for every remaining account.
+# The candidate order is shuffled every pass, so a few accounts that always
+# time out on their own can't stop it at the same place every time and keep
+# the ones after them from ever being purged.
+_CONTENTION_SQLSTATES = ("57014", "55P03")
+CONTENTION_LIMIT = 3
 
 
 def _sqlstate(exc: Exception) -> str | None:
@@ -183,46 +194,63 @@ def _sqlstate(exc: Exception) -> str | None:
     return getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)  # psycopg 3 / psycopg2
 
 
-def _is_database_wide(exc: Exception) -> bool:
+def _database_answers(db: Session) -> bool:
+    # Asking, rather than guessing from the exception: psycopg raises the same
+    # code-less OperationalError for a connection that's gone and for a query
+    # it refused to send (more than 65535 parameters — one huge account).
+    # Opening a new connection here if the old one is gone waits at most
+    # DB_CONNECT_TIMEOUT_SECONDS.
+    try:
+        db.rollback()
+        db.execute(text("SELECT 1"))
+        db.rollback()
+    except Exception:  # noqa: BLE001 — any failure to answer is the answer
+        return False
+    return True
+
+
+def _is_database_wide(exc: Exception, db: Session) -> bool:
     """Whether a failure while purging one account is the database's (stop
     the pass) rather than that account's (count it, go on). Not by exception
     class: psycopg makes per-statement errors — statement_timeout, deadlocks,
-    serialization failures — OperationalErrors too. Not only by
-    connection_invalidated either: SQLAlchemy's psycopg dialect sets it for
-    an open connection that broke, not for failing to open the next one after
-    a database restart."""
+    serialization failures — OperationalErrors too."""
     if not isinstance(exc, DBAPIError):
         return False
     if exc.connection_invalidated:
         return True
     sqlstate = _sqlstate(exc)
-    if sqlstate is None:
-        # No error code from the server: it couldn't be reached, or the
-        # connection went away mid-statement ("server closed the connection
-        # unexpectedly"; psycopg2's "connection already closed" is an
-        # InterfaceError). Other code-less errors are the driver refusing one
-        # statement (e.g. too many parameters for one huge account): that
-        # account's.
-        return isinstance(exc, (OperationalError, InterfaceError))
-    return sqlstate.startswith(_DATABASE_WIDE_SQLSTATES)
+    if sqlstate is not None:
+        return sqlstate.startswith(_DATABASE_WIDE_SQLSTATES)
+    if isinstance(exc, (OperationalError, InterfaceError)):
+        # No error code from the server: unreachable, the connection lost
+        # mid-statement — or a statement the driver refused to send.
+        return not _database_answers(db)
+    return False
 
 
 class PurgePassAborted(Exception):
-    """A pass stopped partway at a database-wide failure (the __cause__).
-    Carries what it had done by then — those deletes are committed and can't
-    be undone — so whoever logs the failure reports them with it: purged and
-    failed so far, and left_pending (the account it stopped at, and every one
-    after it; accounts skipped along the way are in none of the three)."""
+    """A pass stopped partway at a database-wide failure or contention (the
+    __cause__ is the error it stopped at). Carries what it had done by then —
+    those deletes are committed and can't be undone — so whoever logs the
+    failure reports them with it: purged and failed so far, and left_pending
+    (the account it stopped at, and every one after it; accounts skipped
+    along the way are in none of the three)."""
 
-    def __init__(self, purged: int, failed: int, left_pending: int) -> None:
-        super().__init__(f"{purged} purged, {failed} failed, {left_pending} left pending")
+    def __init__(self, reason: str, purged: int, failed: int, left_pending: int) -> None:
+        super().__init__(f"{reason}: {purged} purged, {failed} failed, {left_pending} left pending")
+        self.reason = reason
         self.purged = purged
         self.failed = failed
         self.left_pending = left_pending
 
 
-def purge_expired_accounts(db: Session, now: datetime | None = None) -> PurgeResult:
-    """Purge every account past its grace period; returns how many were removed and how many failed."""
+def purge_expired_accounts(
+    db: Session, now: datetime | None = None, should_stop: Callable[[], bool] | None = None
+) -> PurgeResult:
+    """Purge every account past its grace period; returns how many were
+    removed and how many failed. `should_stop` is checked between accounts
+    (a shutdown): the pass then ends early, as a normal result — what's left
+    is simply still pending for the next one."""
     cutoff = deletion_grace_cutoff(now)
     candidates = list(
         db.scalars(
@@ -230,49 +258,54 @@ def purge_expired_accounts(db: Session, now: datetime | None = None) -> PurgeRes
         )
     )
     db.rollback()  # end the read transaction; each purge below is its own
+    random.shuffle(candidates)  # see _CONTENTION_SQLSTATES
 
     purged = failed = 0
-    failure_sqlstates = set()
+    contention: dict[str, int] = {}
+    failure_kinds: set[str] = set()
     for index, user_id in enumerate(candidates):
+        if should_stop is not None and should_stop():
+            break
         try:
             if _purge_user(db, user_id, cutoff):
                 purged += 1
         except Exception as exc:
-            if _is_database_wide(exc):
-                # By position, not purged/failed: accounts skipped along the
-                # way (a login cancelled the deletion, another instance holds
-                # the lock) are neither.
-                raise PurgePassAborted(purged, failed, len(candidates) - index) from exc
+            sqlstate = _sqlstate(exc)
+            if _is_database_wide(exc, db):
+                raise PurgePassAborted("the database failed", purged, failed, len(candidates) - index) from exc
+            if sqlstate in _CONTENTION_SQLSTATES:
+                contention[sqlstate] = contention.get(sqlstate, 0) + 1
+                if contention[sqlstate] >= CONTENTION_LIMIT:
+                    raise PurgePassAborted(
+                        f"{CONTENTION_LIMIT} accounts hit SQLSTATE {sqlstate} (contention, not the accounts)",
+                        purged,
+                        failed,
+                        len(candidates) - index,
+                    ) from exc
             # One account failing must not stop the rest; it stays pending and is retried next run.
             db.rollback()
             failed += 1
-            failure_sqlstates.add(_sqlstate(exc))
+            failure_kinds.add(sqlstate or type(exc).__name__)
             logger.exception("Failed to purge account %s", user_id)
-    shared = None
-    if not purged and failed >= 2 and len(failure_sqlstates) == 1:
-        shared = next(iter(failure_sqlstates))  # None if they weren't database errors
-    return PurgeResult(purged, failed, shared)
+    if failed >= 2 and not purged and len(failure_kinds) == 1:
+        # A fact, not a verdict: this is also what a few accounts that always
+        # fail on their own look like on a night nothing else expired.
+        logger.error("All %d account(s) the purge pass attempted failed the same way (%s)", failed, *failure_kinds)
+    return PurgeResult(purged, failed)
 
 
-def purge_once() -> PurgeResult:
+def purge_once(should_stop: Callable[[], bool] | None = None) -> PurgeResult:
     """One pass in a session of its own."""
     with SessionLocal() as db:
-        return purge_expired_accounts(db)
+        return purge_expired_accounts(db, should_stop=should_stop)
 
 
 def _log_result(result: PurgeResult, *, log_nothing: bool) -> None:
     # One place for how a pass is reported, so every entry point reports the
     # same outcome at the same level: failed accounts (each already logged
     # with its traceback) as a WARNING, so alerting on WARNING catches them
-    # whichever way the purge runs; a shared cause as an ERROR.
-    if result.shared_sqlstate is not None:
-        logger.error(
-            "Every account the purge pass attempted (%d) failed with SQLSTATE %s: likely one cause they share "
-            "(a lock on a table every DELETE touches, a newer schema's foreign key), not the accounts",
-            result.failed,
-            result.shared_sqlstate,
-        )
-    elif result.failed:
+    # whichever way the purge runs.
+    if result.failed:
         logger.warning(
             "Purged %d account(s); %d failed and stay pending until the next pass", result.purged, result.failed
         )
@@ -281,10 +314,11 @@ def _log_result(result: PurgeResult, *, log_nothing: bool) -> None:
 
 
 def _log_aborted(exc: PurgePassAborted) -> None:
-    # One record per aborted pass, with the counts and the database error's
-    # traceback together.
+    # One record per aborted pass, with the counts and the error's traceback
+    # together.
     logger.error(
-        "Purge pass stopped partway: the database failed. %d account(s) purged, %d failed, %d left pending",
+        "Purge pass stopped partway: %s. %d account(s) purged, %d failed, %d left pending",
+        exc.reason,
         exc.purged,
         exc.failed,
         exc.left_pending,
@@ -292,17 +326,17 @@ def _log_aborted(exc: PurgePassAborted) -> None:
     )
 
 
-def purge_pass() -> bool:
+def purge_pass(should_stop: Callable[[], bool] | None = None) -> bool:
     """One scheduled pass, logged; False if the pass failed, for PassSchedule
-    to retry sooner than the next midnight: it couldn't run at all, it
-    stopped at a database-wide error (see _is_database_wide), or every
-    account it attempted failed with the same SQLSTATE (a cause they share).
-    Accounts that failed on their own, next to others that didn't, are an
-    account-specific problem that retrying within the hour wouldn't fix:
-    they're reported and left for the next midnight's pass. Nothing is logged
-    for a pass with nothing to purge (each instance runs one every night)."""
+    to retry sooner than the next midnight: it couldn't run at all, or it
+    stopped at a database-wide error or at contention (see
+    _is_database_wide, _CONTENTION_SQLSTATES). Accounts that failed on their
+    own are an account-specific problem that retrying within the hour
+    wouldn't fix: they're reported and left for the next midnight's pass.
+    Nothing is logged for a pass with nothing to purge (each instance runs
+    one every night)."""
     try:
-        result = purge_once()
+        result = purge_once(should_stop)
     except PurgePassAborted as exc:
         _log_aborted(exc)
         return False
@@ -310,7 +344,7 @@ def purge_pass() -> bool:
         logger.exception("Purge pass failed")
         return False
     _log_result(result, log_nothing=False)
-    return result.shared_sqlstate is None
+    return True
 
 
 def run(loop: bool = False) -> None:
@@ -334,7 +368,7 @@ def run(loop: bool = False) -> None:
         return
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(sig, lambda *_: stop.set())  # finish the current pass, then exit (10.4.4)
+        signal.signal(sig, lambda *_: stop.set())  # finish the current account, then exit (10.4.4)
     # A bad PURGE_TIMEZONE fails here, not after the first pass when the first
     # midnight is worked out — as the API server's startup does (api/main.py).
     seconds_until_next_midnight()
@@ -359,7 +393,7 @@ def run(loop: bool = False) -> None:
                 delay = CHECK_RETRY_SECONDS
                 continue
             checked = True
-        delay = schedule.after(purge_pass())
+        delay = schedule.after(purge_pass(stop.is_set))
 
 
 if __name__ == "__main__":
@@ -369,7 +403,7 @@ if __name__ == "__main__":
         action="store_true",
         help=(
             "keep running: a pass now, then one every midnight (a failed pass is retried after an hour, "
-            "up to 3 times in a row; an unreachable database at startup is retried for up to 10 minutes)"
+            "up to 3 times a day; an unreachable database at startup is retried for up to 10 minutes)"
         ),
     )
     args = parser.parse_args()
