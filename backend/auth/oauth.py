@@ -256,7 +256,15 @@ def google_deletion(
     (schedule_deletion)."""
     if current_user.provider != PROVIDER or not current_user.provider_id:
         raise HTTPException(status.HTTP_409_CONFLICT, "This account confirms deletion with its password")
-    identity = exchange_code(_require_config(), body.code, body.code_verifier)
+    try:
+        identity = exchange_code(_require_config(), body.code, body.code_verifier)
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_401_UNAUTHORIZED:
+            raise
+        # Google rejected the code. Not a 401 here: this endpoint needs a
+        # session, and the client reads a 401 on an authenticated call as that
+        # session having ended — signing the user out over a bad code.
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Google sign-in failed") from exc
     if identity.sub != current_user.provider_id:
         # 403, not 401: the bearer token is fine — it's the Google account
         # chosen on Google's screen that isn't this one.

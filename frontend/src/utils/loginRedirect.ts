@@ -10,7 +10,9 @@ export interface LoginRedirectState {
   expiredUserId: string | null;
 }
 
-// Only an in-app absolute path is honored, never anything that could leave the app.
+// Only an in-app absolute path is honored, never anything that could leave the
+// app — and never a sign-in page itself: /login, or /auth/... (the Google
+// callback, whose URL carries a one-time code that's been used up by then).
 export function getRedirectState(state: unknown): LoginRedirectState {
   const { returnTo, sessionEnded, userId } = (state ?? {}) as {
     returnTo?: unknown;
@@ -18,7 +20,11 @@ export function getRedirectState(state: unknown): LoginRedirectState {
     userId?: unknown;
   };
   const safe =
-    typeof returnTo === "string" && returnTo.startsWith("/") && !returnTo.startsWith("//") && !returnTo.startsWith("/login");
+    typeof returnTo === "string" &&
+    returnTo.startsWith("/") &&
+    !returnTo.startsWith("//") &&
+    !returnTo.startsWith("/login") &&
+    !returnTo.startsWith("/auth/");
   return {
     returnTo: safe ? returnTo : null,
     sessionEnded: sessionEnded === true,

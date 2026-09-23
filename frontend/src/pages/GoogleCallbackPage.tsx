@@ -28,7 +28,10 @@ const LOGIN_ERRORS: Record<number, string> = {
 };
 
 const DELETION_ERRORS: Record<number, string> = {
-  401: "구글 본인 확인에 실패했습니다. 마이페이지에서 다시 시도해주세요.",
+  // 401 isn't here: on this authenticated call it means the session ended,
+  // which the app handles by itself (a sign-in again; the backend answers 400
+  // when it's Google that turned the code down).
+  400: "구글 본인 확인에 실패했습니다. 마이페이지에서 다시 시도해주세요.",
   403: "이 계정에 연결된 구글 계정이 아닙니다. 연결된 구글 계정을 선택해 다시 시도해주세요.",
   409: "이 계정은 비밀번호로 탈퇴를 확인합니다. 마이페이지에서 다시 시도해주세요.",
   502: "구글에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.",
