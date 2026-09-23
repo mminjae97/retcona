@@ -11,7 +11,7 @@ from pathlib import Path
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from alembic.util import CommandError
-from sqlalchemy import Engine, create_engine, make_url
+from sqlalchemy import Connection, create_engine, make_url
 from sqlalchemy.orm import sessionmaker
 
 logger = logging.getLogger(__name__)
@@ -19,16 +19,28 @@ logger = logging.getLogger(__name__)
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg://retcona:retcona@localhost:5432/retcona")
 
 # Without a connect timeout, an unreachable database host (one that drops
-# packets rather than refusing) leaves every connection attempt, including
-# startup's schema checks, waiting on the OS's TCP timeout, which can be minutes
-# — startup then hangs with no error instead of failing. A connect_timeout
-# already in DATABASE_URL takes precedence.
+# packets rather than refusing) leaves every connection attempt waiting on the
+# OS's TCP timeout, which can be minutes: startup's schema checks hang with no
+# error instead of failing, and so does any request or purge pass that needs a
+# new pooled connection. This applies to all of them, not only startup — a
+# connection that can't be made in this long fails with OperationalError.
+#
+# Only a default: a connect_timeout already in DATABASE_URL or in libpq's
+# PGCONNECT_TIMEOUT wins (an explicit connect argument would override the
+# latter), and it's only passed to the libpq-based drivers, which are the ones
+# that accept it.
 DB_CONNECT_TIMEOUT_SECONDS = 10
+_LIBPQ_DRIVERS = {"psycopg", "psycopg2"}
 
 
 def _connect_args(url: str) -> dict:
     parsed = make_url(url)
-    if parsed.get_backend_name() != "postgresql" or "connect_timeout" in parsed.query:
+    if (
+        parsed.get_backend_name() != "postgresql"
+        or parsed.get_driver_name() not in _LIBPQ_DRIVERS
+        or "connect_timeout" in parsed.query
+        or "PGCONNECT_TIMEOUT" in os.environ
+    ):
         return {}
     return {"connect_timeout": DB_CONNECT_TIMEOUT_SECONDS}
 
@@ -51,7 +63,7 @@ def get_db():
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "db" / "migrations"
 
 
-def check_schema_is_current(engine: Engine) -> None:
+def check_schema_is_current(connection: Connection) -> None:
     """Fails loudly at startup if the database is behind the migrations this
     code ships with, instead of starting and then returning 500s
     (UndefinedColumn, UndefinedTable) on whichever request first touches what
@@ -67,8 +79,7 @@ def check_schema_is_current(engine: Engine) -> None:
         return
     script = ScriptDirectory(str(_MIGRATIONS_DIR))
     expected = set(script.get_heads())
-    with engine.connect() as connection:
-        current = set(MigrationContext.configure(connection).get_current_heads())
+    current = set(MigrationContext.configure(connection).get_current_heads())
     if current == expected:
         return
     if not current:

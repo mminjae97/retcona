@@ -66,16 +66,21 @@ async def _purge_daily() -> None:
             schedule = purge_schedule(PURGE_RETRY_SECONDS)
 
 
+def _check_database() -> None:
+    # One connection for both. Migrations first: a database behind them gets
+    # that plain error rather than whatever the nickname check trips over.
+    with engine.connect() as connection:
+        check_schema_is_current(connection)
+        check_nickname_column_length(connection)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_keys()
     # Blocking DB work, off the event loop (nothing else is being served yet,
     # but this still shouldn't set the precedent of blocking it from
-    # lifespan) — same reasoning as the purge pass below. Migrations first:
-    # a database behind them gets that plain error rather than whatever the
-    # nickname check happens to trip over.
-    await asyncio.to_thread(check_schema_is_current, engine)
-    await asyncio.to_thread(check_nickname_column_length, engine)
+    # lifespan) — same reasoning as the purge pass below.
+    await asyncio.to_thread(_check_database)
     purge_task = None
     if _purge_enabled():
         seconds_until_next_midnight()  # a bad PURGE_TIMEZONE fails startup, not the first midnight
