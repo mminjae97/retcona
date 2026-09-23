@@ -15,7 +15,7 @@ from api.episodes import router as episodes_router
 from api.novels import router as novels_router
 from auth.jwe import validate_keys
 from auth.router import router as auth_router
-from models.db import engine
+from models.db import check_schema_is_current, engine
 from models.user import check_nickname_column_length
 from workers.purge import purge_once, purge_schedule, seconds_until_next_midnight
 
@@ -71,7 +71,10 @@ async def lifespan(app: FastAPI):
     validate_keys()
     # Blocking DB work, off the event loop (nothing else is being served yet,
     # but this still shouldn't set the precedent of blocking it from
-    # lifespan) — same reasoning as the purge pass below.
+    # lifespan) — same reasoning as the purge pass below. Migrations first:
+    # a database behind them gets that plain error rather than whatever the
+    # nickname check happens to trip over.
+    await asyncio.to_thread(check_schema_is_current, engine)
     await asyncio.to_thread(check_nickname_column_length, engine)
     purge_task = None
     if _purge_enabled():
