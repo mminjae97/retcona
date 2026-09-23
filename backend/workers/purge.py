@@ -36,11 +36,14 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from models.base import Base
-from models.db import SessionLocal
+from models.db import SessionLocal, check_schema_is_current, engine
 from models.novel import Novel
 from models.user import User, deletion_grace_cutoff
 
-logger = logging.getLogger(__name__)
+# By name, not __name__: run as `python -m workers.purge`, __name__ is
+# "__main__", which would fall outside the "workers" logger that
+# infra/app_logging.py sets up.
+logger = logging.getLogger("workers.purge")
 
 # The purge runs once a day at midnight in this time zone (an IANA name).
 PURGE_TIMEZONE_ENV = "PURGE_TIMEZONE"
@@ -136,6 +139,15 @@ def purge_once() -> PurgeResult:
 
 def run(loop: bool = False) -> None:
     logging.basicConfig(level=logging.INFO)
+    # The schema check below goes through alembic, whose INFO lines ("Will
+    # assume transactional DDL", ...) are just noise here.
+    logging.getLogger("alembic").setLevel(logging.WARNING)
+    # The same check the API server runs at startup (api/main.py), so a
+    # database behind this code's migrations fails here plainly instead of
+    # partway through a pass. Not in purge_once: the API server's own passes
+    # already ran it at startup.
+    with engine.connect() as connection:
+        check_schema_is_current(connection)
     if not loop:
         # A failure should surface as a non-zero exit (cron, Cloud Scheduler), and Ctrl-C keeps its default meaning.
         result = purge_once()

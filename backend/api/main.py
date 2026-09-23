@@ -19,9 +19,7 @@ from models.db import check_schema_is_current, engine
 from models.user import check_nickname_column_length
 from workers.purge import purge_once, purge_schedule, seconds_until_next_midnight
 
-# uvicorn only sets up handlers for its own loggers, so this one is used to have
-# the purge's INFO line show up next to the server's own output.
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger(__name__)
 
 # The API server purges accounts past their deletion grace period (3.5) every
 # day at midnight (PURGE_TIMEZONE, see workers/purge.py). Set this to 0 to turn
