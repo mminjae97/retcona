@@ -8,13 +8,19 @@ makes the scope a single path: user -> novels -> novel_id.
 
 It runs on a schedule by itself: the API server starts a background loop
 (api/main.py) that does one pass shortly after startup and then one every
-day at midnight (PURGE_TIMEZONE, Asia/Seoul unless set), so a plain deployment
-needs nothing extra. It can also
-be run on its own — once from cron or Cloud Scheduler, or as a long-lived
-worker that does the same daily pass:
+day at midnight (PURGE_TIMEZONE, Asia/Seoul unless set), retrying a failed
+pass after an hour (PASS_RETRY_SECONDS), so a plain deployment needs nothing
+extra. It can also be run on its own — once from cron or Cloud Scheduler, or
+as a long-lived worker that does the same daily pass:
 
     python -m workers.purge                      # one pass now
     python -m workers.purge --loop               # one pass now, then one every midnight
+
+Either way it first runs the same startup check as the API server
+(models.db.check_database) and exits non-zero on a schema mismatch. With
+--loop, a database that can't be reached yet is retried every minute for up
+to 10 minutes (CHECK_RETRY_SECONDS, CHECK_MAX_WAIT_SECONDS) before giving up,
+and a failed pass is retried after an hour, like the API server's loop.
 
 It is idempotent and safe to run concurrently (several API instances, a
 separate worker): each account is purged in its own transaction, under a row
@@ -51,19 +57,20 @@ logger = logging.getLogger("workers.purge")
 PURGE_TIMEZONE_ENV = "PURGE_TIMEZONE"
 DEFAULT_PURGE_TIMEZONE = "Asia/Seoul"
 
-# The standalone --loop worker's retries. While the database can't be reached
-# at startup (still coming up: a compose start, a Cloud SQL restart), the
-# startup check is retried every CHECK_RETRY_SECONDS, but only for
-# CHECK_MAX_WAIT_SECONDS: a connection error can't be told apart from a
-# permanent one (a wrong password, a missing database or host — psycopg gives
-# no SQLSTATE at connect time, and a starting server also answers FATAL), so
-# past that the worker exits non-zero and the misconfiguration shows up as a
-# failing process instead of a healthy-looking one that never purges. After
-# that, a failed pass is retried after PASS_RETRY_SECONDS rather than at the
-# next midnight.
+# A failed pass is retried after this long rather than at the next midnight,
+# by both the API server's loop (api/main.py) and the standalone --loop worker.
+PASS_RETRY_SECONDS = 3600.0
+
+# The standalone --loop worker's startup check. While the database can't be
+# reached (still coming up: a compose start, a Cloud SQL restart), it's
+# retried every CHECK_RETRY_SECONDS, but only for CHECK_MAX_WAIT_SECONDS: a
+# connection error can't be told apart from a permanent one (a wrong password,
+# a missing database or host — psycopg gives no SQLSTATE at connect time, and a
+# starting server also answers FATAL), so past that the worker exits non-zero
+# and the misconfiguration shows up as a failing process instead of a
+# healthy-looking one that never purges.
 CHECK_RETRY_SECONDS = 60.0
 CHECK_MAX_WAIT_SECONDS = 600.0
-PASS_RETRY_SECONDS = 3600.0
 
 
 def seconds_until_next_midnight(now: datetime | None = None) -> float:
@@ -201,6 +208,13 @@ def run(loop: bool = False) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Permanently delete accounts past their deletion grace period.")
-    parser.add_argument("--loop", action="store_true", help="keep running: a pass now, then one every midnight")
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        help=(
+            "keep running: a pass now, then one every midnight (a failed pass is retried after an hour; "
+            "an unreachable database at startup is retried for up to 10 minutes)"
+        ),
+    )
     args = parser.parse_args()
     run(loop=args.loop)

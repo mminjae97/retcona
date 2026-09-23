@@ -16,7 +16,12 @@ from api.novels import router as novels_router
 from auth.jwe import validate_keys
 from auth.router import router as auth_router
 from models.db import check_database
-from workers.purge import purge_once, purge_schedule, seconds_until_next_midnight
+from workers.purge import (
+    PASS_RETRY_SECONDS,
+    purge_once,
+    purge_schedule,
+    seconds_until_next_midnight,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,19 +38,20 @@ def _purge_enabled() -> bool:
 
 # Let startup (migrations, warm-up) settle before the catch-up pass.
 PURGE_STARTUP_DELAY_SECONDS = 60.0
-# After the schedule itself failed, wait this long before carrying on.
-PURGE_RETRY_SECONDS = 3600.0
 
 
-async def _purge_pass() -> None:
+async def _purge_pass() -> bool:
+    """One pass; False if it failed (logged here)."""
     try:
         # Blocking DB work, off the event loop. Safe alongside other
         # instances running the same loop: see workers/purge.py.
         result = await asyncio.to_thread(purge_once)
         if result.purged:
             logger.info("Purged %d account(s) past the deletion grace period", result.purged)
+        return True
     except Exception:
-        logger.exception("Account purge pass failed")
+        logger.exception("Account purge pass failed; retrying in %d s", PASS_RETRY_SECONDS)
+        return False
 
 
 async def _purge_daily() -> None:
@@ -53,14 +59,18 @@ async def _purge_daily() -> None:
     while True:
         try:
             await asyncio.sleep(next(schedule))
-            await _purge_pass()
+            if not await _purge_pass():
+                # A failed pass (e.g. the database restarting for maintenance)
+                # is retried after PASS_RETRY_SECONDS, not at the next
+                # midnight — the same as the standalone worker.
+                schedule = purge_schedule(PASS_RETRY_SECONDS)
         except Exception:
             # Anything that would end this task (it is only awaited at shutdown,
             # so it would die unnoticed and the purge never run again) —
             # including the schedule itself failing. A generator that raised is
             # finished, so start a new schedule: the retry delay, then midnights.
             logger.exception("Account purge schedule failed")
-            schedule = purge_schedule(PURGE_RETRY_SECONDS)
+            schedule = purge_schedule(PASS_RETRY_SECONDS)
 
 
 @asynccontextmanager
