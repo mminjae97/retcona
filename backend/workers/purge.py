@@ -50,6 +50,10 @@ logger = logging.getLogger("workers.purge")
 PURGE_TIMEZONE_ENV = "PURGE_TIMEZONE"
 DEFAULT_PURGE_TIMEZONE = "Asia/Seoul"
 
+# How long the standalone --loop worker waits between attempts at its startup
+# schema check while the database can't be reached.
+SCHEMA_CHECK_RETRY_SECONDS = 60.0
+
 
 def seconds_until_next_midnight(now: datetime | None = None) -> float:
     """Seconds from `now` to the next midnight in the purge time zone.
@@ -160,22 +164,25 @@ def run(loop: bool = False) -> None:
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())  # finish the current pass, then exit (10.4.4)
-    schema_checked = False
+    # A worker started while the database is still coming up (a compose
+    # start, a Cloud SQL restart) retries the check shortly instead of exiting,
+    # or of idling until the next midnight's pass. A schema mismatch
+    # (RuntimeError) still ends it — that needs a migration, not a retry.
+    while True:
+        try:
+            _check_schema()
+            break
+        except OperationalError as exc:
+            logger.warning(
+                "Could not reach the database for the schema check (%s); retrying in %d s",
+                exc.orig or exc,
+                SCHEMA_CHECK_RETRY_SECONDS,
+            )
+            if stop.wait(SCHEMA_CHECK_RETRY_SECONDS):
+                return
     for delay in purge_schedule(startup_delay=0.0):
         if stop.wait(delay):
             break
-        if not schema_checked:
-            # Before the first pass that reaches the database, not before the
-            # loop: a worker started while the database is still coming up (a
-            # compose start, a Cloud SQL restart) retries like a failed pass
-            # instead of exiting. A schema mismatch (RuntimeError) still ends
-            # it — that needs a migration, not a retry.
-            try:
-                _check_schema()
-            except OperationalError:
-                logger.exception("Could not reach the database for the schema check; retrying at the next pass")
-                continue
-            schema_checked = True
         try:
             logger.info("Purged %d account(s), %d failed", *purge_once())
         except Exception:

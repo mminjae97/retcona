@@ -82,7 +82,15 @@ def check_nickname_column_length(connection: Connection) -> None:
     sure users.nickname exists — either the database is at this code's
     migration head, or its schema was compared against the models.
     """
-    nickname_column = next(c for c in inspect(connection).get_columns("users") if c["name"] == "nickname")
+    nickname_column = next(
+        (c for c in inspect(connection).get_columns("users") if c["name"] == "nickname"), None
+    )
+    if nickname_column is None:
+        # Only if that guarantee broke (a database stamped at head without
+        # actually having its schema). A plain error rather than StopIteration,
+        # which asyncio.to_thread would turn into an unrelated-looking
+        # "coroutine raised StopIteration".
+        raise RuntimeError("users.nickname not found in the database — is its schema really at the stamped revision?")
     column_type = nickname_column["type"]
     if not isinstance(column_type, String):
         # RuntimeError like every other startup check, not TypeError: it's the
