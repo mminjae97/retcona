@@ -102,8 +102,10 @@ function WorldSettingsSection({ novelId }: { novelId: string }) {
 
   const dirty = editing !== null && JSON.stringify(form) !== JSON.stringify(initial);
 
+  // While a save is in flight, nothing else can be opened: its result closes
+  // the editor, which would otherwise take a form opened meanwhile with it.
   function startEdit(key: string, values: WorldSettingInput) {
-    if (!confirmDiscard(dirty)) return;
+    if (saving || !confirmDiscard(dirty)) return;
     setEditing(key);
     setForm(values);
     setInitial(values);
@@ -204,7 +206,7 @@ function WorldSettingsSection({ novelId }: { novelId: string }) {
     <section className="settings-section">
       <div className="section-header">
         <h2>세계관 설정</h2>
-        <button type="button" onClick={() => startEdit("new", EMPTY_WORLD)} disabled={items === null}>
+        <button type="button" onClick={() => startEdit("new", EMPTY_WORLD)} disabled={items === null || saving}>
           + 항목 추가
         </button>
       </div>
@@ -233,6 +235,7 @@ function WorldSettingsSection({ novelId }: { novelId: string }) {
                     <div className="card-actions">
                       <button
                         type="button"
+                        disabled={saving}
                         onClick={() =>
                           startEdit(setting.id, {
                             category: setting.category,
@@ -243,7 +246,7 @@ function WorldSettingsSection({ novelId }: { novelId: string }) {
                       >
                         수정
                       </button>
-                      <button type="button" onClick={() => handleDelete(setting)}>
+                      <button type="button" onClick={() => handleDelete(setting)} disabled={saving}>
                         삭제
                       </button>
                     </div>
@@ -304,8 +307,11 @@ function CharactersSection({ novelId }: { novelId: string }) {
 
   const dirty = selected !== null && JSON.stringify(form) !== JSON.stringify(initial);
 
+  // While a save is in flight, the selection can't change: its result is
+  // loaded into the form, which would otherwise overwrite a card opened
+  // meanwhile.
   function select(key: string | null, character?: CharacterPublic) {
-    if (key === selected || !confirmDiscard(dirty)) return;
+    if (saving || key === selected || !confirmDiscard(dirty)) return;
     const values = characterForm(character);
     setSelected(key);
     setForm(values);
@@ -372,7 +378,7 @@ function CharactersSection({ novelId }: { novelId: string }) {
     <section className="settings-section">
       <div className="section-header">
         <h2>캐릭터 설정</h2>
-        <button type="button" onClick={() => select("new")} disabled={items === null}>
+        <button type="button" onClick={() => select("new")} disabled={items === null || saving}>
           + 캐릭터 추가
         </button>
       </div>
@@ -392,6 +398,7 @@ function CharactersSection({ novelId }: { novelId: string }) {
                   type="button"
                   className={character.id === selected ? "character-item selected" : "character-item"}
                   onClick={() => select(character.id, character)}
+                  disabled={saving}
                 >
                   {character.name}
                   {character.source === "auto_detected" && <span className="source-badge">자동 생성</span>}
