@@ -7,7 +7,7 @@
 // The draft is dropped once a save confirms it, so it survives an expired session, a network failure or a
 // closed tab. Every tab (every page load) keeps its own draft and rewrites only that one; the drafts other tabs
 // or earlier loads left are listed on the page and the author loads whichever one they want.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Link, useBlocker, useParams } from "react-router-dom";
 import { fetchCurrentUserId } from "../api/auth";
 import { describeError } from "../api/client";
@@ -21,6 +21,7 @@ import {
   isDraftEventFor,
   isDraftsWipedEventFor,
   listOtherDrafts,
+  loadDraft,
   releaseDraftCache,
   saveDraft,
   startDraftSlot,
@@ -114,6 +115,12 @@ export default function EditorPage() {
   // What this session's own draft of each episode holds, so a confirmed save can
   // be compared against it without reading the whole manuscript back out of storage.
   const ownDraftRef = useRef(new Map<string, string>());
+  // ownDraftRef is a ref (mutating it alone doesn't schedule a render), but the
+  // "drafts nearly full" warning below reads it directly at render time. Most
+  // callers change it right before a state update that would re-render anyway
+  // (e.g. setContent); the one that doesn't (the storage listener noticing
+  // another tab reclaimed this session's own slot) calls this to force one.
+  const [, forceRerender] = useReducer((c: number) => c + 1, 0);
 
   // The server's version of the current episode, kept in one place: the refs
   // are what the debounced writes read, the state is what the page draws from.
@@ -192,6 +199,20 @@ export default function EditorPage() {
       // now, not just as of its next write.
       if (isDraftsWipedEventFor(id, e.key)) setDraftBackupOk(false);
       if (!isDraftEventFor(id, e.key)) return;
+      // A removal under this episode's prefix can be another tab's makeRoom()
+      // reclaiming *this* session's own stale slot (evicted for room, not by
+      // anything this tab did) — ownDraftRef wouldn't otherwise learn its
+      // slot is gone until its next write, overcounting the "drafts nearly
+      // full" warning below in the meantime. loadDraft() re-checks storage
+      // directly rather than assuming which key changed.
+      if (e.newValue === null && ownDraftRef.current.has(id) && loadDraft(id) === null) {
+        ownDraftRef.current.delete(id);
+        // Mutating the ref alone doesn't schedule a render, and the other-
+        // drafts list below is unaffected (it already excludes this tab's own
+        // slot) — showOtherDrafts would just bail out on "nothing changed" and
+        // the warning would stay stale until some unrelated render.
+        forceRerender();
+      }
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => refreshOtherDrafts(), OTHER_DRAFTS_REFRESH_DEBOUNCE_MS);
     };

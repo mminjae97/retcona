@@ -13,11 +13,12 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import DateTime, Engine, Integer, String, inspect
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, TimestampMixin
+from models.nickname_rules import NICKNAME_RULES
 
 
 # Grace period between a deletion request and permanent deletion (3.5).
@@ -45,7 +46,13 @@ class User(Base, TimestampMixin):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    nickname: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Length follows shared/nickname-rules.json (models/nickname_rules.py), but
+    # only at the Python/ORM level: the actual column was created at
+    # VARCHAR(20) by db/migrations/versions/961f54d79f2a_initial_schema.py,
+    # a historical migration that isn't edited retroactively. Raising
+    # maxLength above 20 needs a new migration (ALTER COLUMN) alongside it, or
+    # validation will accept a nickname the database then rejects.
+    nickname: Mapped[str] = mapped_column(String(NICKNAME_RULES["maxLength"]), nullable=False)
     provider: Mapped[str | None] = mapped_column(String)  # google | kakao | naver | None (direct login)
     provider_id: Mapped[str | None] = mapped_column(String)
     password_hash: Mapped[str | None] = mapped_column(String)
@@ -56,3 +63,28 @@ class User(Base, TimestampMixin):
     def has_password(self) -> bool:
         # False for social-login accounts, which re-authenticate with their provider instead (3.5).
         return self.password_hash is not None
+
+
+def check_nickname_column_length(engine: Engine) -> None:
+    """Fails loudly at startup if the *actual* users.nickname column (reflected
+    from the live database) doesn't match NICKNAME_RULES["maxLength"].
+
+    Comparing against User.nickname's declared SQLAlchemy type wouldn't catch
+    anything — that type is derived from the same NICKNAME_RULES value above,
+    so it always trivially matches. Only a migration changes the real column;
+    if shared/nickname-rules.json's maxLength is raised without a paired
+    migration (ALTER COLUMN), this is what stands between that and a 500 on
+    the first nickname past the old, still-actual length.
+    """
+    columns = {c["name"]: c for c in inspect(engine).get_columns("users")}
+    # getattr, not a direct .length: reflection returns a generic TypeEngine,
+    # and while this column is a VARCHAR today (so it does carry .length),
+    # nothing statically guarantees that stays true.
+    actual_length = getattr(columns["nickname"]["type"], "length", None)
+    expected_length = NICKNAME_RULES["maxLength"]
+    if actual_length != expected_length:
+        raise RuntimeError(
+            f"users.nickname is VARCHAR({actual_length}) in the database, but "
+            f"shared/nickname-rules.json's maxLength is {expected_length}. "
+            "Write a migration to ALTER the column (or fix the JSON) before starting."
+        )

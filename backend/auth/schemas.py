@@ -1,43 +1,28 @@
 """Pydantic request/response schemas for the auth endpoints."""
 
-import json
 import unicodedata
 import uuid
 from datetime import datetime
-from pathlib import Path
 
 from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, EmailStr, Field, field_validator
+
+from models.nickname_rules import NICKNAME_RULES as _NICKNAME_RULES
 
 
 def _normalize_email(value: str) -> str:
     return value.lower()
 
 
-# The length/mark-count numbers in the pen-name rule (3.6), shared with the
-# frontend (utils/nickname.ts) via this one file so the two can't drift apart
-# on *these* numbers. The character-class check itself (which Unicode
-# categories are allowed) still can't be shared this way — a regex
-# (frontend) and unicodedata.category() (here) are different engines — and is
-# instead kept in sync by hand, cross-checked over every code point.
-#
-# Falls back to these defaults (kept in sync with shared/nickname-rules.json
-# by hand) instead of failing to import: that file sits outside what
-# pyproject.toml's [tool.setuptools.packages.find] packages, so it exists in
-# a repo checkout (how this app runs today) but not necessarily in a
-# non-editable install (a built wheel, or an image copying only
-# site-packages) — and one missing (or, e.g. mid-edit, incomplete) file
-# shouldn't take the whole API down at import time. Merged rather than
-# swapped in wholesale, so a file missing just one key still uses the others.
-_NICKNAME_RULES_DEFAULT = {"minLength": 2, "maxLength": 20, "maxRawLength": 200, "maxMarks": 3}
-try:
-    _NICKNAME_RULES = {
-        **_NICKNAME_RULES_DEFAULT,
-        **json.loads((Path(__file__).resolve().parents[2] / "shared" / "nickname-rules.json").read_text()),
-    }
-except (OSError, ValueError, TypeError):
-    _NICKNAME_RULES = _NICKNAME_RULES_DEFAULT
+# The length/mark-count numbers in the pen-name rule (3.6) come from
+# models.nickname_rules (shared/nickname-rules.json), also read by
+# models/user.py (the nickname column's length) and the frontend
+# (utils/nickname.ts), so they can't drift apart on *these* numbers. The
+# character-class check itself (which Unicode categories are allowed) still
+# can't be shared this way — a regex (frontend) and unicodedata.category()
+# (here) are different engines — and is instead kept in sync by hand,
+# cross-checked over every code point.
 
 # What a pen name may contain (3.6): letters, numbers, combining marks and the
 # ordinary space, from the Basic Multilingual Plane only. Everything else is out:

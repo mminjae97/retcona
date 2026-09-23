@@ -15,6 +15,8 @@ from api.episodes import router as episodes_router
 from api.novels import router as novels_router
 from auth.jwe import validate_keys
 from auth.router import router as auth_router
+from models.db import engine
+from models.user import check_nickname_column_length
 from workers.purge import purge_once, purge_schedule, seconds_until_next_midnight
 
 # uvicorn only sets up handlers for its own loggers, so this one is used to have
@@ -67,6 +69,7 @@ async def _purge_daily() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_keys()
+    check_nickname_column_length(engine)
     purge_task = None
     if _purge_enabled():
         seconds_until_next_midnight()  # a bad PURGE_TIMEZONE fails startup, not the first midnight

@@ -24,7 +24,7 @@ def upgrade() -> None:
     op.create_table('users',
     sa.Column('id', sa.UUID(), nullable=False),
     sa.Column('email', sa.String(), nullable=False),
-    sa.Column('nickname', sa.String(length=20), nullable=False),
+    sa.Column('nickname', sa.String(length=20), nullable=False),  # keep in sync with shared/nickname-rules.json's maxLength (models/nickname_rules.py) — raising it needs a new migration, not an edit here
     sa.Column('provider', sa.String(), nullable=True),
     sa.Column('provider_id', sa.String(), nullable=True),
     sa.Column('password_hash', sa.String(), nullable=True),
