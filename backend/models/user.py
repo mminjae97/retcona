@@ -68,7 +68,7 @@ class User(Base, TimestampMixin):
 
 def check_nickname_column_length(engine: Engine) -> None:
     """Fails loudly at startup if the *actual* users.nickname column (reflected
-    from the live database) doesn't match NICKNAME_RULES["maxLength"].
+    from the live database) is narrower than NICKNAME_RULES["maxLength"].
 
     Comparing against User.nickname's declared SQLAlchemy type wouldn't catch
     anything — that type is derived from the same NICKNAME_RULES value above,
@@ -81,21 +81,25 @@ def check_nickname_column_length(engine: Engine) -> None:
         columns = {c["name"]: c for c in inspect(engine).get_columns("users")}
         nickname_column = columns["nickname"]
     except (NoSuchTableError, KeyError) as exc:
-        # A fresh database before `alembic upgrade head` — this check runs at
-        # every startup, including one that's about to create the table for
-        # the first time, and should say that plainly rather than surface a
-        # raw KeyError/NoSuchTableError that looks like a bug in this check.
+        # Usually a fresh database that migrations haven't been run against
+        # (the app never creates tables itself), but possibly DATABASE_URL
+        # pointing at the wrong database — say so plainly rather than surface
+        # a raw KeyError/NoSuchTableError that looks like a bug in this check.
         raise RuntimeError(
-            "Could not find users.nickname to check its length — has `alembic upgrade head` been run?"
+            "Could not find users.nickname to check its length — has `alembic upgrade head` "
+            "been run, and does DATABASE_URL point at the right database?"
         ) from exc
     # getattr, not a direct .length: reflection returns a generic TypeEngine,
     # and while this column is a VARCHAR today (so it does carry .length),
     # nothing statically guarantees that stays true.
+    # None means unbounded (TEXT, or VARCHAR with no length). Only a column
+    # narrower than maxLength breaks anything; a wider one just holds names
+    # that can no longer be that long, so it isn't worth refusing to start.
     actual_length = getattr(nickname_column["type"], "length", None)
     expected_length = NICKNAME_RULES["maxLength"]
-    if actual_length != expected_length:
+    if actual_length is not None and actual_length < expected_length:
         raise RuntimeError(
-            f"users.nickname is VARCHAR({actual_length}) in the database, but "
-            f"shared/nickname-rules.json's maxLength is {expected_length}. "
+            f"users.nickname is VARCHAR({actual_length}) in the database, narrower than "
+            f"shared/nickname-rules.json's maxLength of {expected_length}. "
             "Write a migration to ALTER the column (or fix the JSON) before starting."
         )
