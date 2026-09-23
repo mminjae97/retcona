@@ -11,6 +11,7 @@ from models import (  # noqa: F401
     relation,
     story_event,
     user,
+    validation_run,
     world_setting,
 )
 

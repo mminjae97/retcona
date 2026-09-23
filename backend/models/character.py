@@ -15,6 +15,13 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, NovelScopedMixin, TimestampMixin
 
+# The attribute keys a card has — the fields of api/settings.py's FixedAttrs
+# and MutableAttrs, which the settings screen edits. Claim extraction (7.4)
+# describes what the manuscript says in these keys, so a card it creates
+# shows up on that screen filled in.
+FIXED_ATTR_KEYS = ("age", "eye_color", "hair_color", "height", "scars", "origin")
+MUTABLE_ATTR_KEYS = ("hairstyle", "outfit", "condition", "belongings")
+
 
 class Character(Base, NovelScopedMixin, TimestampMixin):
     __tablename__ = "characters"

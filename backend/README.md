@@ -11,6 +11,7 @@ Follows the code structure from design doc section 6.2 as-is. Each module's resp
 | `ai/` | Embedding · reranker · NLI · LLM client wrappers | Chapter 5 |
 | `workers/` | cpu_worker / gpu_worker entry points (branch via `WORKER_TYPE`) | Section 10.4 |
 | `workers/purge.py` | Account purge job: permanently deletes accounts (and all their novels' data) whose deletion request is past the 30-day grace period. Runs by itself inside the API server shortly after startup and then every day at midnight (`PURGE_TIMEZONE`, default `Asia/Seoul`; `PURGE_ENABLED=0` turns it off), retrying a failed pass after an hour; also runnable alone: `python -m workers.purge [--loop]` | Section 3.5 |
+| `workers/cpu_worker.py` | Runs "run validation" jobs from the queue: `python -m workers.cpu_worker` (keeps running until Ctrl-C/SIGTERM; needs Redis and the database). See "Validation runs" below | Sections 2.2, 10.4 |
 | `infra/` | QueueClient · StorageClient · InferenceClient · LLMClient etc. cloud abstraction layer | Section 10.4.3 |
 
 ## Startup checks
@@ -27,6 +28,14 @@ Database connections time out after 10 seconds by default (see `.env.example`).
 `python -m workers.purge --loop` retries the startup check every minute while the database can't be reached, for up to 10 minutes (then it exits non-zero: a wrong password or host looks the same as a database still starting — so run it under a restart policy). Each pass works through the expired accounts in a random order. It stops early only when the database itself fails (unreachable or lost partway — checked with a `SELECT 1` when the error carries no SQLSTATE —, shutting down, read-only after a failover, out of disk, I/O errors or corruption, a table renamed by a newer migration: `_DATABASE_WIDE_SQLSTATES`), or when 3 accounts in the pass hit the same statement timeout or lock error (contention: `_CONTENTION_SQLSTATES` — only with a `statement_timeout`/`lock_timeout` set on the database or role, which the app itself doesn't set; without one, a blocked DELETE simply waits), logging in one ERROR how many accounts it had already purged. Any other failure is counted against its account and the pass goes on; with the order shuffled, no set of accounts can keep the others from being purged. A stopped pass is retried after an hour, up to 3 times after each midnight's pass; accounts that failed on their own are logged as a warning and wait for the next midnight. On shutdown (SIGTERM, or the API server stopping) a pass ends after the account it's on.
 
 Logging: the app's own packages (`infra/app_logging.py`) log at uvicorn's `--log-level` (INFO when run without uvicorn), unless a `--log-config` set their level itself. With no logging configured, they print in uvicorn's format through Python's last-resort handler; anything that configures the root logger (a `--log-config`, `logging.basicConfig`, Cloud Logging) takes over completely, with nothing printed twice.
+
+## Validation runs
+
+"Run validation" in the editor (`POST /novels/{id}/episodes/{id}/validations`) records a `validation_runs` row (queued) and puts a job on the queue (`QUEUE_PROVIDER=redis` locally); the CPU worker takes it (running) and ends it succeeded or failed. The editor polls `GET .../validations/latest` (204 before the first run). While a run is queued or running, another request returns that run instead of starting a second one; one still queued or running 15 minutes after it was requested is failed as `abandoned` (no worker running, or one that died — the Redis queue doesn't redeliver), so it can be run again.
+
+What a run does today (`pipeline/validate_episode.py`) is the first half of the pipeline (7.1): claim extraction (`pipeline/extract_claims.py`) and entity matching/auto-registration (`pipeline/entities.py`, 7.4). It replaces the episode's earlier claims, links each claim to its character/location by name — creating an `auto_detected` card, with this episode's attributes, for a name the novel doesn't have yet — and leaves existing cards as they are. Judgment modules come in stage 2.
+
+The model isn't chosen yet (chapter 5): `LLM_PROVIDER=mock` (`infra/mock_llm.py`) answers the extraction prompt from keyword rules, rough but enough to run everything end to end. Failures are recorded on the run as a code: `queue_unavailable`, `abandoned`, `episode_missing`, `empty_manuscript`, `llm_failed`, `bad_llm_response`, `internal`.
 
 ## Design principles (must follow)
 
