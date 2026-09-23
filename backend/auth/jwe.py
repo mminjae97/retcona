@@ -11,6 +11,8 @@ key pair; this solo-deployment implementation uses symmetric HS256 (signing) + d
 stores/sends the encrypted token.
 """
 
+import hashlib
+import hmac
 import os
 import time
 
@@ -60,6 +62,13 @@ def issue_token(user_id: str, claims: dict | None = None, *, ttl_seconds: int = 
     signed = jwt.encode(payload, _signing_key(), algorithm="HS256")
     encrypted = jwe.encrypt(signed, _encryption_key(), algorithm="dir", encryption="A256GCM")
     return _to_str(encrypted)
+
+
+def keyed_hash(value: str) -> str:
+    """HMAC-SHA256 of `value` under the signing key: for storing a short secret
+    (a 6-digit verification code) without the secret itself — unlike a plain
+    hash, a leaked table of these can't be brute-forced without the key."""
+    return hmac.new(_signing_key().encode(), value.encode(), hashlib.sha256).hexdigest()
 
 
 def decode_token(token: str) -> dict:
