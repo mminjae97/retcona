@@ -11,7 +11,7 @@
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import DateTime, Engine, Integer, String, inspect
 from sqlalchemy.dialects.postgresql import UUID
@@ -20,7 +20,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, TimestampMixin
 from models.nickname_rules import NICKNAME_RULES
-
 
 # Grace period between a deletion request and permanent deletion (3.5).
 DELETION_GRACE_PERIOD = timedelta(days=30)
@@ -39,7 +38,7 @@ def deletion_grace_cutoff(now: datetime | None = None) -> datetime:
     login just un-scheduled, or accept a login for an account purge is about
     to remove.
     """
-    return (now or datetime.now(timezone.utc)) - DELETION_GRACE_PERIOD
+    return (now or datetime.now(UTC)) - DELETION_GRACE_PERIOD
 
 
 class User(Base, TimestampMixin):
