@@ -21,6 +21,10 @@ def _token_claims(credentials: HTTPAuthorizationCredentials | None) -> tuple[uui
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer token")
     try:
         claims = decode_token(credentials.credentials)
+        if "purpose" in claims:
+            # A single-purpose token (the Google signup token, auth/oauth.py)
+            # is not an access token, whatever else it carries.
+            raise ValueError("not an access token")
         user_id = uuid.UUID(claims["sub"])
         # Tokens minted before `ver` existed count as version 0.
         token_version = int(claims.get("ver", 0))

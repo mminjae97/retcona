@@ -56,7 +56,7 @@ class User(Base, TimestampMixin):
     # maxLength above 20 needs a new migration (ALTER COLUMN) alongside it, or
     # validation will accept a nickname the database then rejects.
     nickname: Mapped[str] = mapped_column(String(NICKNAME_RULES["maxLength"]), nullable=False)
-    provider: Mapped[str | None] = mapped_column(String)  # google | kakao | naver | None (direct login)
+    provider: Mapped[str | None] = mapped_column(String)  # google | None (email/password login)
     provider_id: Mapped[str | None] = mapped_column(String)
     password_hash: Mapped[str | None] = mapped_column(String)
     deletion_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

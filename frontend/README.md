@@ -4,7 +4,8 @@ React + TypeScript + Vite. Screen composition follows design doc chapter 2 (UX d
 
 | Path | Screen | Design doc section |
 |---|---|---|
-| `/login` | Login / social login | 3.1, 3.2 |
+| `/login` | Login / Google login | 3.1, 3.2 |
+| `/auth/google/callback` | Google login return, nickname setup for a new account | 3.2, 3.6 |
 | `/` | Dashboard | 2.1 |
 | `/novels/:novelId/settings` | World/character presets | 2.3 |
 | `/novels/:novelId/episodes/:episodeId` | Manuscript editor | 2.2 |
