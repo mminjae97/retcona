@@ -49,6 +49,7 @@ from sqlalchemy.orm import Session
 
 from models.base import Base
 from models.db import SessionLocal, check_database
+from models.email_verification import EmailVerification
 from models.novel import Novel
 from models.user import User, deletion_grace_cutoff
 
@@ -302,9 +303,24 @@ def purge_expired_accounts(
     return PurgeResult(purged, failed)
 
 
+# A signup verification row (auth/email_verification.py) that no one finished
+# with is deleted this long after its last code was sent. Not sooner: the row
+# also carries the address's hourly sending limit.
+STALE_VERIFICATION_AGE = timedelta(days=1)
+
+
+def delete_stale_email_verifications(db: Session, now: datetime | None = None) -> int:
+    """Codes requested for signups that were never finished; returns how many rows went."""
+    cutoff = (now or datetime.now(UTC)) - STALE_VERIFICATION_AGE
+    deleted = db.execute(delete(EmailVerification).where(EmailVerification.sent_at < cutoff)).rowcount
+    db.commit()
+    return deleted
+
+
 def purge_once(should_stop: Callable[[], bool] | None = None) -> PurgeResult:
-    """One pass in a session of its own."""
+    """One pass in a session of its own: stale signup codes, then accounts."""
     with SessionLocal() as db:
+        delete_stale_email_verifications(db)
         return purge_expired_accounts(db, should_stop=should_stop)
 
 

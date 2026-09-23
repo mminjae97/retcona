@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { getMe, requestAccountDeletion, updateNickname } from "../api/auth";
+import { deletionAcceptedMessage, getGoogleConfig, getMe, requestAccountDeletion, updateNickname } from "../api/auth";
 import type { UserPublic } from "../api/auth";
 import { ApiError, describeError } from "../api/client";
+import { describeGoogleStartFailure, startGoogleLogin } from "../utils/googleAuth";
 import { getNicknameError, nicknameInputProps, stripNickname } from "../utils/nickname";
 import { createNovel, deleteNovel, listNovels, renameNovel } from "../api/novels";
 import type { NovelPublic } from "../api/novels";
@@ -13,8 +14,10 @@ import "./MyPage.css";
 
 const DELETION_ERROR_MESSAGES_BY_STATUS: Record<number, string> = {
   403: "비밀번호가 올바르지 않습니다.",
-  501: "소셜 로그인 계정의 탈퇴는 아직 지원되지 않습니다.",
 };
+
+const DELETION_WARNING =
+  "정말 회원 탈퇴를 접수하시겠습니까?\n30일의 유예기간이 지나면 계정과 모든 작품 데이터가 영구 삭제되며 복구할 수 없습니다.";
 
 // The editing/value/saving/error state cluster shared by the nickname and
 // novel-rename inline forms below (deletion is its own shape: a confirm
@@ -170,9 +173,7 @@ export default function MyPage() {
     if (deleting || !deletionPassword) return;
     if (
       !deletionConfirmedRef.current &&
-      !window.confirm(
-        "정말 회원 탈퇴를 접수하시겠습니까?\n30일의 유예기간이 지나면 계정과 모든 작품 데이터가 영구 삭제되며 복구할 수 없습니다.",
-      )
+      !window.confirm(DELETION_WARNING)
     ) {
       return;
     }
@@ -181,17 +182,40 @@ export default function MyPage() {
     setDeleting(true);
     try {
       const result = await requestAccountDeletion(deletionPassword);
-      // The server refuses the login that would cancel it from exactly this
-      // moment on, so the exact time is shown, not just the date.
-      const deadline = new Date(result.purge_after).toLocaleString("ko-KR");
-      window.alert(
-        `탈퇴가 접수되었습니다.\n${deadline}까지 다시 로그인하면 탈퇴가 취소됩니다. 이 시각이 지나면 취소할 수 없으며, 이후 계정과 모든 데이터가 영구 삭제됩니다.`,
-      );
+      window.alert(deletionAcceptedMessage(result));
       navigate("/login");
     } catch (err) {
       setDeletionError(
         (err instanceof ApiError && DELETION_ERROR_MESSAGES_BY_STATUS[err.status]) || describeError(err),
       );
+      setDeleting(false);
+    }
+  }
+
+  // A Google account confirms with a fresh Google sign-in instead of a
+  // password (3.5): off to Google, and the callback page finishes it.
+  async function handleGoogleDeletion() {
+    if (deleting || !window.confirm(DELETION_WARNING)) return;
+    setDeletionError(null);
+    setDeleting(true);
+    try {
+      const config = await getGoogleConfig();
+      if (!config.enabled) {
+        setDeletionError("구글 로그인이 설정되지 않아 본인 확인을 할 수 없습니다. 관리자에게 문의해주세요.");
+        setDeleting(false);
+        return;
+      }
+      const failure = await startGoogleLogin(
+        config,
+        { returnTo: null, sessionEnded: false, expiredUserId: null },
+        "delete-account",
+      );
+      if (failure !== null) {
+        setDeletionError(describeGoogleStartFailure(failure));
+        setDeleting(false);
+      }
+    } catch (err) {
+      setDeletionError(describeError(err));
       setDeleting(false);
     }
   }
@@ -339,7 +363,16 @@ export default function MyPage() {
           // token) means there's no account to delete from this session.
           <p>{userError ?? "불러오는 중..."}</p>
         ) : !user.has_password ? (
-          <p>소셜 로그인 계정의 회원 탈퇴는 아직 지원되지 않습니다.</p>
+          <div className="deletion-form">
+            <p>
+              구글 계정으로 본인 확인을 한 뒤 탈퇴가 접수됩니다. 이 계정에 연결된 구글 계정을 선택해주세요. 탈퇴 접수 후
+              30일이 지나면 계정과 모든 작품 데이터가 영구 삭제되며, 그 전에 다시 로그인하면 탈퇴가 취소됩니다.
+            </p>
+            <button type="button" onClick={handleGoogleDeletion} disabled={deleting}>
+              {deleting ? "구글로 이동 중..." : "구글로 본인 확인 후 탈퇴"}
+            </button>
+            {deletionError && <p className="mypage-error">{deletionError}</p>}
+          </div>
         ) : confirmingDeletion ? (
           <form className="deletion-form" onSubmit={handleRequestDeletion}>
             <p>

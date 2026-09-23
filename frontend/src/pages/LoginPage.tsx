@@ -7,7 +7,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { getGoogleConfig, login, requestSignupCode, signup, verifySignupCode } from "../api/auth";
 import type { GoogleConfig, UserPublic } from "../api/auth";
 import { ApiError, describeError as describeApiError } from "../api/client";
-import { startGoogleLogin } from "../utils/googleAuth";
+import { describeGoogleStartFailure, startGoogleLogin } from "../utils/googleAuth";
 import type { GoogleLoginStartFailure } from "../utils/googleAuth";
 import { destinationAfterLogin, getRedirectState } from "../utils/loginRedirect";
 import { getNicknameError, nicknameInputProps, stripNickname } from "../utils/nickname";
@@ -71,6 +71,8 @@ export default function LoginPage() {
   // while a request is still in flight — can't carry them over to another
   // address, and going back to the first address brings them back.
   const [codeSentTo, setCodeSentTo] = useState<string | null>(null);
+  // How long a code stays valid, as the server says (CODE_TTL).
+  const [codeValidMinutes, setCodeValidMinutes] = useState(5);
   const [resendWait, setResendWait] = useState<{ email: string; until: number } | null>(null);
   const [code, setCode] = useState("");
   const [verified, setVerified] = useState<{ email: string; token: string } | null>(null);
@@ -118,6 +120,7 @@ export default function LoginPage() {
     try {
       const sent = await requestSignupCode(target);
       setCodeSentTo(target);
+      setCodeValidMinutes(Math.max(1, Math.round(sent.expires_in / 60)));
       setCode("");
       setResendWait({ email: target, until: Date.now() + sent.resend_after * 1000 });
       setNow(Date.now());
@@ -174,15 +177,7 @@ export default function LoginPage() {
     }
     if (failure === null) return; // on its way to Google
     setLeavingForGoogle(false);
-    setError(
-      failure.reason === "wrong-origin"
-        ? `구글 로그인은 ${failure.origin} 주소에서 사용할 수 있습니다. 이 주소로 접속해 다시 시도해주세요.`
-        : failure.reason === "insecure"
-          ? "구글 로그인은 HTTPS 또는 localhost 주소에서만 사용할 수 있습니다."
-          : failure.reason === "storage"
-            ? "브라우저 저장소를 사용할 수 없어 구글 로그인을 시작할 수 없습니다."
-            : "구글 로그인 설정에 문제가 있어 시작할 수 없습니다. 관리자에게 문의해주세요.",
-    );
+    setError(describeGoogleStartFailure(failure));
   }
 
   function switchMode(next: Mode) {
@@ -321,7 +316,7 @@ export default function LoginPage() {
               </button>
             </div>
             <span className="field-hint" id="signup-code-hint">
-              메일로 받은 6자리 인증번호를 10분 안에 입력해주세요.
+              메일로 받은 6자리 인증번호를 {codeValidMinutes}분 안에 입력해주세요.
             </span>
           </div>
         )}

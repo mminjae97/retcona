@@ -20,6 +20,9 @@ account from it.
   else's Gmail address first sit in the account that person later opens with
   Google; linking verified ones only would be a separate, deliberate feature.
 
+Deleting a Google account (3.5) re-authenticates the same way: a fresh code,
+whose Google account must be the one linked (POST /auth/google/deletion).
+
 Configured by GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET /
 GOOGLE_OAUTH_REDIRECT_URI; without them the endpoints answer 503 and the
 frontend keeps the Google button disabled (GET /auth/google/config).
@@ -43,9 +46,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from auth.dependencies import get_current_user_unlocked
 from auth.jwe import decode_token, issue_token
-from auth.router import complete_login, issue_access_token
-from auth.schemas import Nickname, TokenResponse, UserPublic
+from auth.router import complete_login, issue_access_token, schedule_deletion
+from auth.schemas import DeletionResponse, Nickname, TokenResponse, UserPublic
 from models.db import get_db
 from models.user import User
 
@@ -237,3 +241,24 @@ def google_signup(body: GoogleSignupRequest, db: Session = Depends(get_db)) -> T
         raise HTTPException(status.HTTP_409_CONFLICT, "Email is already registered") from exc
     db.refresh(user)
     return TokenResponse(access_token=issue_access_token(user), user=UserPublic.model_validate(user))
+
+
+@router.post("/deletion", response_model=DeletionResponse)
+def google_deletion(
+    body: GoogleLoginRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_unlocked),
+) -> DeletionResponse:
+    """Schedule a Google account's deletion (3.5), with a fresh Google sign-in
+    as the identity check a password is for an email account: the code must
+    be for the Google account this account is linked to. The same grace
+    period and token revocation as a password-confirmed deletion follow
+    (schedule_deletion)."""
+    if current_user.provider != PROVIDER or not current_user.provider_id:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This account confirms deletion with its password")
+    identity = exchange_code(_require_config(), body.code, body.code_verifier)
+    if identity.sub != current_user.provider_id:
+        # 403, not 401: the bearer token is fine — it's the Google account
+        # chosen on Google's screen that isn't this one.
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "A different Google account was used")
+    return schedule_deletion(db, current_user)

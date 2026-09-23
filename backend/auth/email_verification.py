@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-CODE_TTL = timedelta(minutes=10)
+CODE_TTL = timedelta(minutes=5)
 RESEND_COOLDOWN = timedelta(seconds=60)
 MAX_SENDS_PER_HOUR = 5
 MAX_ATTEMPTS = 5
