@@ -39,21 +39,44 @@ async function codeChallenge(verifier: string): Promise<string> {
   return base64Url(new Uint8Array(digest));
 }
 
-// Leaves the app for Google's sign-in page. Returns false (and stays) if the
-// pending login can't be remembered for the callback page to check.
+// Why a Google login couldn't start (the page stays where it is):
+// - wrong-origin: this page isn't on the origin Google sends the browser back
+//   to (the configured redirect URI's), so the callback page there couldn't
+//   read what's saved here — sessionStorage is per origin. `origin` is where
+//   to open the app instead.
+// - insecure: the page isn't a secure context (plain http on anything but
+//   localhost), where the browser offers no crypto.subtle for PKCE.
+// - storage: sessionStorage is blocked.
+export type GoogleLoginStartFailure =
+  | { reason: "wrong-origin"; origin: string }
+  | { reason: "insecure" }
+  | { reason: "storage" };
+
+// Leaves the app for Google's sign-in page, or says why it can't. Never
+// throws, and saves nothing unless it's actually leaving.
 export async function startGoogleLogin(
   config: Extract<GoogleConfig, { enabled: true }>,
   context: LoginRedirectState,
-): Promise<boolean> {
+): Promise<GoogleLoginStartFailure | null> {
+  const callbackOrigin = new URL(config.redirect_uri).origin;
+  if (callbackOrigin !== window.location.origin) {
+    return { reason: "wrong-origin", origin: callbackOrigin };
+  }
   const pending: PendingGoogleLogin = {
     ...context,
     state: randomUrlSafe(32),
     codeVerifier: randomUrlSafe(48), // 64 characters, within PKCE's 43-128
   };
+  let challenge: string;
+  try {
+    challenge = await codeChallenge(pending.codeVerifier);
+  } catch {
+    return { reason: "insecure" }; // crypto.subtle is undefined outside a secure context
+  }
   try {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(pending));
   } catch {
-    return false; // storage blocked: the callback couldn't be verified
+    return { reason: "storage" }; // the callback couldn't be verified
   }
   const params = new URLSearchParams({
     client_id: config.client_id,
@@ -61,14 +84,14 @@ export async function startGoogleLogin(
     response_type: "code",
     scope: "openid email",
     state: pending.state,
-    code_challenge: await codeChallenge(pending.codeVerifier),
+    code_challenge: challenge,
     code_challenge_method: "S256",
     // Always ask which account, so a shared computer's last Google account
     // isn't signed in silently.
     prompt: "select_account",
   });
   window.location.assign(`${AUTHORIZE_URL}?${params}`);
-  return true;
+  return null;
 }
 
 // The login this tab started, if the callback's state matches it. Removed

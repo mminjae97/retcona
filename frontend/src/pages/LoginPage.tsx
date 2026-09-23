@@ -154,10 +154,16 @@ export default function LoginPage() {
     if (!googleConfig?.enabled || leavingForGoogle) return;
     setError(null);
     setLeavingForGoogle(true);
-    if (!(await startGoogleLogin(googleConfig, redirect))) {
-      setLeavingForGoogle(false);
-      setError("브라우저 저장소를 사용할 수 없어 구글 로그인을 시작할 수 없습니다.");
-    }
+    const failure = await startGoogleLogin(googleConfig, redirect);
+    if (failure === null) return; // on its way to Google
+    setLeavingForGoogle(false);
+    setError(
+      failure.reason === "wrong-origin"
+        ? `구글 로그인은 ${failure.origin} 주소에서 사용할 수 있습니다. 이 주소로 접속해 다시 시도해주세요.`
+        : failure.reason === "insecure"
+          ? "구글 로그인은 HTTPS 또는 localhost 주소에서만 사용할 수 있습니다."
+          : "브라우저 저장소를 사용할 수 없어 구글 로그인을 시작할 수 없습니다.",
+    );
   }
 
   function switchMode(next: Mode) {
