@@ -110,8 +110,7 @@ def _store(
         if run is None or run.status != "running":
             logger.warning("Validation run %s was given up on before it finished; discarding its results", run_id)
             return
-        episode = db.scalar(select(Episode).where(Episode.id == episode_id, Episode.novel_id == novel_id))
-        if episode is None:
+        if db.scalar(select(Episode.id).where(Episode.id == episode_id, Episode.novel_id == novel_id)) is None:
             raise RunFailed("episode_missing")
 
         # A new run replaces the episode's earlier claims (and their flags):
@@ -150,9 +149,18 @@ def _store(
             "new_locations": registration.new_locations,
         }
         # "submitted" means validated (2.2) — only if what was validated is
-        # still what's saved. A save during the run already made it a draft.
-        if episode.updated_at == content_updated_at:
-            episode.status = "submitted"
+        # still what's saved (a save during the run already made it a draft).
+        # updated_at is set to itself: left out, its onupdate would bump it,
+        # and this run would read as out of date the moment it finished.
+        db.execute(
+            update(Episode)
+            .where(
+                Episode.id == episode_id,
+                Episode.novel_id == novel_id,
+                Episode.updated_at == content_updated_at,
+            )
+            .values(status="submitted", updated_at=Episode.updated_at)
+        )
         db.commit()
 
 

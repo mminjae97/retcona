@@ -9,6 +9,7 @@ Business logic (pipeline/, workers/) uses only this interface and doesn't know t
 The QUEUE_PROVIDER environment variable selects the implementation.
 """
 
+import functools
 import json
 import uuid
 from abc import ABC, abstractmethod
@@ -90,7 +91,10 @@ class PubSubQueueClient(QueueClient):
         raise NotImplementedError
 
 
+@functools.cache
 def get_queue_client() -> QueueClient:
+    """One per process: the client holds a connection pool, which every
+    "run validation" request would otherwise open anew."""
     import os
 
     provider = os.environ.get("QUEUE_PROVIDER", "redis")
