@@ -265,6 +265,14 @@ def purge_expired_accounts(
     failure_kinds: set[str] = set()
     for index, user_id in enumerate(candidates):
         if should_stop is not None and should_stop():
+            # Not a failure — what's left is picked up by the next pass — but
+            # said, since the result alone looks like a finished pass.
+            logger.info(
+                "Purge pass interrupted by shutdown: %d account(s) purged, %d failed, %d left pending",
+                purged,
+                failed,
+                len(candidates) - index,
+            )
             break
         try:
             if _purge_user(db, user_id, cutoff):
