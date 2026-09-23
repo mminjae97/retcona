@@ -3,7 +3,6 @@
 import unicodedata
 import uuid
 from datetime import datetime
-
 from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, EmailStr, Field, field_validator
@@ -101,6 +100,8 @@ class SignupRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     nickname: Nickname
+    # From POST /auth/signup/verify: proof that this email received the code.
+    verification_token: str
 
     @field_validator("email")
     @classmethod
@@ -118,6 +119,28 @@ class SignupRequest(BaseModel):
         if "\x00" in value:
             raise ValueError("Password must not contain NUL characters")
         return value
+
+
+class SignupCodeRequest(BaseModel):
+    email: EmailStr
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return _normalize_email(value)
+
+
+class SignupCodeSent(BaseModel):
+    expires_in: int  # seconds the code stays valid
+    resend_after: int  # seconds until another code may be requested
+
+
+class SignupCodeVerify(SignupCodeRequest):
+    code: str = Field(pattern=r"^[0-9]{6}$")
+
+
+class SignupCodeVerified(BaseModel):
+    verification_token: str
 
 
 class LoginRequest(BaseModel):

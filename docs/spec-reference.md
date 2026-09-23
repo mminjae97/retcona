@@ -298,7 +298,7 @@ Design principles for this area:
 
 | Method | Provider | Notes |
 |---|---|---|
-| Native login | Email + password | Password hashed (bcrypt or similar). Signup form includes a nickname (pen name) field. |
+| Native login | Email + password | Password hashed (bcrypt or similar). Signup form includes a nickname (pen name) field. Before signup, a 6-digit code emailed to the address proves the author owns it. |
 | Social login | Google | OAuth 2.0 (authorization code + PKCE). On first login the account is created once a nickname is chosen (§3.2). |
 
 ### 3.2 Social login flow
@@ -318,8 +318,9 @@ User clicks the Google login button
 ```
 
 An email already registered with a password is refused rather than linked:
-email signups don't verify the address, so linking by email would let whoever
-registered someone else's Gmail address first into that person's account.
+accounts created before signup email verification existed never proved they own
+the address, so linking by email would let whoever registered someone else's
+Gmail address first into that person's account.
 
 Key rule: **social login never auto-fills the nickname from the provider
 profile name.** It is always entered directly by the user, so authors can

@@ -61,6 +61,10 @@ class User(Base, TimestampMixin):
     password_hash: Mapped[str | None] = mapped_column(String)
     deletion_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # When the email was shown to belong to the account's owner: a signup code
+    # (auth/email_verification.py) or Google's own verification. Null for
+    # accounts created before email verification existed.
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     @property
     def has_password(self) -> bool:

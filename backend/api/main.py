@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from api.episodes import router as episodes_router
 from api.novels import router as novels_router
 from api.settings import router as settings_router
+from auth.email_verification import router as signup_verification_router
 from auth.jwe import validate_keys
 from auth.oauth import router as google_router
 from auth.router import router as auth_router
@@ -94,6 +95,7 @@ def health() -> dict:
 
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(google_router, prefix="/auth/google", tags=["auth"])
+app.include_router(signup_verification_router, prefix="/auth/signup", tags=["auth"])
 app.include_router(novels_router, prefix="/novels", tags=["novels"])
 app.include_router(episodes_router, prefix="/novels", tags=["episodes"])
 app.include_router(settings_router, prefix="/novels", tags=["settings"])

@@ -19,10 +19,34 @@ interface TokenResponse {
   deletion_cancelled: boolean;
 }
 
-export async function signup(email: string, password: string, nickname: string): Promise<UserPublic> {
+// Signup email verification (3.1): a 6-digit code is emailed, and the right
+// code gets a verification token that the signup itself then has to carry.
+export interface SignupCodeSent {
+  expires_in: number; // seconds the code stays valid
+  resend_after: number; // seconds until another code may be requested
+}
+
+export function requestSignupCode(email: string): Promise<SignupCodeSent> {
+  return apiFetch<SignupCodeSent>("/auth/signup/code", { method: "POST", body: JSON.stringify({ email }) });
+}
+
+export async function verifySignupCode(email: string, code: string): Promise<string> {
+  const res = await apiFetch<{ verification_token: string }>("/auth/signup/verify", {
+    method: "POST",
+    body: JSON.stringify({ email, code }),
+  });
+  return res.verification_token;
+}
+
+export async function signup(
+  email: string,
+  password: string,
+  nickname: string,
+  verificationToken: string,
+): Promise<UserPublic> {
   const res = await apiFetch<TokenResponse>("/auth/signup", {
     method: "POST",
-    body: JSON.stringify({ email, password, nickname }),
+    body: JSON.stringify({ email, password, nickname, verification_token: verificationToken }),
   });
   setToken(res.access_token, res.user.id);
   return res.user;

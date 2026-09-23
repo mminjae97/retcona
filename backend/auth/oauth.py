@@ -13,10 +13,12 @@ account from it.
   nickname is never taken from the Google profile). This keeps users.nickname
   required, instead of an account existing without one until that screen is
   done.
-- An email already registered with a password is refused (409), not linked:
-  email signups don't verify the address, so linking by email would let
-  whoever registered someone else's Gmail address first sit in the account
-  that person later opens with Google.
+- An email already registered with a password is refused (409), not linked
+  — every one, verified or not. Accounts created before signup email
+  verification existed (users.email_verified_at is null) never proved they
+  own the address, so linking by email would let whoever registered someone
+  else's Gmail address first sit in the account that person later opens with
+  Google; linking verified ones only would be a separate, deliberate feature.
 
 Configured by GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET /
 GOOGLE_OAUTH_REDIRECT_URI; without them the endpoints answer 503 and the
@@ -30,6 +32,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import UTC, datetime
 from typing import Literal, NamedTuple
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -215,7 +218,15 @@ def google_signup(body: GoogleSignupRequest, db: Session = Depends(get_db)) -> T
         # Expired (the author took too long on the nickname screen) or not one of ours.
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired signup token") from exc
 
-    user = User(email=email, nickname=body.nickname, provider=PROVIDER, provider_id=sub, password_hash=None)
+    # Google only hands over verified emails (exchange_code checks email_verified).
+    user = User(
+        email=email,
+        nickname=body.nickname,
+        provider=PROVIDER,
+        provider_id=sub,
+        password_hash=None,
+        email_verified_at=datetime.now(UTC),
+    )
     db.add(user)
     try:
         db.commit()

@@ -4,15 +4,22 @@ Google login is handled separately in auth/oauth.py, and shares
 complete_login() below with the email login.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from jose.exceptions import JWEError, JWTError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from auth.dependencies import get_current_user, get_current_user_unlocked, lock_current_user, lock_user
-from auth.jwe import issue_token
+from auth.dependencies import (
+    get_current_user,
+    get_current_user_unlocked,
+    lock_current_user,
+    lock_user,
+)
+from auth.email_verification import VERIFIED_PURPOSE
+from auth.jwe import decode_token, issue_token
 from auth.schemas import (
     DeletionRequest,
     DeletionResponse,
@@ -34,12 +41,32 @@ def issue_access_token(user: User) -> str:
     return issue_token(str(user.id), {"ver": user.token_version})
 
 
+def _require_verified_email(verification_token: str, email: str) -> None:
+    """403 unless the token is POST /auth/signup/verify's for this email
+    (auth/email_verification.py) and still valid."""
+    try:
+        claims = decode_token(verification_token)
+        verified = claims.get("purpose") == VERIFIED_PURPOSE and claims.get("sub") == email
+    except (JWEError, JWTError, ValueError, KeyError, TypeError):
+        verified = False
+    if not verified:
+        # 403, not 401: nothing here is a session, and the signup screen
+        # handles it by asking for a new code.
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Email is not verified")
+
+
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 def signup(body: SignupRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    _require_verified_email(body.verification_token, body.email)
     if db.scalar(select(User).where(User.email == body.email)) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Email is already registered")
 
-    user = User(email=body.email, nickname=body.nickname, password_hash=hash_password(body.password))
+    user = User(
+        email=body.email,
+        nickname=body.nickname,
+        password_hash=hash_password(body.password),
+        email_verified_at=datetime.now(UTC),
+    )
     db.add(user)
     try:
         db.commit()
@@ -144,7 +171,7 @@ def request_deletion(
     # this one must not start a second deletion with a token that is no longer valid.
     lock_current_user(db, current_user)
 
-    requested_at = datetime.now(timezone.utc)
+    requested_at = datetime.now(UTC)
     current_user.deletion_requested_at = requested_at
     # Kills every token issued so far for good, even if a later login
     # cancels the deletion (see get_current_user).
