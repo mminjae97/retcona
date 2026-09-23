@@ -49,8 +49,8 @@ where the character/world count is large.
 
 ### Core features (functional requirements)
 
-1. **Account & My Page** — sign up via email or social login (Google, Kakao,
-   Naver); use a pen name instead of a real name; manage multiple novels
+1. **Account & My Page** — sign up via email or a Google account; use a pen
+   name instead of a real name; manage multiple novels
    under one account from My Page; view per-novel relationship graph/
    timeline; account deletion.
 2. **In-service writing editor** — long-form text editor; a local, in-browser
@@ -299,22 +299,27 @@ Design principles for this area:
 | Method | Provider | Notes |
 |---|---|---|
 | Native login | Email + password | Password hashed (bcrypt or similar). Signup form includes a nickname (pen name) field. |
-| Social login | Google, Kakao, Naver | OAuth 2.0. First login auto-creates an account and routes to nickname setup (§3.2). |
+| Social login | Google | OAuth 2.0 (authorization code + PKCE). On first login the account is created once a nickname is chosen (§3.2). |
 
 ### 3.2 Social login flow
 
 ```
-User clicks social login button
-  -> Frontend requests authorization from the OAuth provider
-  -> Provider returns an authorization code to the frontend
-  -> Frontend sends the code to the API server
-  -> API exchanges the code for an access token + profile with the provider
-  -> API looks up the user in DB, creates one if not found
-  -> API issues an auth token (JWE-encrypted) to the frontend
-  -> If this was a new signup: frontend shows a nickname-setup screen,
-     user enters a nickname, frontend sends it to the API,
-     API updates users.nickname
+User clicks the Google login button
+  -> Frontend sends the browser to Google (state + PKCE code challenge)
+  -> Google returns an authorization code to the frontend's callback page
+  -> Frontend sends the code + PKCE verifier to the API server
+  -> API exchanges the code with Google (client secret stays on the server)
+     for an ID token: Google account id + verified email
+  -> API looks up the user by Google account id
+  -> Existing account: API issues an auth token (JWE-encrypted)
+  -> New account: API returns a short-lived signup token; frontend shows a
+     nickname-setup screen; the nickname + signup token create the account,
+     and API issues an auth token
 ```
+
+An email already registered with a password is refused rather than linked:
+email signups don't verify the address, so linking by email would let whoever
+registered someone else's Gmail address first into that person's account.
 
 Key rule: **social login never auto-fills the nickname from the provider
 profile name.** It is always entered directly by the user, so authors can

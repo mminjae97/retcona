@@ -3,6 +3,7 @@ import { Outlet, RouterProvider, createBrowserRouter, useLocation, useNavigate }
 import { onAuthExpired } from "./api/client";
 import { getUserId } from "./utils/session";
 import LoginPage from "./pages/LoginPage";
+import GoogleCallbackPage from "./pages/GoogleCallbackPage";
 import DashboardPage from "./pages/DashboardPage";
 import EpisodeListPage from "./pages/EpisodeListPage";
 import EditorPage from "./pages/EditorPage";
@@ -63,6 +64,7 @@ const router = createBrowserRouter([
     // if it repeated the parent's own path, which this layout doesn't have.
     children: [
       { path: "login", element: <LoginPage /> },
+      { path: "auth/google/callback", element: <GoogleCallbackPage /> },
       { index: true, element: <DashboardPage /> },
       { path: "novels/:novelId/settings", element: <SettingsPage /> },
       { path: "novels/:novelId/episodes", element: <EpisodeListPage /> },

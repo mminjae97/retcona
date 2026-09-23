@@ -1,5 +1,5 @@
-// Auth API calls (design doc 3.1, 3.5, 3.6) — email/password signup and login,
-// nickname change, account deletion request.
+// Auth API calls (design doc 3.1, 3.2, 3.5, 3.6) — email/password signup and
+// login, Google login, nickname change, account deletion request.
 
 import { announceAccountDeleted, setUserId } from "../utils/session";
 import { apiFetch, clearToken, getToken, setToken } from "./client";
@@ -42,6 +42,48 @@ export async function login(email: string, password: string): Promise<LoginResul
   });
   setToken(res.access_token, res.user.id);
   return { user: res.user, deletionCancelled: res.deletion_cancelled };
+}
+
+export type GoogleConfig = { enabled: true; client_id: string; redirect_uri: string } | { enabled: false };
+
+export function getGoogleConfig(): Promise<GoogleConfig> {
+  return apiFetch<GoogleConfig>("/auth/google/config");
+}
+
+interface GoogleLoginResponse {
+  status: "logged_in" | "signup_required";
+  access_token: string | null;
+  user: UserPublic | null;
+  deletion_cancelled: boolean;
+  signup_token: string | null;
+  email: string | null;
+}
+
+export type GoogleLoginResult =
+  | ({ status: "logged_in" } & LoginResult)
+  // A Google account with no account here yet: it gets one once a nickname
+  // is chosen (googleSignup), never taken from the Google profile (3.6).
+  | { status: "signup_required"; signupToken: string; email: string };
+
+export async function googleLogin(code: string, codeVerifier: string): Promise<GoogleLoginResult> {
+  const res = await apiFetch<GoogleLoginResponse>("/auth/google/login", {
+    method: "POST",
+    body: JSON.stringify({ code, code_verifier: codeVerifier }),
+  });
+  if (res.status === "signup_required") {
+    return { status: "signup_required", signupToken: res.signup_token!, email: res.email! };
+  }
+  setToken(res.access_token!, res.user!.id);
+  return { status: "logged_in", user: res.user!, deletionCancelled: res.deletion_cancelled };
+}
+
+export async function googleSignup(signupToken: string, nickname: string): Promise<UserPublic> {
+  const res = await apiFetch<TokenResponse>("/auth/google/signup", {
+    method: "POST",
+    body: JSON.stringify({ signup_token: signupToken, nickname }),
+  });
+  setToken(res.access_token, res.user.id);
+  return res.user;
 }
 
 export function getMe(): Promise<UserPublic> {

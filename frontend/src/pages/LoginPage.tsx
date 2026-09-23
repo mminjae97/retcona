@@ -1,18 +1,18 @@
 // Login screen (design doc 3.1, 3.2)
-// Email+password login, Google/Kakao/Naver social login buttons
-// First-time social login signup goes to the nickname setup screen (3.2, 3.6)
-import { useState } from "react";
+// Email+password login, and the Google login button (the only social login)
+// First-time Google signup goes to the nickname setup screen (3.2, 3.6), on the callback page
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { login, signup } from "../api/auth";
-import type { UserPublic } from "../api/auth";
+import { getGoogleConfig, login, signup } from "../api/auth";
+import type { GoogleConfig, UserPublic } from "../api/auth";
 import { ApiError, describeError as describeApiError } from "../api/client";
+import { startGoogleLogin } from "../utils/googleAuth";
+import { destinationAfterLogin, getRedirectState } from "../utils/loginRedirect";
 import { getNicknameError, nicknameInputProps, stripNickname } from "../utils/nickname";
 import "./LoginPage.css";
 
 type Mode = "login" | "signup";
-
-const SOCIAL_PROVIDERS = ["Google", "Kakao", "Naver"] as const;
 
 // Keyed by HTTP status rather than the backend's exact message text, so a
 // wording change in the API's error detail can't silently break this mapping.
@@ -34,33 +34,40 @@ function describeError(err: unknown): string {
   return describeApiError(err);
 }
 
-// Where the user was headed when they got sent here, and whether they had a
-// session that ended (both set by AuthExpiryRedirect). Only an in-app absolute
-// path is honored, never anything that could leave the app.
-function getRedirectState(state: unknown): { returnTo: string | null; sessionEnded: boolean; expiredUserId: string | null } {
-  const { returnTo, sessionEnded, userId } = (state ?? {}) as {
-    returnTo?: unknown;
-    sessionEnded?: unknown;
-    userId?: unknown;
-  };
-  const safe =
-    typeof returnTo === "string" && returnTo.startsWith("/") && !returnTo.startsWith("//") && !returnTo.startsWith("/login");
-  return {
-    returnTo: safe ? returnTo : null,
-    sessionEnded: sessionEnded === true,
-    expiredUserId: typeof userId === "string" ? userId : null,
-  };
-}
-
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { returnTo, sessionEnded, expiredUserId } = getRedirectState(useLocation().state);
+  const redirect = getRedirectState(useLocation().state);
+  const { returnTo, sessionEnded, expiredUserId } = redirect;
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [nickname, setNickname] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // null until known; the button stays disabled if it can't be loaded or
+  // Google login isn't configured on the server.
+  const [googleConfig, setGoogleConfig] = useState<GoogleConfig | null>(null);
+  const [leavingForGoogle, setLeavingForGoogle] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getGoogleConfig()
+      .then((config) => active && setGoogleConfig(config))
+      .catch(() => active && setGoogleConfig({ enabled: false }));
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function handleGoogle() {
+    if (!googleConfig?.enabled || leavingForGoogle) return;
+    setError(null);
+    setLeavingForGoogle(true);
+    if (!(await startGoogleLogin(googleConfig, redirect))) {
+      setLeavingForGoogle(false);
+      setError("브라우저 저장소를 사용할 수 없어 구글 로그인을 시작할 수 없습니다.");
+    }
+  }
 
   function switchMode(next: Mode) {
     setMode(next);
@@ -99,12 +106,7 @@ export default function LoginPage() {
           window.alert("진행 중이던 회원 탈퇴가 취소되었습니다. 계정이 원래대로 복구되었어요.");
         }
       }
-      // Back to the page the ended session was on, but only for that same
-      // account: someone else signing in there would land on a page that isn't theirs.
-      // If a session had ended but whose is unknown (it began before the id was
-      // remembered), it isn't taken back either.
-      const sameAccount = !sessionEnded || (expiredUserId !== null && signedInUser?.id === expiredUserId);
-      navigate(sameAccount ? (returnTo ?? "/") : "/");
+      navigate(destinationAfterLogin(redirect, signedInUser?.id ?? null));
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -170,11 +172,14 @@ export default function LoginPage() {
         <div className="login-divider">또는</div>
 
         <div className="social-login-buttons">
-          {SOCIAL_PROVIDERS.map((provider) => (
-            <button key={provider} type="button" disabled title="소셜 로그인은 준비 중입니다">
-              {provider}로 계속하기
-            </button>
-          ))}
+          <button
+            type="button"
+            onClick={handleGoogle}
+            disabled={!googleConfig?.enabled || leavingForGoogle}
+            title={googleConfig && !googleConfig.enabled ? "구글 로그인이 설정되지 않았습니다" : undefined}
+          >
+            {leavingForGoogle ? "구글로 이동 중..." : "Google로 계속하기"}
+          </button>
         </div>
       </form>
     </div>

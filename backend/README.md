@@ -5,7 +5,7 @@ Follows the code structure from design doc section 6.2 as-is. Each module's resp
 | Module | Responsibility | Related design doc section |
 |---|---|---|
 | `api/` | REST endpoints | All |
-| `auth/` | Login · social login (OAuth) · token (JWE) issuance | Chapter 3 |
+| `auth/` | Login · Google login (OAuth, `auth/oauth.py`) · token (JWE) issuance | Chapter 3 |
 | `pipeline/` | extract_claims, context_bundle, 3 judgment modules, merge | Chapter 7 |
 | `models/` | DB models (users, novels, characters, locations ...) | Chapter 4 |
 | `ai/` | Embedding · reranker · NLI · LLM client wrappers | Chapter 5 |

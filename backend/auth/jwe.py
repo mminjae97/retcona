@@ -53,10 +53,10 @@ def validate_keys() -> None:
     _encryption_key()
 
 
-def issue_token(user_id: str, claims: dict | None = None) -> str:
+def issue_token(user_id: str, claims: dict | None = None, *, ttl_seconds: int = ACCESS_TOKEN_TTL_SECONDS) -> str:
     now = int(time.time())
     # sub/iat/exp last, so a caller-supplied claims dict can never override them.
-    payload = {**(claims or {}), "sub": user_id, "iat": now, "exp": now + ACCESS_TOKEN_TTL_SECONDS}
+    payload = {**(claims or {}), "sub": user_id, "iat": now, "exp": now + ttl_seconds}
     signed = jwt.encode(payload, _signing_key(), algorithm="HS256")
     encrypted = jwe.encrypt(signed, _encryption_key(), algorithm="dir", encryption="A256GCM")
     return _to_str(encrypted)

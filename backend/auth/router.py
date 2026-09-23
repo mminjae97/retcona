@@ -1,6 +1,7 @@
 """Email/password auth endpoints (design doc 3.1).
 
-Social login (Google/Kakao/Naver) is handled separately in auth/oauth.py.
+Google login is handled separately in auth/oauth.py, and shares
+complete_login() below with the email login.
 """
 
 from datetime import datetime, timezone
@@ -28,7 +29,7 @@ from models.user import DELETION_GRACE_PERIOD, User, deletion_grace_cutoff
 router = APIRouter()
 
 
-def _issue_access_token(user: User) -> str:
+def issue_access_token(user: User) -> str:
     # `ver` ties the token to users.token_version so a deletion request can revoke it.
     return issue_token(str(user.id), {"ver": user.token_version})
 
@@ -47,7 +48,7 @@ def signup(body: SignupRequest, db: Session = Depends(get_db)) -> TokenResponse:
         raise HTTPException(status.HTTP_409_CONFLICT, "Email is already registered")
     db.refresh(user)
 
-    return TokenResponse(access_token=_issue_access_token(user), user=UserPublic.model_validate(user))
+    return TokenResponse(access_token=issue_access_token(user), user=UserPublic.model_validate(user))
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -60,17 +61,24 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     if user is None or user.password_hash is None or not password_ok:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
 
-    # Re-read under a row lock, taken only now that the slow password check is
-    # done. That serializes this login with request_deletion, so the state and
-    # token_version used below are current: either the deletion committed
-    # first (and this login cancels it, or is refused once the grace period
-    # has run out), or this login completes first and the deletion revokes the
-    # token afterwards — never a "successful" login whose token was already
-    # dead when it was issued.
+    return complete_login(db, user, "Invalid email or password")
+
+
+def complete_login(db: Session, user: User, not_found_detail: str) -> TokenResponse:
+    """Finish a login whose credentials have been checked: the deletion-state
+    handling and token issue shared by the email and Google logins.
+
+    Re-reads the user under a row lock, taken only now that the slow
+    credential check is done. That serializes this login with
+    request_deletion, so the state and token_version used below are current:
+    either the deletion committed first (and this login cancels it, or is
+    refused once the grace period has run out), or this login completes first
+    and the deletion revokes the token afterwards — never a "successful" login
+    whose token was already dead when it was issued."""
     locked = lock_user(db, user.id)
     if locked is None:
         # Purged (3.5) between the lookup and the lock.
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, not_found_detail)
     user = locked
     deletion_cancelled = False
     if user.deletion_requested_at is not None:
@@ -85,7 +93,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     # Snapshot before commit(), which expires the instance and would make the
     # validation below re-query; commit() (even with nothing to write) also
     # releases the row lock.
-    access_token = _issue_access_token(user)
+    access_token = issue_access_token(user)
     user_public = UserPublic.model_validate(user)
     db.commit()
 

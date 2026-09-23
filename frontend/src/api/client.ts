@@ -69,9 +69,10 @@ function extractDetail(body: unknown): string | undefined {
   return undefined;
 }
 
-// Login and signup answer 401 for a wrong password, which their own screens
-// handle — every other 401 on an authenticated call means the session is over.
-const AUTH_ENTRY_PATHS = ["/auth/login", "/auth/signup"];
+// Login and signup answer 401 for a wrong password (or a rejected Google code,
+// an expired Google signup token), which their own screens handle — every
+// other 401 on an authenticated call means the session is over.
+const AUTH_ENTRY_PATHS = ["/auth/login", "/auth/signup", "/auth/google/login", "/auth/google/signup"];
 
 const AUTH_EXPIRED_EVENT = "retcona:auth-expired";
 
