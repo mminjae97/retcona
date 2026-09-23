@@ -22,3 +22,11 @@ npm run dev
 ```
 
 `vite.config.ts` proxies `/api` requests to `http://localhost:8000` (backend).
+
+## Site icon
+
+The browser tab / home-screen icon is `src/assets/favicon.png`, the only file to change — `index.html` points both `icon` and `apple-touch-icon` at it.
+
+- Replace it with a square PNG, 512×512 recommended, with a real transparent background (an image that merely *shows* a checkerboard has it baked in as pixels, and the checkerboard will show up in the tab).
+- Keep the same file name, or update the two `<link>` tags in `index.html` to match.
+- No cache busting needed: the build fingerprints it (`dist/assets/favicon-<hash>.png`), so a new icon gets a new URL.
