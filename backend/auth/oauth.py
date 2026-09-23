@@ -67,7 +67,17 @@ class _Config(NamedTuple):
 
 def _config() -> _Config | None:
     values = [os.environ.get(f"GOOGLE_OAUTH_{name}", "").strip() for name in ("CLIENT_ID", "CLIENT_SECRET", "REDIRECT_URI")]
-    return _Config(*values) if all(values) else None
+    if not all(values):
+        return None
+    config = _Config(*values)
+    redirect = urllib.parse.urlsplit(config.redirect_uri)
+    if redirect.scheme not in ("http", "https") or not redirect.netloc:
+        # Google needs the absolute URL of the callback page, and the frontend
+        # compares its origin with its own: a relative path or a typo would
+        # only fail later, in the browser. Off (the button disabled) instead.
+        logger.error("GOOGLE_OAUTH_REDIRECT_URI must be an absolute http(s) URL; Google login is off")
+        return None
+    return config
 
 
 def _require_config() -> _Config:
