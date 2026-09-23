@@ -2,7 +2,7 @@
 // World: category + title + free-form description
 // Character: three sections — fixed attributes / mutable attributes / personality·speech
 // All fields are optional; if left blank, they're auto-filled from the editor (7.4)
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, describeError } from "../api/client";
@@ -82,6 +82,25 @@ function useList<T>(load: () => Promise<T[]>) {
   return { items, setItems, error, retry: () => setAttempt((n) => n + 1) };
 }
 
+// Disabling the form's fieldset while a save runs takes keyboard focus away
+// from the field being typed in; this puts it back once the lock lifts, if
+// that field is still on screen (a world card's editor closes on success) and
+// focus hasn't gone anywhere since — the lock drops it on <body>, and a field
+// the user has moved to meanwhile (the other tab's form) keeps it.
+function useRestoreFocusAfter(busy: boolean) {
+  const focused = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (busy) return;
+    const element = focused.current;
+    focused.current = null;
+    const focusLost = document.activeElement === null || document.activeElement === document.body;
+    if (element?.isConnected && focusLost) element.focus();
+  }, [busy]);
+  return () => {
+    focused.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  };
+}
+
 function confirmDiscard(dirty: boolean): boolean {
   return !dirty || window.confirm("저장하지 않은 변경 사항이 있습니다. 버리시겠습니까?");
 }
@@ -106,6 +125,7 @@ function WorldSettingsSection({ novelId }: { novelId: string }) {
   // result closes the editor (or removes the card), which would otherwise
   // take a form opened meanwhile with it.
   const busy = saving || deleting;
+  const rememberFocus = useRestoreFocusAfter(busy);
 
   function startEdit(key: string, values: WorldSettingInput) {
     if (busy || !confirmDiscard(dirty)) return;
@@ -129,6 +149,7 @@ function WorldSettingsSection({ novelId }: { novelId: string }) {
       setFormError("제목과 내용을 입력해주세요.");
       return;
     }
+    rememberFocus();
     setSaving(true);
     setFormError(null);
     try {
@@ -321,6 +342,7 @@ function CharactersSection({ novelId }: { novelId: string }) {
   // result is loaded into the form, and a delete closes it, either of which
   // would otherwise overwrite or close a card opened meanwhile.
   const busy = saving || deleting;
+  const rememberFocus = useRestoreFocusAfter(busy);
 
   function select(key: string | null, character?: CharacterPublic) {
     if (busy || key === selected || !confirmDiscard(dirty)) return;
@@ -343,6 +365,7 @@ function CharactersSection({ novelId }: { novelId: string }) {
       setFormError("이름을 입력해주세요.");
       return;
     }
+    rememberFocus();
     setSaving(true);
     setFormError(null);
     try {
