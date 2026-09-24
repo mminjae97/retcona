@@ -121,6 +121,7 @@ def _store(
     novel_id: uuid.UUID,
     run_id: uuid.UUID,
     episode_id: uuid.UUID,
+    content: str,
     content_updated_at: datetime,
     extraction: Extraction,
     flags: list[Flag],
@@ -149,7 +150,7 @@ def _store(
         )
         db.execute(delete(Claim).where(Claim.novel_id == novel_id, Claim.episode_id == episode_id))
 
-        registration = match_and_register(db, novel_id, episode_id, extraction.claims)
+        registration = match_and_register(db, novel_id, extraction.claims)
         subject_ids = [registration.subject_id(claim) for claim in extraction.claims]
         claim_ids = [uuid.uuid4() for _ in extraction.claims]
         db.add_all(
@@ -180,7 +181,7 @@ def _store(
             )
             for flag in flags
         )
-        apply_new_information(db, novel_id, episode_id, episode_index, extraction.claims, subject_ids, flags)
+        apply_new_information(db, novel_id, episode_id, episode_index, content, extraction.claims, subject_ids, flags)
 
         run.status = "succeeded"
         run.finished_at = func.now()
@@ -224,7 +225,7 @@ def validate_episode(novel_id: uuid.UUID, run_id: uuid.UUID) -> None:
             logger.exception("Validation run %s: the model call failed", run_id)
             raise RunFailed("llm_failed") from exc
         flags = _judge(novel_id, episode_id, extraction)
-        _store(novel_id, run_id, episode_id, content_updated_at, extraction, flags)
+        _store(novel_id, run_id, episode_id, content, content_updated_at, extraction, flags)
     except RunFailed as exc:
         _finish_failed(novel_id, run_id, exc.code)
     except Exception:

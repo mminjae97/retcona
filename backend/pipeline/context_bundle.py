@@ -34,7 +34,7 @@ class Card:
     name: str
     # fixed_attrs of a character, geo_attrs of a location
     attrs: dict[str, str]
-    # attr_sources: {key: the episode id it was filled in from}
+    # {key: the episode id it was filled in from}, from attr_sources
     sources: dict[str, str]
 
 
@@ -57,6 +57,17 @@ def _text_values(attrs: object) -> dict[str, str]:
     return {str(key): str(value).strip() for key, value in attrs.items() if value is not None and str(value).strip()}
 
 
+def source_episodes(attr_sources: object) -> dict[str, str]:
+    """{key: episode id} of a card's attr_sources (models/character.py)."""
+    if not isinstance(attr_sources, dict):
+        return {}
+    return {
+        str(key): str(record["episode_id"])
+        for key, record in attr_sources.items()
+        if isinstance(record, dict) and record.get("episode_id")
+    }
+
+
 def get_context_bundle(
     db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, claims: list[ExtractedClaim]
 ) -> ContextBundle:
@@ -74,7 +85,7 @@ def get_context_bundle(
                 id=character.id,
                 name=character.name,
                 attrs=_text_values(character.fixed_attrs),
-                sources=_text_values(character.attr_sources),
+                sources=source_episodes(character.attr_sources),
             )
     for location in db.scalars(
         select(Location).where(Location.novel_id == novel_id).order_by(Location.created_at, Location.id)
@@ -86,6 +97,6 @@ def get_context_bundle(
                 id=location.id,
                 name=location.name,
                 attrs=_text_values(location.geo_attrs),
-                sources=_text_values(location.attr_sources),
+                sources=source_episodes(location.attr_sources),
             )
     return bundle

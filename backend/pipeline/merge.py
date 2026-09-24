@@ -10,9 +10,9 @@
   or not: changing an existing setting is the author's call (2.4). The one
   exception is a value filled in from this same episode by an earlier run:
   that's the episode's own earlier wording, and the new wording replaces it —
-  or, when the episode no longer says anything about that attribute, the
-  value is cleared, so text the author removed isn't held against other
-  episodes.
+  or, once the sentence it was taken from is gone from the episode, the value
+  is cleared, so text the author removed isn't held against other episodes.
+  (Only then: a run whose extraction merely missed it this time keeps it.)
 """
 
 import uuid
@@ -27,6 +27,8 @@ from models.character import (
     CharacterStateHistory,
 )
 from models.location import GEO_ATTR_KEYS, Location
+from pipeline.context_bundle import source_episodes
+from pipeline.entities import normalize_name
 from pipeline.extract_claims import ExtractedClaim
 from pipeline.judges import Flag
 
@@ -43,11 +45,18 @@ def merge_and_dedupe(flags_by_module: list[list[Flag]]) -> list[Flag]:
     return sorted(best.values(), key=lambda flag: flag.confidence, reverse=True)
 
 
+def _still_in(record: dict, content: str) -> bool:
+    # Whitespace-insensitive: a rewrapped line is still the same sentence.
+    evidence = record.get("evidence")
+    return bool(evidence) and normalize_name(evidence) in normalize_name(content)
+
+
 def apply_new_information(
     db: Session,
     novel_id: uuid.UUID,
     episode_id: uuid.UUID,
     episode_index: int,
+    content: str,
     claims: list[ExtractedClaim],
     subject_ids: list[uuid.UUID],
     flags: list[Flag],
@@ -60,14 +69,15 @@ def apply_new_information(
     # below references them.
     db.flush()
 
-    # (kind, id) -> {key: value}, first mention in the episode wins
-    card_values: dict[tuple[str, uuid.UUID], dict[str, str]] = {}
+    # (kind, id) -> {key: (value, evidence)}, first mention in the episode wins
+    card_values: dict[tuple[str, uuid.UUID], dict[str, tuple[str, str]]] = {}
     states: dict[uuid.UUID, dict[str, str]] = {}
     for index, (claim, subject_id) in enumerate(zip(claims, subject_ids, strict=True)):
         card_keys = FIXED_ATTR_KEYS if claim.subject_kind == "character" else GEO_ATTR_KEYS
         for key, value in claim.attributes.items():
             if key in card_keys and (index, key) not in flagged:
-                card_values.setdefault((claim.subject_kind, subject_id), {}).setdefault(key, value)
+                evidence = claim.evidence or claim.text
+                card_values.setdefault((claim.subject_kind, subject_id), {}).setdefault(key, (value, evidence))
             elif claim.subject_kind == "character" and key in MUTABLE_ATTR_KEYS:
                 states.setdefault(subject_id, {}).setdefault(key, value)
 
@@ -83,15 +93,17 @@ def apply_new_information(
         ):
             attrs = dict(getattr(card, attrs_field) or {})
             sources = dict(card.attr_sources or {})
+            from_episodes = source_episodes(sources)
             values = card_values.get((kind, card.id), {})
-            for key in [key for key, from_episode in sources.items() if from_episode == source and key not in values]:
-                attrs.pop(key, None)
-                del sources[key]
-            for key, value in values.items():
+            for key, from_episode in from_episodes.items():
+                if from_episode == source and key not in values and not _still_in(sources[key], content):
+                    attrs.pop(key, None)
+                    del sources[key]
+            for key, (value, evidence) in values.items():
                 # Empty, or filled in from this same episode's earlier wording.
-                if not attrs.get(key) or sources.get(key) == source:
+                if not attrs.get(key) or from_episodes.get(key) == source:
                     attrs[key] = value
-                    sources[key] = source
+                    sources[key] = {"episode_id": source, "evidence": evidence}
             # Reassigned, not mutated: SQLAlchemy doesn't see changes inside a JSONB value.
             setattr(card, attrs_field, attrs)
             card.attr_sources = sources

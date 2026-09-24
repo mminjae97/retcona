@@ -78,13 +78,20 @@ class _Pair:
     evidence: str
 
 
+# Syllables before a final 다 that make it a predicate ending ("습했다",
+# "이다", "있다", "빛난다") rather than the end of a noun ("바다", "캐나다").
+_PREDICATE_STEMS = set("이하한난있없는된진졌렸웠났랐갔왔섰쳤썼았었였했됐")
+
+
 def _as_statement(value: str) -> str:
-    # "푸른색" -> "푸른색이다."; a value that's already a sentence (ends in 다
-    # or punctuation) is kept, with a period.
+    # "푸른색" -> "푸른색이다."; a value that's already a sentence (ends in a
+    # predicate or punctuation) is kept, with a period.
     value = value.rstrip()
     if value.endswith((".", "!", "?", "…")):
         return value
-    return f"{value}." if value.endswith("다") else f"{value}이다."
+    if value.endswith("다") and value[-2:-1] in _PREDICATE_STEMS:
+        return f"{value}."
+    return f"{value}이다."
 
 
 def _topic_particle(word: str) -> str:

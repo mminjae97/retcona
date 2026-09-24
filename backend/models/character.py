@@ -4,11 +4,13 @@
 - Fixed attributes: name, age, eye color, hair color, height, scars, origin
 - Mutable attributes: hairstyle, outfit, injury/health status, belongings
 - personality: personality/speech patterns (for OOC judgment, 7.2)
-- attr_sources: which episode each fixed attribute was filled in from, for the
-  ones validation filled in (7.4) rather than the author: {key: episode id}.
-  Validating that episode again after editing it compares against its own
-  earlier wording, so that value is replaced, not flagged. A key leaves this
-  map once the author changes its value on the settings screen.
+- attr_sources: where each fixed attribute validation filled in (7.4) came
+  from, for the ones the author didn't enter: {key: {"episode_id": ...,
+  "evidence": the manuscript sentence}}. Validating that episode again after
+  editing it doesn't hold it to its own earlier wording: the value is
+  replaced, or cleared once that sentence is gone from the episode
+  (pipeline/merge.py). A key leaves this map once the author changes its
+  value on the settings screen.
 """
 
 import uuid
