@@ -143,12 +143,19 @@ def _store(
         # A new run replaces the episode's earlier claims (and their flags):
         # they describe content that has since been validated again. What the
         # author dismissed as a false positive stays dismissed when the same
-        # sentence is flagged again (same card, attribute and sentence).
+        # sentence is flagged again against the same setting (same card,
+        # attribute, sentence and setting value — a changed setting is judged
+        # afresh).
         earlier = select(Claim.id).where(Claim.novel_id == novel_id, Claim.episode_id == episode_id)
         dismissed = {
-            (subject_id, attribute, evidence)
-            for subject_id, attribute, evidence in db.execute(
-                select(Claim.subject_id, ContradictionFlag.attribute, ContradictionFlag.evidence_text)
+            tuple(row)
+            for row in db.execute(
+                select(
+                    Claim.subject_id,
+                    ContradictionFlag.attribute,
+                    ContradictionFlag.evidence_text,
+                    ContradictionFlag.reference_text,
+                )
                 .join(Claim, Claim.id == ContradictionFlag.claim_id)
                 .where(
                     ContradictionFlag.novel_id == novel_id,
@@ -183,6 +190,12 @@ def _store(
             )
             for claim_id, claim, subject_id in zip(claim_ids, extraction.claims, subject_ids, strict=True)
         )
+        statuses = [
+            "dismissed"
+            if (subject_ids[flag.claim_index], flag.attribute, flag.evidence_text, flag.reference_text) in dismissed
+            else "open"
+            for flag in flags
+        ]
         db.add_all(
             ContradictionFlag(
                 novel_id=novel_id,
@@ -192,11 +205,9 @@ def _store(
                 confidence=flag.confidence,
                 evidence_text=flag.evidence_text,
                 reference_text=flag.reference_text,
-                status="dismissed"
-                if (subject_ids[flag.claim_index], flag.attribute, flag.evidence_text) in dismissed
-                else "open",
+                status=flag_status,
             )
-            for flag in flags
+            for flag, flag_status in zip(flags, statuses, strict=True)
         )
         apply_new_information(db, novel_id, episode_id, episode_index, content, extraction.claims, subject_ids, flags)
 
@@ -208,7 +219,8 @@ def _store(
             "dropped_claims": extraction.dropped,
             "new_characters": registration.new_characters,
             "new_locations": registration.new_locations,
-            "flags": len(flags),
+            # Left for the author to look at: not the ones still dismissed.
+            "flags": statuses.count("open"),
         }
         # "submitted" means validated (2.2) — only if what was validated is
         # still what's saved (a save during the run already made it a draft).

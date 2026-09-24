@@ -29,6 +29,7 @@ from models.episode import Episode
 from models.location import Location
 from models.user import User
 from models.validation_run import ValidationRun
+from pipeline.entities import normalize_name
 
 logger = logging.getLogger(__name__)
 
@@ -320,8 +321,14 @@ def _flag_public(flag: ContradictionFlag, claim: Claim) -> FlagPublic:
         subject_id=claim.subject_id,
         subject_name=claim.subject_name,
         claim_text=claim.text,
-        value=(claim.attributes or {}).get(flag.attribute) if flag.attribute else None,
+        value=_flag_value(flag, claim),
     )
+
+
+def _flag_value(flag: ContradictionFlag, claim: Claim) -> str | None:
+    """What the manuscript says for the flagged attribute: shown to the author,
+    and what accepting writes to the card."""
+    return (claim.attributes or {}).get(flag.attribute) if flag.attribute else None
 
 
 class FlagAction(BaseModel):
@@ -330,6 +337,12 @@ class FlagAction(BaseModel):
     # dismiss: a false positive; the flag is closed and the card left as it is
     # reopen: undoes a dismissal
     action: Literal["accept", "dismiss", "reopen"]
+
+
+# 409 details, as codes the result screen turns into messages.
+FLAG_HANDLED = "flag_handled"  # not open (accept/dismiss) or not dismissed (reopen)
+FLAG_NO_VALUE = "flag_no_value"  # the claim has no value for the attribute
+FLAG_CARD_MISSING = "flag_card_missing"  # the setting card was deleted
 
 
 # Which card attribute a flag's attribute lives in, by subject kind.
@@ -364,10 +377,10 @@ def act_on_flag(
 
     if body.action == "reopen":
         if flag.status != "dismissed":
-            raise HTTPException(status.HTTP_409_CONFLICT, "Only a dismissed flag can be reopened")
+            raise HTTPException(status.HTTP_409_CONFLICT, FLAG_HANDLED)
         flag.status = "open"
     elif flag.status != "open":
-        raise HTTPException(status.HTTP_409_CONFLICT, "The flag has already been handled")
+        raise HTTPException(status.HTTP_409_CONFLICT, FLAG_HANDLED)
     elif body.action == "dismiss":
         flag.status = "dismissed"
     else:
@@ -378,16 +391,16 @@ def act_on_flag(
 
 
 def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Claim) -> None:
-    value = (claim.attributes or {}).get(flag.attribute) if flag.attribute else None
+    value = _flag_value(flag, claim)
     fields = _CARD_FIELDS.get(claim.subject_kind or "")
     if not value or fields is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "The flag has no value to apply")
+        raise HTTPException(status.HTTP_409_CONFLICT, FLAG_NO_VALUE)
     model, attrs_field = fields
     card = None
     if claim.subject_id is not None:
         card = db.scalar(select(model).where(model.id == claim.subject_id, model.novel_id == novel_id))
     if card is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "The setting card no longer exists")
+        raise HTTPException(status.HTTP_409_CONFLICT, FLAG_CARD_MISSING)
     # Reassigned, not mutated: SQLAlchemy doesn't see changes inside a JSONB value.
     setattr(card, attrs_field, {**(getattr(card, attrs_field) or {}), flag.attribute: value})
     # The author chose this value: it's theirs now, not an episode's to
@@ -395,3 +408,27 @@ def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Cl
     card.attr_sources = {key: record for key, record in (card.attr_sources or {}).items() if key != flag.attribute}
     # As an edit on the settings screen does (api/settings.py).
     card.source = "manual"
+
+    # The episode's other open flags on the same attribute were judged against
+    # the old value. One that says the same as what was just accepted is
+    # accepted with it; the rest now show the new value, for the author to
+    # judge (accepting one of those replaces it again, knowingly).
+    siblings = db.execute(
+        select(ContradictionFlag, Claim)
+        .join(Claim, Claim.id == ContradictionFlag.claim_id)
+        .where(
+            ContradictionFlag.novel_id == novel_id,
+            ContradictionFlag.id != flag.id,
+            ContradictionFlag.status == "open",
+            ContradictionFlag.attribute == flag.attribute,
+            Claim.novel_id == novel_id,
+            Claim.episode_id == claim.episode_id,
+            Claim.subject_kind == claim.subject_kind,
+            Claim.subject_id == claim.subject_id,
+        )
+    )
+    for sibling, sibling_claim in siblings:
+        if normalize_name(_flag_value(sibling, sibling_claim) or "") == normalize_name(value):
+            sibling.status = "accepted"
+        else:
+            sibling.reference_text = value

@@ -611,7 +611,7 @@ function RunStatus({
   if (run.status === "failed") {
     return (
       <p className="editor-validation editor-error" role="alert">
-        {describeRunError(run.error)}
+        {describeRunError(run.error)} <Link to={resultPath}>이전 검증 결과 보기</Link>
       </p>
     );
   }

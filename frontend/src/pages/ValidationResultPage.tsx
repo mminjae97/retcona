@@ -29,16 +29,54 @@ function sortFlags(flags: Flag[]): Flag[] {
   return [...flags.filter((flag) => flag.status === "open"), ...flags.filter((flag) => flag.status !== "open")];
 }
 
+// 409 details are codes (backend/api/episodes.py).
 function describeActionError(err: unknown): string {
   if (err instanceof ApiError && err.status === 404) {
     return "검증 결과가 바뀌었습니다. 새로고침해 주세요.";
   }
   if (err instanceof ApiError && err.status === 409) {
-    if (err.message.includes("card")) return "설정 카드가 삭제되어 반영할 수 없습니다.";
-    if (err.message.includes("value")) return "이 항목은 반영할 값이 없습니다.";
+    if (err.message === "flag_card_missing") return "설정 카드가 삭제되어 반영할 수 없습니다.";
+    if (err.message === "flag_no_value") return "이 항목은 반영할 값이 없습니다.";
     return "이미 처리된 항목입니다. 새로고침해 주세요.";
   }
   return describeError(err);
+}
+
+// Where `sentence` is in `content`: as written, or else comparing letters and
+// digits only — the model's copy of a sentence may differ from the manuscript
+// in spacing, quotes or punctuation (as backend/pipeline/merge.py allows).
+// `text` is wordChars(content), made once for all of a manuscript's flags.
+function locate(content: string, text: WordChars, sentence: string): { start: number; end: number } | null {
+  if (!sentence) return null;
+  const exact = content.indexOf(sentence);
+  if (exact !== -1) return { start: exact, end: exact + sentence.length };
+  const wanted = wordChars(sentence).chars;
+  const at = wanted ? text.chars.indexOf(wanted) : -1;
+  if (at === -1) return null;
+  return { start: text.starts[at], end: text.ends[at + wanted.length - 1] };
+}
+
+// The letters and digits of `text`, lowercased, with where each came from
+// (UTF-16 offsets of the original character, per unit of `chars`).
+type WordChars = { chars: string; starts: number[]; ends: number[] };
+
+function wordChars(text: string): WordChars {
+  let chars = "";
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let offset = 0;
+  for (const char of text) {
+    if (/[\p{L}\p{N}]/u.test(char)) {
+      const lower = char.toLowerCase();
+      chars += lower;
+      for (let unit = 0; unit < lower.length; unit++) {
+        starts.push(offset);
+        ends.push(offset + char.length);
+      }
+    }
+    offset += char.length;
+  }
+  return { chars, starts, ends };
 }
 
 // A stretch of the manuscript: plain text, or a sentence one or more flags
@@ -51,14 +89,15 @@ type Segment = { text: string; flagIds: string[] };
 function segment(content: string, flags: Flag[]): { segments: Segment[]; located: Set<string> } {
   const ranges = new Map<string, { start: number; end: number; flagIds: string[] }>();
   const located = new Set<string>();
+  const text = wordChars(content);
   for (const flag of flags) {
-    const start = flag.evidence_text ? content.indexOf(flag.evidence_text) : -1;
-    if (start === -1) continue;
+    const found = locate(content, text, flag.evidence_text);
+    if (!found) continue;
     located.add(flag.id);
-    const key = `${start}:${flag.evidence_text.length}`;
+    const key = `${found.start}:${found.end}`;
     const range = ranges.get(key);
     if (range) range.flagIds.push(flag.id);
-    else ranges.set(key, { start, end: start + flag.evidence_text.length, flagIds: [flag.id] });
+    else ranges.set(key, { ...found, flagIds: [flag.id] });
   }
   // Overlapping sentences (one inside another) are drawn as one highlight
   // starting at the earlier one; the later one's flags join it.
@@ -149,7 +188,13 @@ export default function ValidationResultPage() {
     setActionErrors(({ [flag.id]: _, ...rest }) => rest);
     try {
       const updated = await actOnFlag(novelId, episodeId, flag.id, action);
-      setFlags((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      if (action === "accept") {
+        // Accepting also updates the episode's other flags on the same
+        // attribute (the new setting value, or accepted with it).
+        setFlags(sortFlags(await listFlags(novelId, episodeId)));
+      } else {
+        setFlags((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      }
     } catch (err) {
       setActionErrors((current) => ({ ...current, [flag.id]: describeActionError(err) }));
     } finally {
@@ -195,7 +240,7 @@ export default function ValidationResultPage() {
         {isRunActive(run) && <p className="result-notice">새 검증이 진행 중입니다. 끝나면 새로고침해 주세요.</p>}
         {run?.status === "failed" && (
           <p className="result-notice">
-            마지막 검증이 실패했습니다: {describeRunError(run.error)} 아래는 그 전에 성공한 검증의 결과입니다.
+            마지막 검증이 실패했습니다: {describeRunError(run.error)} 그 전에 성공한 검증이 있으면 아래에 그 결과를 보여 줍니다.
           </p>
         )}
         {outdated && (
@@ -243,9 +288,7 @@ export default function ValidationResultPage() {
             모순 후보 {flags.length}개{flags.length > 0 && ` · 확인할 항목 ${openCount}개`}
           </h2>
           {flags.length === 0 ? (
-            <p className="result-empty">
-              {run === null ? "검증 결과가 없습니다." : "설정과 어긋나는 서술을 찾지 못했습니다."}
-            </p>
+            <p className="result-empty">{describeNoFlags(run)}</p>
           ) : (
             <ol className="flag-list">
               {flags.map((flag) => (
@@ -272,6 +315,16 @@ export default function ValidationResultPage() {
       </div>
     </div>
   );
+}
+
+// Why the list is empty. "Nothing contradicts" only for a run that got as far
+// as judging: not one that failed, is still going, or predates judgment
+// (its summary has no flags count).
+function describeNoFlags(run: ValidationRun | null): string {
+  if (run === null) return "검증 결과가 없습니다.";
+  if (run.status !== "succeeded") return "표시할 모순 후보가 없습니다.";
+  if (run.summary.flags === undefined) return "모순 판정이 추가되기 전의 검증 결과입니다. 원고 화면에서 다시 검증해 주세요.";
+  return "설정과 어긋나는 서술을 찾지 못했습니다.";
 }
 
 function FlagCard({
