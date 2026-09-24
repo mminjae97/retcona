@@ -13,11 +13,14 @@ Usage: python download.py
 """
 
 import hashlib
+import shutil
 import sys
 import urllib.request
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent / "data"
+# Seconds without data before a download gives up.
+TIMEOUT = 60
 
 _KORNLI = "https://raw.githubusercontent.com/kakaobrain/kor-nlu-datasets/0df0fe7d496eb61b092e022e238c2230b29f1cbc/KorNLI"
 _KLUE = "https://raw.githubusercontent.com/KLUE-benchmark/KLUE/3efd98708a40ff49251fddde35453f8fbb11f536/klue_benchmark/klue-nli-v1.1"
@@ -59,11 +62,14 @@ def main() -> int:
         if not path.exists():
             print(f"Downloading {name}")
             partial = path.with_suffix(path.suffix + ".part")
-            urllib.request.urlretrieve(url, partial)
+            with urllib.request.urlopen(url, timeout=TIMEOUT) as response, partial.open("wb") as file:
+                shutil.copyfileobj(response, file)
             partial.replace(path)
         actual = _sha256(path)
         if actual != expected:
-            print(f"{name}: SHA-256 mismatch (expected {expected}, got {actual})", file=sys.stderr)
+            # Removed, so running this again downloads it afresh.
+            path.unlink()
+            print(f"{name}: SHA-256 mismatch (expected {expected}, got {actual}); removed it, run again", file=sys.stderr)
             failed = True
         else:
             print(f"{name}: {actual}")

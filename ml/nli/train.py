@@ -1,13 +1,17 @@
 """Fine-tunes a Korean encoder for NLI (design doc chapter 5).
 
-Two stages, since KLUE-NLI (25k pairs) would be lost among KorNLI's 943k if
-the two were simply mixed:
+The backend's model ("mixed" in RESULTS.md) is KorNLI and KLUE-NLI shuffled
+into one training set:
 
-    python train.py --data kornli --init klue/roberta-base --output runs/stage1
-    python train.py --data klue --init runs/stage1 --output runs/stage2
+    python train.py --data kornli klue --init klue/roberta-base --output runs/mixed
 
-Each stage evaluates on KLUE-NLI dev as it goes and saves the final model to
---output, loadable by the backend (NLI_MODEL=<that directory>).
+--init also takes an earlier run's --output, to continue from it (e.g.
+--data klue on top of a KorNLI run — which RESULTS.md found to miss far more
+contradictions in novel prose). The run evaluates on KLUE-NLI dev as it goes,
+for the record, and saves the model as it is at the end of training to
+--output, loadable by the backend (NLI_MODEL=<that directory>). An --output
+that already has checkpoints is refused, unless --resume continues the
+interrupted run that made them (with the same arguments).
 """
 
 import argparse
@@ -71,7 +75,14 @@ def main() -> None:
     parser.add_argument("--eval-steps", type=int, default=2000)
     parser.add_argument("--limit", type=int, help="use only this many training pairs (a quick check)")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--resume", action="store_true", help="continue an interrupted run in --output")
     args = parser.parse_args()
+
+    has_checkpoints = any(Path(args.output).glob("checkpoint-*"))
+    if has_checkpoints and not args.resume:
+        parser.error(f"{args.output} already has checkpoints: pass --resume to continue that run, or pick another --output")
+    if args.resume and not has_checkpoints:
+        parser.error(f"--resume: {args.output} has no checkpoint to continue from")
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -105,9 +116,10 @@ def main() -> None:
         eval_steps=args.eval_steps,
         save_strategy="steps",
         save_steps=args.eval_steps,
-        save_total_limit=2,
-        load_best_model_at_end=True,
-        metric_for_best_model="accuracy",
+        # Only for resuming. The model saved at the end is the final one, not
+        # the checkpoint best on KLUE-NLI dev: that score doesn't track how
+        # well the model finds contradictions in novel prose (RESULTS.md).
+        save_total_limit=1,
         logging_steps=200,
         report_to=[],
         seed=args.seed,
@@ -122,9 +134,7 @@ def main() -> None:
         data_collator=DataCollatorWithPadding(tokenizer),
         compute_metrics=_accuracy,
     )
-    # Resumes from the latest checkpoint in --output if a run was interrupted.
-    resume = any(Path(args.output).glob("checkpoint-*"))
-    trainer.train(resume_from_checkpoint=resume or None)
+    trainer.train(resume_from_checkpoint=args.resume or None)
     print("KLUE-NLI dev:", trainer.evaluate())
     trainer.save_model(args.output)
     tokenizer.save_pretrained(args.output)

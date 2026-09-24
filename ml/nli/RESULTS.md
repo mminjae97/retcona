@@ -15,7 +15,7 @@ Metrics:
 | Machine | RTX 3060 12 GB, Windows 10, 6 CPU threads |
 | Environment | `retcona-ml`: Python 3.12, PyTorch 2.14.0+cu126, transformers 5.17.0 |
 | Base model | `klue/roberta-base` |
-| Training defaults (`train.py`) | batch 32, max length 128, lr 2e-5, warmup 6%, weight decay 0.01, fp16, seed 42, best checkpoint on KLUE-NLI dev accuracy |
+| Training defaults (`train.py`) | batch 32, max length 128, lr 2e-5, warmup 6%, weight decay 0.01, fp16, seed 42. Rounds 1–3 kept the checkpoint best on KLUE-NLI dev accuracy (for `mixed` and `stage2` that was the final one; `stage1` kept epoch 0.81). `train.py` now keeps the final model instead (see "Training changes" below). |
 | Data | KorNLI train 942,854 · KLUE-NLI train 24,998 · KLUE-NLI dev 3,000 · novel set: 77 pairs in round 1, 150 from round 2 — see README.md |
 
 ## Round 1 — 2026-09-24
@@ -107,3 +107,8 @@ Novel confusion for `mixed` (rows gold, columns predicted; entailment / neutral 
 ### Decision
 
 Chosen (2026-09-24): `mixed` is the backend's model, kept locally in `runs/mixed` for now (`backend/infra/inference_client.py` uses it by default). Rationale: it's tied for the best novel result and stays close to the current model on general Korean NLI, at the same size and speed. It's also the combination chosen for the project (KorNLI + KLUE-NLI, official data only). Remaining weak spots for a later round: synonym restatements, attribute-less sentences, Sino-Korean color and number expressions. These could be addressed with more novel-style training pairs or with a check in the backend that the sentence mentions the attribute at all.
+
+## Training changes after round 3
+
+- `train.py` saves the model as it is at the end of training instead of the checkpoint with the best KLUE-NLI dev accuracy. That score moved against novel-prose recall in rounds 1–3, so it shouldn't pick the model. `mixed` is unaffected: its best checkpoint was the final one (epoch 1.00: 0.855).
+- An `--output` that already has checkpoints is refused unless `--resume` is given. Before, a re-run silently continued the old run, even with different `--data` or `--init`.

@@ -40,6 +40,6 @@ python train.py --data kornli klue --init klue/roberta-base --output runs/mixed 
 python evaluate.py --model runs/mixed Huffon/klue-roberta-base-nli --errors --latency
 ```
 
-KorNLI and KLUE-NLI are shuffled into one training set (1 epoch). Training on KLUE-NLI after KorNLI instead (`--data kornli`, then `--data klue --init <that run>`) scores higher on KLUE-NLI dev but misses far more contradictions in novel prose (RESULTS.md, rounds 1–3). `train.py` evaluates on KLUE-NLI dev every 2,000 steps, keeps the best checkpoint, and resumes from the latest one if interrupted. `data/` and `runs/` aren't committed.
+KorNLI and KLUE-NLI are shuffled into one training set (1 epoch). Training on KLUE-NLI after KorNLI instead (`--data kornli`, then `--data klue --init <that run>`) scores higher on KLUE-NLI dev but misses far more contradictions in novel prose (RESULTS.md, rounds 1–3). `train.py` evaluates on KLUE-NLI dev every 2,000 steps for the record and saves the model as it is at the end of training (not the checkpoint best on KLUE-NLI dev, which doesn't track novel-prose results). An interrupted run continues with the same command plus `--resume`. `data/` and `runs/` aren't committed.
 
 The backend uses `runs/mixed` by default (`backend/infra/inference_client.py`); `NLI_MODEL` points it at another directory. The model stays on the machine that trained it for now. Hosting it for deployment is on the pre-launch checklist (`docs/pre-launch-checklist.md`).

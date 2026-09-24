@@ -37,8 +37,10 @@ class NLIScores:
 
 
 class InferenceClient(ABC):
-    def load(self) -> None:
-        """Loads the models ahead of the first call, where that means anything."""
+    def load(self) -> str:
+        """Loads the models ahead of the first call, where that means anything,
+        and says which they are (for the worker's startup log)."""
+        return type(self).__name__
 
     @abstractmethod
     def rerank(self, query: str, candidates: list[str]) -> list[float]:
@@ -78,8 +80,9 @@ class CPUInferenceClient(InferenceClient):
                 self._nli = (tokenizer, model, label_index)
             return self._nli
 
-    def load(self) -> None:
+    def load(self) -> str:
         self._load_nli()
+        return f"NLI {self._nli_model_name}"
 
     def rerank(self, query: str, candidates: list[str]) -> list[float]:
         raise NotImplementedError

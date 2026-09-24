@@ -20,7 +20,7 @@ dependencies = [
     "redis>=5.0",           # local dev QueueClient implementation (10.4.3)
     "rank-bm25>=0.2",       # BM25 hybrid search (chapter 5)
     "sentence-transformers>=3.0",  # KURE-v1 embedding, bge-reranker (chapter 5)
-    "transformers>=4.41",   # NLI model (klue-roberta) for the judgment modules (7.2)
+    "transformers>=5.17,<6",  # NLI model (7.2); same major version as ml/nli, which saves it
     "tzdata>=2024.1",       # IANA time zones for the purge schedule on platforms without a system copy
 ]
 

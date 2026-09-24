@@ -1,6 +1,6 @@
 """Compares NLI models on KLUE-NLI dev and the novel evaluation set.
 
-    python evaluate.py --model Huffon/klue-roberta-base-nli runs/stage2 --data klue-dev novel
+    python evaluate.py --model runs/mixed Huffon/klue-roberta-base-nli --data klue-dev novel
 
 For each model and dataset: accuracy, per-label precision/recall/F1, and how
 the backend would do with it — a pair is flagged when its contradiction

@@ -12,9 +12,9 @@ class InferenceError(Exception):
     """The model couldn't be loaded (a download on first use) or run."""
 
 
-def load_models() -> None:
-    """Loads the models now rather than on first use (worker startup)."""
-    get_inference_client().load()
+def load_models() -> str:
+    """Loads the models now rather than on first use (worker startup); says which."""
+    return get_inference_client().load()
 
 
 def rerank(query: str, candidates: list[str]) -> list[float]:
