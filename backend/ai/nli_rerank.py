@@ -8,6 +8,15 @@ no knowledge of what the backend actually is.
 from infra.inference_client import NLIScores, get_inference_client
 
 
+class InferenceError(Exception):
+    """The model couldn't be loaded (a download on first use) or run."""
+
+
+def load_models() -> None:
+    """Loads the models now rather than on first use (worker startup)."""
+    get_inference_client().load()
+
+
 def rerank(query: str, candidates: list[str]) -> list[float]:
     return get_inference_client().rerank(query, candidates)
 
@@ -15,4 +24,7 @@ def rerank(query: str, candidates: list[str]) -> list[float]:
 def check_contradictions(pairs: list[tuple[str, str]]) -> list[NLIScores]:
     """NLI scores of each (premise, hypothesis), in order. klue-roberta + KorNLI
     based; needs re-finetuning for the novel narration/dialogue domain (chapter 5)."""
-    return get_inference_client().nli(pairs)
+    try:
+        return get_inference_client().nli(pairs)
+    except Exception as exc:
+        raise InferenceError(str(exc)) from exc

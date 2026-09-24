@@ -84,8 +84,10 @@ def extract(manuscript: str, known_characters: list[str], known_locations: list[
                 claims.append(_claim("spacetime", "character", character, sentence, {}))
         if location:
             # "검은 숲은 ..." describes the place; "... 검은 숲으로 향했다" doesn't.
+            # Its features are what follows the place's name ("어둡고 습했다.").
             describes = re.search(rf"{re.escape(location)}(?:은|는|이|가)(?![가-힣])", sentence)
-            claims.append(_claim("location", "location", location, sentence, {"features": sentence} if describes else {}))
+            features = sentence[describes.end() :].strip() if describes else ""
+            claims.append(_claim("location", "location", location, sentence, {"features": features} if features else {}))
     return {"claims": claims[:_MAX_CLAIMS]}
 
 

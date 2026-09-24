@@ -54,7 +54,9 @@ export interface ValidationRunSummary {
   dropped_claims?: number;
   new_characters?: string[];
   new_locations?: string[];
-  // How many claims contradict the settings (appearance, location).
+  // How many contradictions with the settings the run found (appearance,
+  // location), one per claim and attribute. Missing on runs from before
+  // contradiction judgment.
   flags?: number;
 }
 

@@ -30,6 +30,9 @@ class NLIScores:
 
 
 class InferenceClient(ABC):
+    def load(self) -> None:
+        """Loads the models ahead of the first call, where that means anything."""
+
     @abstractmethod
     def rerank(self, query: str, candidates: list[str]) -> list[float]:
         """Cross-encoder score from the bge-reranker-v2-m3-ko family."""
@@ -67,6 +70,9 @@ class CPUInferenceClient(InferenceClient):
                     raise RuntimeError(f"NLI model {self._nli_model_name} has no {sorted(missing)} label(s)")
                 self._nli = (tokenizer, model, label_index)
             return self._nli
+
+    def load(self) -> None:
+        self._load_nli()
 
     def rerank(self, query: str, candidates: list[str]) -> list[float]:
         raise NotImplementedError

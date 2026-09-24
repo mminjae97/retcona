@@ -599,13 +599,16 @@ function RunStatus({ run, episodeUpdatedAt, settingsPath }: { run: ValidationRun
       </p>
     );
   }
-  const { claims = 0, flags = 0, new_characters: characters = [], new_locations: locations = [] } = run.summary;
+  // flags is missing on runs from before contradiction judgment: those only
+  // extracted claims, and saying "nothing contradicts" would be a false all-clear.
+  const { claims = 0, flags, new_characters: characters = [], new_locations: locations = [] } = run.summary;
   const finishedAt = run.finished_at ? new Date(run.finished_at).toLocaleString() : "";
   return (
     <div className="editor-validation" role="status">
       <p>
-        검증 완료{finishedAt && ` · ${finishedAt}`}: 설정과 대조할 서술 {claims}개를 찾았고,{" "}
-        {flags > 0 ? `그중 ${flags}개가 설정과 어긋나 보입니다.` : "설정과 어긋나는 서술은 없습니다."}
+        검증 완료{finishedAt && ` · ${finishedAt}`}: 설정과 대조할 서술 {claims}개를 찾았습니다.
+        {flags !== undefined &&
+          (flags > 0 ? ` 설정과 어긋나 보이는 곳이 ${flags}군데 있습니다.` : " 설정과 어긋나는 곳은 없습니다.")}
       </p>
       {characters.length > 0 && (
         <p>

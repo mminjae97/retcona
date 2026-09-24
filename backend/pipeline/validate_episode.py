@@ -34,6 +34,7 @@ from datetime import datetime
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
+from ai.nli_rerank import InferenceError
 from models.character import Character
 from models.claim import Claim, ContradictionFlag
 from models.db import SessionLocal
@@ -111,9 +112,8 @@ def _judge(novel_id: uuid.UUID, episode_id: uuid.UUID, extraction: Extraction) -
         return merge_and_dedupe(
             [judge_appearance(extraction.claims, bundle), judge_location(extraction.claims, bundle)]
         )
-    except Exception as exc:
-        # Loading the NLI model (a download on first use) or running it.
-        logger.exception("Novel %s: judging the claims failed", novel_id)
+    except InferenceError as exc:
+        logger.exception("Novel %s: the NLI model failed", novel_id)
         raise RunFailed("inference_failed") from exc
 
 

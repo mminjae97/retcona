@@ -41,7 +41,7 @@ What a run does (`pipeline/validate_episode.py`, 7.1):
 
 `GET /novels/{id}/episodes/{id}/flags` lists the flags of the episode's latest successful run, most confident first.
 
-NLI runs in the worker process on the CPU (`INFERENCE_BACKEND=cpu`, `infra/inference_client.py`) with `Huffon/klue-roberta-base-nli` (klue-roberta fine-tuned on KLUE-NLI, chapter 5). It's downloaded from Hugging Face the first time a run needs it (about 440 MB, into the Hugging Face cache) and kept loaded after that; `NLI_MODEL` names another checkpoint or a local directory. The model isn't tuned for novel prose (chapter 5): expect false positives, which the author dismisses.
+NLI runs in the worker process on the CPU (`INFERENCE_BACKEND=cpu`, `infra/inference_client.py`) with `Huffon/klue-roberta-base-nli` (klue-roberta fine-tuned on KLUE-NLI, chapter 5). The worker loads it at startup — downloading it from Hugging Face the first time (about 440 MB, into the Hugging Face cache) — and keeps it loaded; if that fails, the worker still starts and the first run that needs it tries again; `NLI_MODEL` names another checkpoint or a local directory. The model isn't tuned for novel prose (chapter 5): expect false positives, which the author dismisses.
 
 The model isn't chosen yet (chapter 5): `LLM_PROVIDER=mock` (`infra/mock_llm.py`) answers the extraction prompt from keyword rules, rough but enough to run everything end to end. Failures are recorded on the run as a code: `queue_unavailable`, `abandoned`, `episode_missing`, `empty_manuscript`, `llm_failed`, `bad_llm_response`, `inference_failed` (the NLI model couldn't be downloaded, loaded or run), `internal`.
 

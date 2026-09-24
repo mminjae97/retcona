@@ -22,6 +22,7 @@ import signal
 import threading
 import uuid
 
+from ai.nli_rerank import load_models
 from infra.queue_client import get_queue_client
 from models.db import check_database
 from pipeline.validate_episode import validate_episode
@@ -44,6 +45,15 @@ def run() -> None:
     # The same startup check as the API server's, minus the nickname column
     # (see workers/purge.py). Logging needs no setup: workers/__init__.py did it.
     check_database(nickname_column=False)
+    # The NLI model now, not inside the first job: on a fresh install that's
+    # a ~440 MB download, and runs queued behind it would wait on it (and
+    # could be given up on, api/episodes.py). If it fails, the worker still
+    # starts; the first job that needs it tries again.
+    logger.info("Loading the NLI model (downloaded on first use)")
+    try:
+        load_models()
+    except Exception:
+        logger.exception("Could not load the NLI model; runs will try again when they need it")
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())  # finish the current job, then exit

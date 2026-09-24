@@ -15,8 +15,11 @@ sentence (premise) and the manuscript sentence the claim came from
 (hypothesis): the sentence as written, rather than the claim's value in the
 same template, because the model reads two same-shaped sentences with
 different values ("17살" / "열일곱 살") as contradicting, however alike they
-mean. A pair is only sent to the model when the card has a value from
-somewhere other than this episode and the manuscript doesn't simply repeat it.
+mean. A sentence that doesn't name the subject ("그의 눈이 붉게 빛났다") reads
+to the model as about someone else, so then the claim's own restatement,
+which names it (ai/llm.py), is the hypothesis instead. A pair is only sent to
+the model when the card has a value from somewhere other than this episode
+and the claim's value doesn't simply repeat it.
 
 Only fixed attributes are judged: mutable ones (hairstyle, outfit, ...)
 change over the story, and a change is state history, not an error. Distance
@@ -24,7 +27,6 @@ between locations needs distances in relations first — with spacetime
 (stage 4). Behavior (OOC) is stage 5.
 """
 
-import unicodedata
 import uuid
 from dataclasses import dataclass
 
@@ -32,6 +34,7 @@ from ai.nli_rerank import check_contradictions
 from models.character import FIXED_ATTR_KEYS
 from models.location import GEO_ATTR_KEYS
 from pipeline.context_bundle import Card, ContextBundle
+from pipeline.entities import normalize_name
 from pipeline.extract_claims import ExtractedClaim
 
 # A pair the model finds this likely to contradict is flagged. Past one half,
@@ -68,10 +71,7 @@ class _Pair:
     attribute: str
     premise: str
     hypothesis: str
-
-
-def _normalized(text: str) -> str:
-    return " ".join(unicodedata.normalize("NFC", text).split()).casefold()
+    evidence: str
 
 
 def _as_statement(value: str) -> str:
@@ -107,14 +107,17 @@ def _pairs(claims: list[ExtractedClaim], bundle: ContextBundle, kind: str, keys:
         card = bundle.card_for(claim)
         if card is None:
             continue  # a new entity: nothing to contradict yet
-        hypothesis = claim.evidence or claim.text
+        evidence = claim.evidence or claim.text
+        names_subject = normalize_name(card.name) in normalize_name(evidence)
+        hypothesis = evidence if names_subject else claim.text
         for attribute, value in claim.attributes.items():
             setting = card.attrs.get(attribute)
             if attribute not in keys or not setting or card.sources.get(attribute) == this_episode:
                 continue
-            if _normalized(value) == _normalized(setting) or _normalized(setting) in _normalized(hypothesis):
+            # The value itself repeats the setting ("푸른색" / "푸른색 눈동자").
+            if normalize_name(setting) in normalize_name(value):
                 continue
-            pairs.append(_Pair(index, card, attribute, _premise(card, attribute, setting), hypothesis))
+            pairs.append(_Pair(index, card, attribute, _premise(card, attribute, setting), hypothesis, evidence))
     return pairs
 
 
@@ -127,7 +130,7 @@ def _judge(pairs: list[_Pair], error_type: str) -> list[Flag]:
             error_type=error_type,
             attribute=pair.attribute,
             confidence=round(score.contradiction, 4),
-            evidence_text=pair.hypothesis,
+            evidence_text=pair.evidence,
             reference_text=pair.card.attrs[pair.attribute],
         )
         for pair, score in zip(pairs, scores, strict=True)
