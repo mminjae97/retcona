@@ -141,8 +141,23 @@ def _store(
             raise RunFailed("episode_missing")
 
         # A new run replaces the episode's earlier claims (and their flags):
-        # they describe content that has since been validated again.
+        # they describe content that has since been validated again. What the
+        # author dismissed as a false positive stays dismissed when the same
+        # sentence is flagged again (same card, attribute and sentence).
         earlier = select(Claim.id).where(Claim.novel_id == novel_id, Claim.episode_id == episode_id)
+        dismissed = {
+            (subject_id, attribute, evidence)
+            for subject_id, attribute, evidence in db.execute(
+                select(Claim.subject_id, ContradictionFlag.attribute, ContradictionFlag.evidence_text)
+                .join(Claim, Claim.id == ContradictionFlag.claim_id)
+                .where(
+                    ContradictionFlag.novel_id == novel_id,
+                    Claim.novel_id == novel_id,
+                    Claim.episode_id == episode_id,
+                    ContradictionFlag.status == "dismissed",
+                )
+            )
+        }
         db.execute(
             delete(ContradictionFlag).where(
                 ContradictionFlag.novel_id == novel_id, ContradictionFlag.claim_id.in_(earlier)
@@ -177,7 +192,9 @@ def _store(
                 confidence=flag.confidence,
                 evidence_text=flag.evidence_text,
                 reference_text=flag.reference_text,
-                status="open",
+                status="dismissed"
+                if (subject_ids[flag.claim_index], flag.attribute, flag.evidence_text) in dismissed
+                else "open",
             )
             for flag in flags
         )

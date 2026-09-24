@@ -552,24 +552,28 @@ export default function EditorPage() {
         requestError={validation.requestError}
         episodeUpdatedAt={episode.updated_at}
         settingsPath={`/novels/${novelId}/settings`}
+        resultPath={`/novels/${novelId}/episodes/${episodeId}/result`}
       />
     </div>
   );
 }
 
 // What the latest run found, or where it is: how many of the claims it
-// extracted contradict the settings (appearance and location so far), and the
-// characters and locations it registered as new (7.4).
+// extracted contradict the settings (appearance and location so far), with a
+// link to the result screen (2.4), and the characters and locations it
+// registered as new (7.4).
 function ValidationStatus({
   run,
   requestError,
   episodeUpdatedAt,
   settingsPath,
+  resultPath,
 }: {
   run: ValidationRun | null;
   requestError: string | null;
   episodeUpdatedAt: string;
   settingsPath: string;
+  resultPath: string;
 }) {
   return (
     <>
@@ -579,12 +583,24 @@ function ValidationStatus({
           {requestError}
         </p>
       )}
-      {run && <RunStatus run={run} episodeUpdatedAt={episodeUpdatedAt} settingsPath={settingsPath} />}
+      {run && (
+        <RunStatus run={run} episodeUpdatedAt={episodeUpdatedAt} settingsPath={settingsPath} resultPath={resultPath} />
+      )}
     </>
   );
 }
 
-function RunStatus({ run, episodeUpdatedAt, settingsPath }: { run: ValidationRun; episodeUpdatedAt: string; settingsPath: string }) {
+function RunStatus({
+  run,
+  episodeUpdatedAt,
+  settingsPath,
+  resultPath,
+}: {
+  run: ValidationRun;
+  episodeUpdatedAt: string;
+  settingsPath: string;
+  resultPath: string;
+}) {
   if (run.status === "queued" || run.status === "running") {
     return (
       <p className="editor-validation" role="status">
@@ -609,6 +625,12 @@ function RunStatus({ run, episodeUpdatedAt, settingsPath }: { run: ValidationRun
         검증 완료{finishedAt && ` · ${finishedAt}`}: 설정과 대조할 서술 {claims}개를 찾았습니다.
         {flags !== undefined &&
           (flags > 0 ? ` 설정과 어긋나 보이는 곳이 ${flags}군데 있습니다.` : " 설정과 어긋나는 곳은 없습니다.")}
+        {flags !== undefined && flags > 0 && (
+          <>
+            {" "}
+            <Link to={resultPath}>검증 결과 보기</Link>
+          </>
+        )}
       </p>
       {characters.length > 0 && (
         <p>
@@ -622,9 +644,7 @@ function RunStatus({ run, episodeUpdatedAt, settingsPath }: { run: ValidationRun
           이 결과 이후 원고가 수정되어 최신 상태가 아닙니다. 다시 검증하려면 검증 실행을 눌러 주세요.
         </p>
       )}
-      <p className="editor-validation-note">
-        지금은 외형과 장소만 대조합니다. 어긋난 서술을 원고와 나란히 보는 검증 결과 화면은 다음 업데이트에서 제공됩니다.
-      </p>
+      <p className="editor-validation-note">지금은 인물의 외형과 장소의 특징만 설정과 대조합니다.</p>
     </div>
   );
 }

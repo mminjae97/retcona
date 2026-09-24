@@ -3,7 +3,8 @@
 Saving (PATCH) never triggers the AI pipeline — that's the separate "run
 validation" step (POST .../validations), which records a run and hands it to
 the CPU worker through the job queue (10.2); the editor then polls the run.
-What the latest run found contradicting the settings is listed by GET .../flags.
+What the latest run found contradicting the settings is listed by GET .../flags,
+and the author acts on each flag with PATCH .../flags/{id} (2.4).
 Editing a `submitted` episode's content flips it back to `draft` (2.2),
 leaving existing validation results in place.
 """
@@ -11,6 +12,7 @@ leaving existing validation results in place.
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
@@ -20,9 +22,11 @@ from sqlalchemy.orm import Session, load_only
 from api.deps import get_owned_novel as _get_owned_novel
 from auth.dependencies import get_current_user
 from infra.queue_client import get_queue_client
+from models.character import Character
 from models.claim import Claim, ContradictionFlag
 from models.db import get_db
 from models.episode import Episode
+from models.location import Location
 from models.user import User
 from models.validation_run import ValidationRun
 
@@ -276,6 +280,8 @@ class FlagPublic(BaseModel):
     subject_id: uuid.UUID | None  # None once the card is deleted
     subject_name: str | None
     claim_text: str
+    # What the manuscript says for the attribute — what "accept" writes to the card
+    value: str | None
 
 
 @router.get("/{novel_id}/episodes/{episode_id}/flags", response_model=list[FlagPublic])
@@ -298,19 +304,94 @@ def list_flags(
         )
         .order_by(ContradictionFlag.confidence.desc(), ContradictionFlag.id)
     )
-    return [
-        FlagPublic(
-            id=flag.id,
-            error_type=flag.error_type,
-            attribute=flag.attribute,
-            confidence=flag.confidence,
-            status=flag.status,
-            evidence_text=flag.evidence_text,
-            reference_text=flag.reference_text,
-            subject_kind=claim.subject_kind,
-            subject_id=claim.subject_id,
-            subject_name=claim.subject_name,
-            claim_text=claim.text,
+    return [_flag_public(flag, claim) for flag, claim in rows]
+
+
+def _flag_public(flag: ContradictionFlag, claim: Claim) -> FlagPublic:
+    return FlagPublic(
+        id=flag.id,
+        error_type=flag.error_type,
+        attribute=flag.attribute,
+        confidence=flag.confidence,
+        status=flag.status,
+        evidence_text=flag.evidence_text,
+        reference_text=flag.reference_text,
+        subject_kind=claim.subject_kind,
+        subject_id=claim.subject_id,
+        subject_name=claim.subject_name,
+        claim_text=claim.text,
+        value=(claim.attributes or {}).get(flag.attribute) if flag.attribute else None,
+    )
+
+
+class FlagAction(BaseModel):
+    # accept: the manuscript is right — its value replaces the card's (7.4:
+    #   changing an existing setting goes through the author, and this is that)
+    # dismiss: a false positive; the flag is closed and the card left as it is
+    # reopen: undoes a dismissal
+    action: Literal["accept", "dismiss", "reopen"]
+
+
+# Which card attribute a flag's attribute lives in, by subject kind.
+_CARD_FIELDS = {"character": (Character, "fixed_attrs"), "location": (Location, "geo_attrs")}
+
+
+@router.patch("/{novel_id}/episodes/{episode_id}/flags/{flag_id}", response_model=FlagPublic)
+def act_on_flag(
+    novel_id: uuid.UUID,
+    episode_id: uuid.UUID,
+    flag_id: uuid.UUID,
+    body: FlagAction,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FlagPublic:
+    # The novel's row lock: accepting writes a setting card, as the settings
+    # screen and validation runs do under the same lock.
+    _get_episode(db, novel_id, episode_id, user, for_update=True)
+    row = db.execute(
+        select(ContradictionFlag, Claim)
+        .join(Claim, Claim.id == ContradictionFlag.claim_id)
+        .where(
+            ContradictionFlag.id == flag_id,
+            ContradictionFlag.novel_id == novel_id,
+            Claim.novel_id == novel_id,
+            Claim.episode_id == episode_id,
         )
-        for flag, claim in rows
-    ]
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Flag not found")
+    flag, claim = row
+
+    if body.action == "reopen":
+        if flag.status != "dismissed":
+            raise HTTPException(status.HTTP_409_CONFLICT, "Only a dismissed flag can be reopened")
+        flag.status = "open"
+    elif flag.status != "open":
+        raise HTTPException(status.HTTP_409_CONFLICT, "The flag has already been handled")
+    elif body.action == "dismiss":
+        flag.status = "dismissed"
+    else:
+        _accept(db, novel_id, flag, claim)
+        flag.status = "accepted"
+    db.commit()
+    return _flag_public(flag, claim)
+
+
+def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Claim) -> None:
+    value = (claim.attributes or {}).get(flag.attribute) if flag.attribute else None
+    fields = _CARD_FIELDS.get(claim.subject_kind or "")
+    if not value or fields is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "The flag has no value to apply")
+    model, attrs_field = fields
+    card = None
+    if claim.subject_id is not None:
+        card = db.scalar(select(model).where(model.id == claim.subject_id, model.novel_id == novel_id))
+    if card is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "The setting card no longer exists")
+    # Reassigned, not mutated: SQLAlchemy doesn't see changes inside a JSONB value.
+    setattr(card, attrs_field, {**(getattr(card, attrs_field) or {}), flag.attribute: value})
+    # The author chose this value: it's theirs now, not an episode's to
+    # replace or clear on a later run (models/character.py).
+    card.attr_sources = {key: record for key, record in (card.attr_sources or {}).items() if key != flag.attribute}
+    # As an edit on the settings screen does (api/settings.py).
+    card.source = "manual"

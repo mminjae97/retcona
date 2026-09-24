@@ -83,3 +83,43 @@ export function requestValidation(novelId: string, episodeId: string): Promise<V
 export async function getLatestValidation(novelId: string, episodeId: string): Promise<ValidationRun | null> {
   return (await apiFetch<ValidationRun | undefined>(`/novels/${novelId}/episodes/${episodeId}/validations/latest`)) ?? null;
 }
+
+// Contradiction flags (2.4): what the latest successful run found
+// contradicting the settings, most confident first.
+export type FlagStatus = "open" | "resolved_by_revalidation" | "accepted" | "dismissed";
+
+export interface Flag {
+  id: string;
+  error_type: "appearance" | "location" | string;
+  // The setting-card key it contradicts (eye_color, features, ...).
+  attribute: string | null;
+  // The model's contradiction probability, 0-1.
+  confidence: number;
+  status: FlagStatus;
+  // The manuscript sentence.
+  evidence_text: string;
+  // The setting's value it contradicts.
+  reference_text: string | null;
+  subject_kind: "character" | "location" | null;
+  // null once the card has been deleted.
+  subject_id: string | null;
+  subject_name: string | null;
+  claim_text: string;
+  // What the manuscript says for the attribute: what "accept" writes to the card.
+  value: string | null;
+}
+
+// accept: the manuscript is right, its value replaces the card's.
+// dismiss: a false positive. reopen: undoes a dismissal.
+export type FlagAction = "accept" | "dismiss" | "reopen";
+
+export function listFlags(novelId: string, episodeId: string): Promise<Flag[]> {
+  return apiFetch<Flag[]>(`/novels/${novelId}/episodes/${episodeId}/flags`);
+}
+
+export function actOnFlag(novelId: string, episodeId: string, flagId: string, action: FlagAction): Promise<Flag> {
+  return apiFetch<Flag>(`/novels/${novelId}/episodes/${episodeId}/flags/${flagId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ action }),
+  });
+}
