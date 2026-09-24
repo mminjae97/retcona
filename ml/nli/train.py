@@ -10,9 +10,10 @@ into one training set:
 contradictions in novel prose). The run evaluates on KLUE-NLI dev as it goes,
 for the record, and saves the model as it is at the end of training to
 --output, loadable by the backend (NLI_MODEL=<that directory, absolute>).
-Its checkpoints are kept only until then. An --output that still has
-checkpoints (an interrupted run) is refused, unless --resume continues that
-run (with the same arguments).
+Its checkpoints are kept only until then. --output must be new or empty, so
+a finished model (e.g. runs/mixed, which the backend loads) is never
+overwritten; --resume instead continues an interrupted run left there (with
+the same arguments).
 """
 
 import argparse
@@ -80,11 +81,14 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true", help="continue an interrupted run in --output")
     args = parser.parse_args()
 
-    has_checkpoints = any(Path(args.output).glob("checkpoint-*"))
-    if has_checkpoints and not args.resume:
-        parser.error(f"{args.output} already has checkpoints: pass --resume to continue that run, or pick another --output")
-    if args.resume and not has_checkpoints:
-        parser.error(f"--resume: {args.output} has no checkpoint to continue from")
+    output = Path(args.output)
+    if args.resume:
+        if not any(output.glob("checkpoint-*")):
+            parser.error(f"--resume: {args.output} has no checkpoint to continue from")
+    elif output.exists() and any(output.iterdir()):
+        # A finished model, or an interrupted run's checkpoints: either way
+        # not something to write over by accident.
+        parser.error(f"{args.output} isn't empty: pick another --output, or pass --resume to continue an interrupted run")
 
     random.seed(args.seed)
     np.random.seed(args.seed)

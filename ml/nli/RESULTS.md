@@ -111,7 +111,7 @@ Chosen (2026-09-24): `mixed` is the backend's model, kept locally in `runs/mixed
 ## Training changes after round 3
 
 - `train.py` saves the model as it is at the end of training instead of the checkpoint with the best KLUE-NLI dev accuracy. That score moved against novel-prose recall in rounds 1–3, so it shouldn't pick the model. `mixed` is unaffected: its best checkpoint was the final one (epoch 1.00: 0.855).
-- An `--output` that already has checkpoints is refused unless `--resume` is given. Before, a re-run silently continued the old run, even with different `--data` or `--init`.
+- `--output` must be new or empty unless `--resume` is given (to continue an interrupted run). Before, a re-run silently continued the old run, even with different `--data` or `--init`, and a finished model folder such as `runs/mixed` could be written over.
 - Checkpoints are deleted once the final model is saved, since they're only needed to resume. `runs/mixed` had two (2.4 GB), which were removed by hand; the model itself (`model.safetensors`, config, tokenizer) is unchanged.
 
 ## Caveat: the novel set picked the model it reports on
