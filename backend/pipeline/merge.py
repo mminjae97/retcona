@@ -15,6 +15,7 @@
   (Only then: a run whose extraction merely missed it this time keeps it.)
 """
 
+import re
 import uuid
 
 from sqlalchemy import Text, cast, delete, or_, select
@@ -45,10 +46,21 @@ def merge_and_dedupe(flags_by_module: list[list[Flag]]) -> list[Flag]:
     return sorted(best.values(), key=lambda flag: flag.confidence, reverse=True)
 
 
-def _still_in(record: dict, content: str) -> bool:
-    # Whitespace-insensitive: a rewrapped line is still the same sentence.
-    evidence = record.get("evidence")
-    return bool(evidence) and normalize_name(evidence) in normalize_name(content)
+# What's compared of a sentence: letters and digits only, so a copy that
+# differs in spacing, quotes or punctuation is still the same sentence.
+_NOT_WORD = re.compile(r"[\W_]+")
+
+
+def _words(text: str) -> str:
+    return _NOT_WORD.sub("", normalize_name(text))
+
+
+def _gone_from(record: dict, content: str) -> bool:
+    """Whether the manuscript sentence a value was taken from is no longer in
+    the episode. Without a recorded sentence there's no telling, and the value
+    is kept."""
+    evidence = _words(record.get("evidence") or "")
+    return bool(evidence) and evidence not in _words(content)
 
 
 def apply_new_information(
@@ -70,14 +82,15 @@ def apply_new_information(
     db.flush()
 
     # (kind, id) -> {key: (value, evidence)}, first mention in the episode wins
-    card_values: dict[tuple[str, uuid.UUID], dict[str, tuple[str, str]]] = {}
+    card_values: dict[tuple[str, uuid.UUID], dict[str, tuple[str, str | None]]] = {}
     states: dict[uuid.UUID, dict[str, str]] = {}
     for index, (claim, subject_id) in enumerate(zip(claims, subject_ids, strict=True)):
         card_keys = FIXED_ATTR_KEYS if claim.subject_kind == "character" else GEO_ATTR_KEYS
         for key, value in claim.attributes.items():
             if key in card_keys and (index, key) not in flagged:
-                evidence = claim.evidence or claim.text
-                card_values.setdefault((claim.subject_kind, subject_id), {}).setdefault(key, (value, evidence))
+                # The sentence as the manuscript has it — not the claim's
+                # restatement, which the manuscript never contains.
+                card_values.setdefault((claim.subject_kind, subject_id), {}).setdefault(key, (value, claim.evidence))
             elif claim.subject_kind == "character" and key in MUTABLE_ATTR_KEYS:
                 states.setdefault(subject_id, {}).setdefault(key, value)
 
@@ -96,7 +109,7 @@ def apply_new_information(
             from_episodes = source_episodes(sources)
             values = card_values.get((kind, card.id), {})
             for key, from_episode in from_episodes.items():
-                if from_episode == source and key not in values and not _still_in(sources[key], content):
+                if from_episode == source and key not in values and _gone_from(sources[key], content):
                     attrs.pop(key, None)
                     del sources[key]
             for key, (value, evidence) in values.items():

@@ -252,8 +252,8 @@ def _apply(character: Character, body: CharacterInput) -> None:
     # episode's it was filled in from (models/character.py).
     previous = character.fixed_attrs or {}
     character.attr_sources = {
-        key: episode_id
-        for key, episode_id in (character.attr_sources or {}).items()
+        key: record
+        for key, record in (character.attr_sources or {}).items()
         if fixed_attrs.get(key) == previous.get(key)
     }
     character.name = body.name
