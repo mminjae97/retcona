@@ -5,16 +5,23 @@ The judgment modules in chapter 7 only call this interface and don't know the ac
 """
 
 import functools
+import logging
 import os
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 
-# A klue-roberta model fine-tuned on KLUE-NLI (chapter 5's klue-roberta +
-# KorNLI line). Downloaded from Hugging Face on first use (~440 MB), then
-# read from the local cache. NLI_MODEL points at another checkpoint or a
-# local directory — e.g. one re-finetuned on novel prose (chapter 5).
-DEFAULT_NLI_MODEL = "Huffon/klue-roberta-base-nli"
+logger = logging.getLogger(__name__)
+
+# The NLI model is the one trained in ml/nli (klue/roberta-base on KorNLI +
+# KLUE-NLI, "mixed" in ml/nli/RESULTS.md), which is kept on the machine that
+# trained it for now: this directory, or wherever NLI_MODEL points (a local
+# directory or a Hugging Face id). Without it, the worker falls back to a
+# public checkpoint (klue-roberta on KLUE-NLI, downloaded on first use,
+# ~440 MB) that misses about half the contradictions in novel prose.
+LOCAL_NLI_MODEL = Path(__file__).resolve().parents[2] / "ml" / "nli" / "runs" / "mixed"
+FALLBACK_NLI_MODEL = "Huffon/klue-roberta-base-nli"
 # Pairs per forward pass: bounds memory on a long episode's many claims.
 _NLI_BATCH_SIZE = 16
 _NLI_MAX_TOKENS = 256
@@ -30,8 +37,10 @@ class NLIScores:
 
 
 class InferenceClient(ABC):
-    def load(self) -> None:
-        """Loads the models ahead of the first call, where that means anything."""
+    def load(self) -> str:
+        """Loads the models ahead of the first call, where that means anything,
+        and says which they are (for the worker's startup log)."""
+        return type(self).__name__
 
     @abstractmethod
     def rerank(self, query: str, candidates: list[str]) -> list[float]:
@@ -71,8 +80,9 @@ class CPUInferenceClient(InferenceClient):
                 self._nli = (tokenizer, model, label_index)
             return self._nli
 
-    def load(self) -> None:
+    def load(self) -> str:
         self._load_nli()
+        return f"NLI {self._nli_model_name}"
 
     def rerank(self, query: str, candidates: list[str]) -> list[float]:
         raise NotImplementedError
@@ -120,9 +130,26 @@ class GPUInferenceClient(InferenceClient):
         raise NotImplementedError
 
 
+def _nli_model() -> str:
+    # A directory is best given as an absolute path: the worker runs from
+    # backend/, and a relative one that isn't found there reads as a Hugging
+    # Face id.
+    if configured := os.environ.get("NLI_MODEL", "").strip():
+        return configured
+    if (LOCAL_NLI_MODEL / "config.json").is_file():
+        return str(LOCAL_NLI_MODEL)
+    logger.warning(
+        "No trained NLI model at %s and NLI_MODEL isn't set; using %s, which misses more contradictions "
+        "(train one with ml/nli, see its README)",
+        LOCAL_NLI_MODEL,
+        FALLBACK_NLI_MODEL,
+    )
+    return FALLBACK_NLI_MODEL
+
+
 @functools.cache
 def get_inference_client() -> InferenceClient:
     # One per process: the CPU client holds the loaded model.
     if os.environ.get("INFERENCE_BACKEND", "cpu") == "gpu":
         return GPUInferenceClient()
-    return CPUInferenceClient(nli_model=os.environ.get("NLI_MODEL") or DEFAULT_NLI_MODEL)
+    return CPUInferenceClient(nli_model=_nli_model())

@@ -45,13 +45,14 @@ def run() -> None:
     # The same startup check as the API server's, minus the nickname column
     # (see workers/purge.py). Logging needs no setup: workers/__init__.py did it.
     check_database(nickname_column=False)
-    # The NLI model now, not inside the first job: on a fresh install that's
-    # a ~440 MB download, and runs queued behind it would wait on it (and
-    # could be given up on, api/episodes.py). If it fails, the worker still
-    # starts; the first job that needs it tries again.
-    logger.info("Loading the NLI model (downloaded on first use)")
+    # The NLI model now, not inside the first job: loading takes a while (a
+    # ~440 MB download, for a Hugging Face checkpoint not cached yet), and runs
+    # queued behind it would wait on it (and could be given up on,
+    # api/episodes.py). If it fails, the worker still starts; the first job
+    # that needs it tries again.
+    logger.info("Loading the NLI model")
     try:
-        load_models()
+        logger.info("Loaded %s", load_models())
     except Exception:
         logger.exception("Could not load the NLI model; runs will try again when they need it")
     stop = threading.Event()
