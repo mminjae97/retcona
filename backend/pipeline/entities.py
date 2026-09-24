@@ -7,7 +7,8 @@ Embedding similarity (chapter 5) isn't used yet.
 
 A subject with no match becomes a new card, source=auto_detected, its initial
 attributes taken from what this episode's claims say about it (the first
-mention of each key wins). Only new cards get attributes this way: what a
+mention of each key wins), each recorded in attr_sources as coming from this
+episode (models/character.py). Only new cards get attributes this way: what a
 claim says about an existing card is for the judgment modules to compare, not
 to write over it (7.4: changes to existing settings go through the author).
 
@@ -55,7 +56,9 @@ def _initial_attrs(claims: list[ExtractedClaim], keys: tuple[str, ...]) -> dict[
     return attrs
 
 
-def match_and_register(db: Session, novel_id: uuid.UUID, claims: list[ExtractedClaim]) -> Registration:
+def match_and_register(
+    db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, claims: list[ExtractedClaim]
+) -> Registration:
     registration = Registration()
     # Oldest first, so where two locations share a name (nothing stops the
     # author from making both), claims keep going to the same, first one.
@@ -79,12 +82,14 @@ def match_and_register(db: Session, novel_id: uuid.UUID, claims: list[ExtractedC
         name = subject_claims[0].subject
         entity_id = uuid.uuid4()
         if kind == "character":
+            fixed_attrs = _initial_attrs(subject_claims, FIXED_ATTR_KEYS)
             entity = Character(
                 id=entity_id,
                 novel_id=novel_id,
                 name=name,
                 source="auto_detected",
-                fixed_attrs=_initial_attrs(subject_claims, FIXED_ATTR_KEYS),
+                fixed_attrs=fixed_attrs,
+                attr_sources=dict.fromkeys(fixed_attrs, str(episode_id)),
                 # A new card has no earlier state to contradict, so its
                 # current state starts from this episode too.
                 mutable_attrs=_initial_attrs(subject_claims, MUTABLE_ATTR_KEYS),
@@ -92,12 +97,14 @@ def match_and_register(db: Session, novel_id: uuid.UUID, claims: list[ExtractedC
             )
             registration.new_characters.append(name)
         else:
+            geo_attrs = _initial_attrs(subject_claims, GEO_ATTR_KEYS)
             entity = Location(
                 id=entity_id,
                 novel_id=novel_id,
                 name=name,
                 source="auto_detected",
-                geo_attrs=_initial_attrs(subject_claims, GEO_ATTR_KEYS),
+                geo_attrs=geo_attrs,
+                attr_sources=dict.fromkeys(geo_attrs, str(episode_id)),
             )
             registration.new_locations.append(name)
         db.add(entity)

@@ -247,8 +247,17 @@ def _reject_duplicate_name(
 
 
 def _apply(character: Character, body: CharacterInput) -> None:
+    fixed_attrs = body.fixed_attrs.stored()
+    # A value the author changed or cleared is theirs now, no longer the
+    # episode's it was filled in from (models/character.py).
+    previous = character.fixed_attrs or {}
+    character.attr_sources = {
+        key: episode_id
+        for key, episode_id in (character.attr_sources or {}).items()
+        if fixed_attrs.get(key) == previous.get(key)
+    }
     character.name = body.name
-    character.fixed_attrs = body.fixed_attrs.stored()
+    character.fixed_attrs = fixed_attrs
     character.mutable_attrs = body.mutable_attrs.stored()
     character.personality = body.personality.stored()
 

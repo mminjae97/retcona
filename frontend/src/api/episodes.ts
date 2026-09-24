@@ -46,6 +46,7 @@ export type ValidationRunError =
   | "empty_manuscript"
   | "llm_failed"
   | "bad_llm_response"
+  | "inference_failed"
   | "internal";
 
 export interface ValidationRunSummary {
@@ -53,6 +54,8 @@ export interface ValidationRunSummary {
   dropped_claims?: number;
   new_characters?: string[];
   new_locations?: string[];
+  // How many claims contradict the settings (appearance, location).
+  flags?: number;
 }
 
 export interface ValidationRun {

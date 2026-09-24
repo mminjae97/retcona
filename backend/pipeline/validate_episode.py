@@ -1,8 +1,9 @@
 """One "run validation" job on an episode (design doc 2.2, 7.1), as the CPU worker runs it.
 
-Today this is the pipeline's first half: claim extraction (7.1) and entity
-matching / auto-registration (7.4). The context bundle, the judgment modules
-and the merge (stage 2 on) plug in after the claims are stored.
+The pipeline (7.1): claim extraction, then the context bundle, the judgment
+modules (appearance and location so far, pipeline/judges.py) and the merge,
+then entity matching / auto-registration and applying what the episode adds
+to the settings (7.4).
 
 The run row (models/validation_run.py) carries the job through
 queued -> running -> succeeded | failed. Steps:
@@ -11,14 +12,19 @@ queued -> running -> succeeded | failed. Steps:
 2. Read the episode and the novel's known names, in a short transaction.
 3. Call the model with no transaction open: it can take a while, and holding
    the novel's row lock through it would block the author's saves.
-4. Write everything in one transaction under the novel's row lock: replace
-   this episode's earlier claims, match or register entities, store the new
-   claims, finish the run. A run the API gave up on in the meantime
-   (api/episodes.py, abandoned) writes nothing.
+4. Read the setting cards the claims are about (the context bundle), and
+   judge the claims against them — NLI, also with no transaction open.
+5. Write everything in one transaction under the novel's row lock: replace
+   this episode's earlier claims and flags, match or register entities,
+   store the new claims and their flags, fill in what the episode adds to the
+   settings, finish the run. A run the API gave up on in the meantime
+   (api/episodes.py, abandoned) writes nothing. A card the author edited
+   between steps 4 and 5 is judged as it was at step 4; its new values are
+   kept either way (only empty attributes are filled in).
 
 A failure is recorded on the run as an error code the editor turns into a
 message: episode_missing, empty_manuscript, llm_failed, bad_llm_response,
-internal.
+inference_failed, internal.
 """
 
 import logging
@@ -35,8 +41,11 @@ from models.episode import Episode
 from models.location import Location
 from models.novel import Novel
 from models.validation_run import ValidationRun
+from pipeline.context_bundle import get_context_bundle
 from pipeline.entities import match_and_register
 from pipeline.extract_claims import Extraction, ExtractionError, extract_claims
+from pipeline.judges import Flag, judge_appearance, judge_location
+from pipeline.merge import apply_new_information, merge_and_dedupe
 
 logger = logging.getLogger(__name__)
 
@@ -95,12 +104,26 @@ def _read_input(novel_id: uuid.UUID, episode_id: uuid.UUID) -> tuple[str, dateti
         return row.content, row.updated_at, characters, locations
 
 
+def _judge(novel_id: uuid.UUID, episode_id: uuid.UUID, extraction: Extraction) -> list[Flag]:
+    with SessionLocal() as db:
+        bundle = get_context_bundle(db, novel_id, episode_id, extraction.claims)
+    try:
+        return merge_and_dedupe(
+            [judge_appearance(extraction.claims, bundle), judge_location(extraction.claims, bundle)]
+        )
+    except Exception as exc:
+        # Loading the NLI model (a download on first use) or running it.
+        logger.exception("Novel %s: judging the claims failed", novel_id)
+        raise RunFailed("inference_failed") from exc
+
+
 def _store(
     novel_id: uuid.UUID,
     run_id: uuid.UUID,
     episode_id: uuid.UUID,
     content_updated_at: datetime,
     extraction: Extraction,
+    flags: list[Flag],
 ) -> None:
     with SessionLocal() as db:
         _lock_novel(db, novel_id)
@@ -110,7 +133,10 @@ def _store(
         if run is None or run.status != "running":
             logger.warning("Validation run %s was given up on before it finished; discarding its results", run_id)
             return
-        if db.scalar(select(Episode.id).where(Episode.id == episode_id, Episode.novel_id == novel_id)) is None:
+        episode_index = db.scalar(
+            select(Episode.episode_index).where(Episode.id == episode_id, Episode.novel_id == novel_id)
+        )
+        if episode_index is None:
             raise RunFailed("episode_missing")
 
         # A new run replaces the episode's earlier claims (and their flags):
@@ -123,21 +149,38 @@ def _store(
         )
         db.execute(delete(Claim).where(Claim.novel_id == novel_id, Claim.episode_id == episode_id))
 
-        registration = match_and_register(db, novel_id, extraction.claims)
+        registration = match_and_register(db, novel_id, episode_id, extraction.claims)
+        subject_ids = [registration.subject_id(claim) for claim in extraction.claims]
+        claim_ids = [uuid.uuid4() for _ in extraction.claims]
         db.add_all(
             Claim(
+                id=claim_id,
                 novel_id=novel_id,
                 episode_id=episode_id,
                 text=claim.text,
                 claim_type=claim.claim_type,
                 subject_kind=claim.subject_kind,
-                subject_id=registration.subject_id(claim),
+                subject_id=subject_id,
                 subject_name=claim.subject,
                 evidence_text=claim.evidence,
                 attributes=claim.attributes,
             )
-            for claim in extraction.claims
+            for claim_id, claim, subject_id in zip(claim_ids, extraction.claims, subject_ids, strict=True)
         )
+        db.add_all(
+            ContradictionFlag(
+                novel_id=novel_id,
+                claim_id=claim_ids[flag.claim_index],
+                error_type=flag.error_type,
+                attribute=flag.attribute,
+                confidence=flag.confidence,
+                evidence_text=flag.evidence_text,
+                reference_text=flag.reference_text,
+                status="open",
+            )
+            for flag in flags
+        )
+        apply_new_information(db, novel_id, episode_id, episode_index, extraction.claims, subject_ids, flags)
 
         run.status = "succeeded"
         run.finished_at = func.now()
@@ -147,6 +190,7 @@ def _store(
             "dropped_claims": extraction.dropped,
             "new_characters": registration.new_characters,
             "new_locations": registration.new_locations,
+            "flags": len(flags),
         }
         # "submitted" means validated (2.2) — only if what was validated is
         # still what's saved (a save during the run already made it a draft).
@@ -179,7 +223,8 @@ def validate_episode(novel_id: uuid.UUID, run_id: uuid.UUID) -> None:
         except Exception as exc:
             logger.exception("Validation run %s: the model call failed", run_id)
             raise RunFailed("llm_failed") from exc
-        _store(novel_id, run_id, episode_id, content_updated_at, extraction)
+        flags = _judge(novel_id, episode_id, extraction)
+        _store(novel_id, run_id, episode_id, content_updated_at, extraction, flags)
     except RunFailed as exc:
         _finish_failed(novel_id, run_id, exc.code)
     except Exception:

@@ -4,6 +4,11 @@
 - Fixed attributes: name, age, eye color, hair color, height, scars, origin
 - Mutable attributes: hairstyle, outfit, injury/health status, belongings
 - personality: personality/speech patterns (for OOC judgment, 7.2)
+- attr_sources: which episode each fixed attribute was filled in from, for the
+  ones validation filled in (7.4) rather than the author: {key: episode id}.
+  Validating that episode again after editing it compares against its own
+  earlier wording, so that value is replaced, not flagged. A key leaves this
+  map once the author changes its value on the settings screen.
 """
 
 import uuid
@@ -32,6 +37,7 @@ class Character(Base, NovelScopedMixin, TimestampMixin):
     fixed_attrs: Mapped[dict] = mapped_column(JSONB, default=dict)  # age, eye color, hair color, height, scars, origin, etc.
     mutable_attrs: Mapped[dict] = mapped_column(JSONB, default=dict)  # hairstyle, outfit, injury/health status, belongings
     personality: Mapped[dict] = mapped_column(JSONB, default=dict)  # personality keywords, speech traits, goals/values
+    attr_sources: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}", nullable=False)
 
 
 class CharacterStateHistory(Base, NovelScopedMixin, TimestampMixin):

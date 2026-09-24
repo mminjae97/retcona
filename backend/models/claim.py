@@ -10,7 +10,14 @@ claims: verification-target claim units extracted from the manuscript by the ext
     basis on the result screen, 2.4)
   - attributes: what the claim says as setting-card keys (e.g. {"eye_color": ...}),
     where it maps onto one — what a new card's initial attributes come from (7.4)
-contradiction_flags:
+contradiction_flags: a claim that contradicts the novel's settings (7.2)
+  - error_type: the judgment module that raised it — appearance | behavior |
+    location | spacetime, as claim_type
+  - attribute: the setting-card key the claim contradicts (e.g. "eye_color")
+  - evidence_text: the manuscript sentence that contradicts it
+  - reference_text: the setting's value it contradicts, as the card has it
+  - confidence: the judgment's contradiction probability (0-1); the result
+    screen sorts by it (2.5)
   - status: open | resolved_by_revalidation | accepted | dismissed (2.4, 7.5)
 """
 
@@ -43,8 +50,10 @@ class ContradictionFlag(Base, NovelScopedMixin, TimestampMixin):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     claim_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("claims.id"), nullable=False)
-    error_type: Mapped[str] = mapped_column(String, nullable=False)  # appearance mismatch | OOC | location error | spacetime contradiction
+    error_type: Mapped[str] = mapped_column(String, nullable=False)  # appearance | behavior (OOC) | location | spacetime
+    attribute: Mapped[str | None] = mapped_column(String)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     evidence_text: Mapped[str] = mapped_column(Text, nullable=False)
+    reference_text: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String, default="open")
     # open | resolved_by_revalidation | accepted | dismissed
