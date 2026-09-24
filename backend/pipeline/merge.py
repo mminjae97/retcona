@@ -9,12 +9,15 @@
   episode. An attribute the card already has is never changed here, flagged
   or not: changing an existing setting is the author's call (2.4). The one
   exception is a value filled in from this same episode by an earlier run:
-  that's the episode's own earlier wording, and the new wording replaces it.
+  that's the episode's own earlier wording, and the new wording replaces it —
+  or, when the episode no longer says anything about that attribute, the
+  value is cleared, so text the author removed isn't held against other
+  episodes.
 """
 
 import uuid
 
-from sqlalchemy import delete, select
+from sqlalchemy import Text, cast, delete, or_, select
 from sqlalchemy.orm import Session
 
 from models.character import (
@@ -70,12 +73,21 @@ def apply_new_information(
 
     for model, attrs_field, kind in ((Character, "fixed_attrs", "character"), (Location, "geo_attrs", "location")):
         ids = [subject_id for (card_kind, subject_id) in card_values if card_kind == kind]
-        if not ids:
-            continue
-        for card in db.scalars(select(model).where(model.novel_id == novel_id, model.id.in_(ids))):
+        # The cards this episode says something about, and those with a value
+        # an earlier run of it filled in (its id among attr_sources' values).
+        for card in db.scalars(
+            select(model).where(
+                model.novel_id == novel_id,
+                or_(model.id.in_(ids), cast(model.attr_sources, Text).contains(source)),
+            )
+        ):
             attrs = dict(getattr(card, attrs_field) or {})
             sources = dict(card.attr_sources or {})
-            for key, value in card_values[(kind, card.id)].items():
+            values = card_values.get((kind, card.id), {})
+            for key in [key for key, from_episode in sources.items() if from_episode == source and key not in values]:
+                attrs.pop(key, None)
+                del sources[key]
+            for key, value in values.items():
                 # Empty, or filled in from this same episode's earlier wording.
                 if not attrs.get(key) or sources.get(key) == source:
                     attrs[key] = value

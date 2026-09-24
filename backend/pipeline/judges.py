@@ -15,9 +15,13 @@ sentence (premise) and the manuscript sentence the claim came from
 (hypothesis): the sentence as written, rather than the claim's value in the
 same template, because the model reads two same-shaped sentences with
 different values ("17살" / "열일곱 살") as contradicting, however alike they
-mean. A sentence that doesn't name the subject ("그의 눈이 붉게 빛났다") reads
-to the model as about someone else, so then the claim's own restatement,
-which names it (ai/llm.py), is the hypothesis instead. A pair is only sent to
+mean. The claim's own restatement, which names the subject (ai/llm.py), is
+the hypothesis instead when the sentence doesn't name the subject ("그의 눈이
+붉게 빛났다" reads to the model as about someone else), or names another
+character/location the episode makes claims about too ("레온의 눈은 파랬고,
+카엘의 눈은 붉게 빛났다" would hold Kael's eyes against Leon's card) — only
+then, since a restatement shaped like the premise gets synonyms ("하늘빛" /
+"푸른색") read as contradicting. A pair is only sent to
 the model when the card has a value from somewhere other than this episode
 and the claim's value doesn't simply repeat it.
 
@@ -100,6 +104,7 @@ def _premise(card: Card, attribute: str, value: str) -> str:
 
 def _pairs(claims: list[ExtractedClaim], bundle: ContextBundle, kind: str, keys: tuple[str, ...]) -> list[_Pair]:
     this_episode = str(bundle.episode_id)
+    subjects = {normalize_name(claim.subject) for claim in claims if claim.subject_kind == kind}
     pairs = []
     for index, claim in enumerate(claims):
         if claim.subject_kind != kind:
@@ -108,8 +113,11 @@ def _pairs(claims: list[ExtractedClaim], bundle: ContextBundle, kind: str, keys:
         if card is None:
             continue  # a new entity: nothing to contradict yet
         evidence = claim.evidence or claim.text
-        names_subject = normalize_name(card.name) in normalize_name(evidence)
-        hypothesis = evidence if names_subject else claim.text
+        subject = normalize_name(claim.subject)
+        named = {name for name in subjects if name in normalize_name(evidence)}
+        # One name inside the other ("레온" / "레온하트") isn't a second subject.
+        others = {name for name in named if subject not in name and name not in subject}
+        hypothesis = evidence if subject in named and not others else claim.text
         for attribute, value in claim.attributes.items():
             setting = card.attrs.get(attribute)
             if attribute not in keys or not setting or card.sources.get(attribute) == this_episode:
