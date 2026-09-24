@@ -1,0 +1,150 @@
+{"premise": "레온의 눈 색깔은 푸른색이다.", "hypothesis": "레온의 붉은 눈동자가 어둠 속에서 번뜩였다.", "label": "contradiction", "category": "eye_color/contradiction"}
+{"premise": "레온의 눈 색깔은 푸른색이다.", "hypothesis": "레온은 검은 눈으로 그녀를 가만히 노려보았다.", "label": "contradiction", "category": "eye_color/contradiction"}
+{"premise": "레온의 눈 색깔은 푸른색이다.", "hypothesis": "황금빛으로 물든 레온의 눈이 천천히 감겼다.", "label": "contradiction", "category": "eye_color/contradiction"}
+{"premise": "레온의 눈 색깔은 푸른색이다.", "hypothesis": "레온의 하늘빛 눈동자가 잘게 흔들렸다.", "label": "neutral", "category": "eye_color/paraphrase"}
+{"premise": "레온의 눈 색깔은 푸른색이다.", "hypothesis": "레온은 바다처럼 파란 눈을 가늘게 떴다.", "label": "neutral", "category": "eye_color/paraphrase"}
+{"premise": "레온의 눈 색깔은 푸른색이다.", "hypothesis": "레온의 눈은 푸르렀다.", "label": "entailment", "category": "eye_color/paraphrase"}
+{"premise": "레온의 눈 색깔은 푸른색이다.", "hypothesis": "레온의 눈동자는 벽안이었다.", "label": "entailment", "category": "eye_color/paraphrase"}
+{"premise": "레온의 눈 색깔은 푸른색이다.", "hypothesis": "레온은 눈을 비비며 하품을 했다.", "label": "neutral", "category": "eye_color/unrelated"}
+{"premise": "레온의 눈 색깔은 푸른색이다.", "hypothesis": "레온의 눈은 파랬고, 카엘의 눈은 붉게 빛났다.", "label": "neutral", "category": "eye_color/other-subject"}
+{"premise": "세라의 눈 색깔은 갈색이다.", "hypothesis": "세라는 초록색 눈을 동그랗게 떴다.", "label": "contradiction", "category": "eye_color/contradiction"}
+{"premise": "세라의 눈 색깔은 갈색이다.", "hypothesis": "세라의 밤색 눈동자에 눈물이 고였다.", "label": "neutral", "category": "eye_color/paraphrase"}
+{"premise": "세라의 눈 색깔은 갈색이다.", "hypothesis": "세라는 눈을 감은 채 한참 동안 말이 없었다.", "label": "neutral", "category": "eye_color/unrelated"}
+{"premise": "레온의 나이는 17살이다.", "hypothesis": "올해로 스무 살이 된 레온은 성인식을 치렀다.", "label": "contradiction", "category": "age/contradiction"}
+{"premise": "레온의 나이는 17살이다.", "hypothesis": "서른을 훌쩍 넘긴 레온의 얼굴에는 피로가 가득했다.", "label": "contradiction", "category": "age/contradiction"}
+{"premise": "레온의 나이는 17살이다.", "hypothesis": "레온은 열두 살 어린아이에 불과했다.", "label": "contradiction", "category": "age/contradiction"}
+{"premise": "레온의 나이는 17살이다.", "hypothesis": "열일곱 살의 레온은 아직 어렸다.", "label": "neutral", "category": "age/paraphrase"}
+{"premise": "레온의 나이는 17살이다.", "hypothesis": "레온은 열일곱이었다.", "label": "entailment", "category": "age/paraphrase"}
+{"premise": "레온의 나이는 17살이다.", "hypothesis": "레온은 아직 성인이 되지 않은 소년이었다.", "label": "entailment", "category": "age/paraphrase"}
+{"premise": "레온의 나이는 17살이다.", "hypothesis": "레온은 나이에 비해 어른스러웠다.", "label": "neutral", "category": "age/unrelated"}
+{"premise": "카엘의 나이는 서른두 살이다.", "hypothesis": "갓 열여덟이 된 카엘은 기사 서임식을 기다렸다.", "label": "contradiction", "category": "age/contradiction"}
+{"premise": "카엘의 나이는 서른두 살이다.", "hypothesis": "삼십 대 초반의 카엘은 노련한 기사였다.", "label": "neutral", "category": "age/paraphrase"}
+{"premise": "카엘의 나이는 서른두 살이다.", "hypothesis": "카엘은 자신의 나이를 한 번도 밝힌 적이 없었다.", "label": "neutral", "category": "age/unrelated"}
+{"premise": "레온의 머리색은 은발이다.", "hypothesis": "레온의 검은 머리카락이 바람에 흩날렸다.", "label": "contradiction", "category": "hair_color/contradiction"}
+{"premise": "레온의 머리색은 은발이다.", "hypothesis": "레온은 붉은 머리칼을 거칠게 쓸어 넘겼다.", "label": "contradiction", "category": "hair_color/contradiction"}
+{"premise": "레온의 머리색은 은발이다.", "hypothesis": "레온은 금발을 쓸어 넘겼다.", "label": "contradiction", "category": "hair_color/contradiction"}
+{"premise": "레온의 머리색은 은발이다.", "hypothesis": "레온의 은빛 머리카락이 달빛에 반짝였다.", "label": "neutral", "category": "hair_color/paraphrase"}
+{"premise": "레온의 머리색은 은발이다.", "hypothesis": "레온의 머리카락은 은색이었다.", "label": "entailment", "category": "hair_color/paraphrase"}
+{"premise": "레온의 머리색은 은발이다.", "hypothesis": "레온은 머리를 짧게 자르기로 했다.", "label": "neutral", "category": "hair_color/unrelated"}
+{"premise": "레온의 머리색은 은발이다.", "hypothesis": "은발의 레온 옆에서 세라의 흑발이 유난히 짙어 보였다.", "label": "neutral", "category": "hair_color/other-subject"}
+{"premise": "세라의 머리색은 흑발이다.", "hypothesis": "세라의 금빛 머리카락이 햇살 아래 빛났다.", "label": "contradiction", "category": "hair_color/contradiction"}
+{"premise": "세라의 머리색은 흑발이다.", "hypothesis": "세라는 칠흑 같은 머리를 하나로 묶었다.", "label": "neutral", "category": "hair_color/paraphrase"}
+{"premise": "세라의 머리색은 흑발이다.", "hypothesis": "세라의 머리카락은 까맸다.", "label": "entailment", "category": "hair_color/paraphrase"}
+{"premise": "레온의 신장은 190cm의 장신이다.", "hypothesis": "작은 키의 레온은 발돋움을 해야 선반에 손이 닿았다.", "label": "contradiction", "category": "height/contradiction"}
+{"premise": "레온의 신장은 190cm의 장신이다.", "hypothesis": "레온은 또래보다 한 뼘은 작았다.", "label": "contradiction", "category": "height/contradiction"}
+{"premise": "레온의 신장은 190cm의 장신이다.", "hypothesis": "레온은 문틀에 머리가 닿지 않도록 몸을 숙였다.", "label": "neutral", "category": "height/paraphrase"}
+{"premise": "레온의 신장은 190cm의 장신이다.", "hypothesis": "레온은 키가 컸다.", "label": "entailment", "category": "height/paraphrase"}
+{"premise": "레온의 신장은 190cm의 장신이다.", "hypothesis": "레온은 계단을 두 칸씩 뛰어올랐다.", "label": "neutral", "category": "height/unrelated"}
+{"premise": "세라의 신장은 150cm 정도로 작다.", "hypothesis": "세라는 누구보다 키가 커서 멀리서도 눈에 띄었다.", "label": "contradiction", "category": "height/contradiction"}
+{"premise": "세라의 신장은 150cm 정도로 작다.", "hypothesis": "자그마한 세라는 기사들 사이에 파묻혀 보이지 않았다.", "label": "neutral", "category": "height/paraphrase"}
+{"premise": "레온의 흉터는 왼쪽 뺨의 긴 흉터이다.", "hypothesis": "레온의 오른쪽 뺨에 난 흉터가 드러났다.", "label": "contradiction", "category": "scars/contradiction"}
+{"premise": "레온의 흉터는 왼쪽 뺨의 긴 흉터이다.", "hypothesis": "레온의 매끈한 얼굴에는 흉터 하나 없었다.", "label": "contradiction", "category": "scars/contradiction"}
+{"premise": "레온의 흉터는 왼쪽 뺨의 긴 흉터이다.", "hypothesis": "레온의 왼뺨을 가로지르는 흉터가 드러났다.", "label": "neutral", "category": "scars/paraphrase"}
+{"premise": "레온의 흉터는 왼쪽 뺨의 긴 흉터이다.", "hypothesis": "레온의 왼쪽 볼에는 길게 그어진 상처 자국이 있었다.", "label": "entailment", "category": "scars/paraphrase"}
+{"premise": "레온의 흉터는 왼쪽 뺨의 긴 흉터이다.", "hypothesis": "레온은 흉터가 보이지 않게 두건을 깊게 눌러썼다.", "label": "neutral", "category": "scars/unrelated"}
+{"premise": "카엘의 흉터는 등에 난 화상 자국이다.", "hypothesis": "카엘의 등은 흉터 하나 없이 깨끗했다.", "label": "contradiction", "category": "scars/contradiction"}
+{"premise": "카엘의 흉터는 등에 난 화상 자국이다.", "hypothesis": "카엘이 셔츠를 벗자 등에 번진 오래된 화상 흉터가 보였다.", "label": "neutral", "category": "scars/paraphrase"}
+{"premise": "레온의 출신은 북부 설원이다.", "hypothesis": "남부 항구 도시에서 태어난 레온은 바다를 그리워했다.", "label": "contradiction", "category": "origin/contradiction"}
+{"premise": "레온의 출신은 북부 설원이다.", "hypothesis": "사막의 유목민 부족에서 자란 레온은 눈을 처음 보았다.", "label": "contradiction", "category": "origin/contradiction"}
+{"premise": "레온의 출신은 북부 설원이다.", "hypothesis": "북부 출신인 레온은 추위에 강했다.", "label": "neutral", "category": "origin/paraphrase"}
+{"premise": "레온의 출신은 북부 설원이다.", "hypothesis": "레온은 눈 덮인 북쪽 땅에서 태어났다.", "label": "entailment", "category": "origin/paraphrase"}
+{"premise": "레온의 출신은 북부 설원이다.", "hypothesis": "레온은 고향 이야기를 꺼내지 않았다.", "label": "neutral", "category": "origin/unrelated"}
+{"premise": "세라의 출신은 아스텔 왕국의 수도이다.", "hypothesis": "변방의 작은 어촌에서 나고 자란 세라는 수도를 동경했다.", "label": "contradiction", "category": "origin/contradiction"}
+{"premise": "세라의 출신은 아스텔 왕국의 수도이다.", "hypothesis": "왕도에서 태어난 세라는 귀족들의 예법에 익숙했다.", "label": "neutral", "category": "origin/paraphrase"}
+{"premise": "세라의 출신은 아스텔 왕국의 수도이다.", "hypothesis": "세라의 출신은 캐나다이다.", "label": "contradiction", "category": "origin/contradiction"}
+{"premise": "검은 숲은 사시사철 눈이 쌓인 침엽수림이다.", "hypothesis": "검은 숲은 뜨거운 모래바람이 부는 사막이었다.", "label": "contradiction", "category": "features/contradiction"}
+{"premise": "검은 숲은 사시사철 눈이 쌓인 침엽수림이다.", "hypothesis": "한여름의 검은 숲에는 눈 한 송이 남아 있지 않았다.", "label": "contradiction", "category": "features/contradiction"}
+{"premise": "검은 숲은 사시사철 눈이 쌓인 침엽수림이다.", "hypothesis": "검은 숲의 활엽수들이 붉게 물들어 낙엽을 떨구었다.", "label": "contradiction", "category": "features/contradiction"}
+{"premise": "검은 숲은 사시사철 눈이 쌓인 침엽수림이다.", "hypothesis": "눈 덮인 검은 숲의 전나무들이 바람에 흔들렸다.", "label": "neutral", "category": "features/paraphrase"}
+{"premise": "검은 숲은 사시사철 눈이 쌓인 침엽수림이다.", "hypothesis": "검은 숲에는 일 년 내내 눈이 녹지 않았다.", "label": "entailment", "category": "features/paraphrase"}
+{"premise": "검은 숲은 사시사철 눈이 쌓인 침엽수림이다.", "hypothesis": "레온은 검은 숲으로 향했다.", "label": "neutral", "category": "features/unrelated"}
+{"premise": "검은 숲은 사시사철 눈이 쌓인 침엽수림이다.", "hypothesis": "검은 숲 깊은 곳에는 오래된 신전이 있었다.", "label": "neutral", "category": "features/unrelated"}
+{"premise": "벨로나 항구는 절벽 아래 자리한 작은 어항이다.", "hypothesis": "벨로나 항구는 수백 척의 상선이 드나드는 대륙 최대의 무역항이었다.", "label": "contradiction", "category": "features/contradiction"}
+{"premise": "벨로나 항구는 절벽 아래 자리한 작은 어항이다.", "hypothesis": "벨로나 항구는 끝없는 평야 한가운데 있어 바다가 보이지 않았다.", "label": "contradiction", "category": "features/contradiction"}
+{"premise": "벨로나 항구는 절벽 아래 자리한 작은 어항이다.", "hypothesis": "깎아지른 절벽 밑 벨로나 항구에는 고깃배 몇 척만이 묶여 있었다.", "label": "neutral", "category": "features/paraphrase"}
+{"premise": "벨로나 항구는 절벽 아래 자리한 작은 어항이다.", "hypothesis": "벨로나 항구의 선술집은 늘 소란스러웠다.", "label": "neutral", "category": "features/unrelated"}
+{"premise": "아르덴 성은 호수 한가운데 섬 위에 세워진 성이다.", "hypothesis": "아르덴 성은 메마른 황무지 언덕 위에 홀로 서 있었다.", "label": "contradiction", "category": "features/contradiction"}
+{"premise": "아르덴 성은 호수 한가운데 섬 위에 세워진 성이다.", "hypothesis": "배를 타야만 아르덴 성에 닿을 수 있었다.", "label": "neutral", "category": "features/paraphrase"}
+{"premise": "아르덴 성은 호수 한가운데 섬 위에 세워진 성이다.", "hypothesis": "아르덴 성의 성벽은 물 위에 떠 있는 듯 보였다.", "label": "neutral", "category": "features/paraphrase"}
+{"premise": "아르덴 성은 호수 한가운데 섬 위에 세워진 성이다.", "hypothesis": "아르덴 성의 연회장은 밤늦도록 불이 꺼지지 않았다.", "label": "neutral", "category": "features/unrelated"}
+{"premise": "레온의 눈 색깔은 푸른색이다.", "hypothesis": "레온의 눈은 붉은색이다.", "label": "contradiction", "category": "eye_color/restatement"}
+{"premise": "레온의 눈 색깔은 푸른색이다.", "hypothesis": "레온의 눈은 하늘빛이다.", "label": "entailment", "category": "eye_color/restatement"}
+{"premise": "레온의 나이는 17살이다.", "hypothesis": "레온은 열일곱 살이다.", "label": "entailment", "category": "age/restatement"}
+{"premise": "레온의 나이는 17살이다.", "hypothesis": "레온은 스무 살이다.", "label": "contradiction", "category": "age/restatement"}
+{"premise": "레온의 머리색은 은발이다.", "hypothesis": "레온의 머리카락은 은빛이다.", "label": "entailment", "category": "hair_color/restatement"}
+{"premise": "레온의 머리색은 은발이다.", "hypothesis": "레온의 머리카락은 검은색이다.", "label": "contradiction", "category": "hair_color/restatement"}
+{"premise": "레온의 출신은 북부 설원이다.", "hypothesis": "레온은 남부 항구 도시 출신이다.", "label": "contradiction", "category": "origin/restatement"}
+{"premise": "레온의 출신은 북부 설원이다.", "hypothesis": "레온은 북부 출신이다.", "label": "entailment", "category": "origin/restatement"}
+{"premise": "이안의 눈 색깔은 흑안이다.", "hypothesis": "이안의 붉은 눈이 핏빛으로 번들거렸다.", "label": "contradiction", "category": "eye_color/contradiction"}
+{"premise": "이안의 눈 색깔은 흑안이다.", "hypothesis": "\"네 눈은 어쩜 그렇게 새파랗니?\" 유모가 이안의 눈을 들여다보며 웃었다.", "label": "contradiction", "category": "eye_color/contradiction"}
+{"premise": "이안의 눈 색깔은 흑안이다.", "hypothesis": "이안의 새카만 눈동자가 촛불을 담고 일렁였다.", "label": "neutral", "category": "eye_color/paraphrase"}
+{"premise": "이안의 눈 색깔은 흑안이다.", "hypothesis": "이안은 검은 눈을 가졌다.", "label": "entailment", "category": "eye_color/paraphrase"}
+{"premise": "이안의 눈 색깔은 흑안이다.", "hypothesis": "이안은 눈을 가늘게 뜨고 상대의 속내를 읽으려 했다.", "label": "neutral", "category": "eye_color/unrelated"}
+{"premise": "이안의 눈 색깔은 흑안이다.", "hypothesis": "이안의 눈은 검었지만 그의 동생 루카의 눈은 에메랄드처럼 초록빛이었다.", "label": "neutral", "category": "eye_color/other-subject"}
+{"premise": "델리아의 눈 색깔은 적안이다.", "hypothesis": "델리아의 잿빛 눈동자에는 아무런 감정도 담겨 있지 않았다.", "label": "contradiction", "category": "eye_color/contradiction"}
+{"premise": "델리아의 눈 색깔은 적안이다.", "hypothesis": "델리아의 루비 같은 눈이 가늘어졌다.", "label": "neutral", "category": "eye_color/paraphrase"}
+{"premise": "델리아의 눈 색깔은 적안이다.", "hypothesis": "델리아의 눈은 붉은색이다.", "label": "entailment", "category": "eye_color/restatement"}
+{"premise": "델리아의 눈 색깔은 적안이다.", "hypothesis": "델리아의 눈은 푸른색이다.", "label": "contradiction", "category": "eye_color/restatement"}
+{"premise": "이안의 나이는 7살이다.", "hypothesis": "열일곱 살 청년이 된 이안은 검을 차고 길을 나섰다.", "label": "contradiction", "category": "age/contradiction"}
+{"premise": "이안의 나이는 7살이다.", "hypothesis": "일곱 살배기 이안은 유모의 치맛자락을 꼭 붙잡았다.", "label": "neutral", "category": "age/paraphrase"}
+{"premise": "이안의 나이는 7살이다.", "hypothesis": "이안은 아직 어린아이였다.", "label": "entailment", "category": "age/paraphrase"}
+{"premise": "델리아의 나이는 백 살이 넘은 마녀이다.", "hypothesis": "이제 막 스물을 넘긴 델리아는 마탑의 최연소 견습생이었다.", "label": "contradiction", "category": "age/contradiction"}
+{"premise": "델리아의 나이는 백 살이 넘은 마녀이다.", "hypothesis": "한 세기를 넘게 살아온 델리아에게 인간의 전쟁은 지루한 반복이었다.", "label": "neutral", "category": "age/paraphrase"}
+{"premise": "델리아의 나이는 백 살이 넘은 마녀이다.", "hypothesis": "델리아는 젊어 보이는 외모와 달리 말투가 노인 같았다.", "label": "neutral", "category": "age/unrelated"}
+{"premise": "루카의 나이는 스물다섯 살이다.", "hypothesis": "루카는 스물다섯이었다.", "label": "entailment", "category": "age/paraphrase"}
+{"premise": "루카의 나이는 스물다섯 살이다.", "hypothesis": "루카는 스물다섯 번째 생일에 기사단에 입단했다.", "label": "neutral", "category": "age/paraphrase"}
+{"premise": "루카의 나이는 스물다섯 살이다.", "hypothesis": "마흔이 된 루카는 기사단장 자리에 올랐다.", "label": "contradiction", "category": "age/contradiction"}
+{"premise": "루카의 나이는 스물다섯 살이다.", "hypothesis": "루카는 서른다섯 살이다.", "label": "contradiction", "category": "age/restatement"}
+{"premise": "이안의 머리색은 금발이다.", "hypothesis": "이안의 새하얀 머리카락이 눈보라 속에 섞여 들었다.", "label": "contradiction", "category": "hair_color/contradiction"}
+{"premise": "이안의 머리색은 금발이다.", "hypothesis": "\"그 갈색 머리 녀석 말이야.\" 병사들이 이안을 가리키며 수군거렸다.", "label": "contradiction", "category": "hair_color/contradiction"}
+{"premise": "이안의 머리색은 금발이다.", "hypothesis": "햇살을 받은 이안의 금빛 머리칼이 반짝였다.", "label": "neutral", "category": "hair_color/paraphrase"}
+{"premise": "이안의 머리색은 금발이다.", "hypothesis": "이안의 머리카락은 노란빛이었다.", "label": "entailment", "category": "hair_color/paraphrase"}
+{"premise": "이안의 머리색은 금발이다.", "hypothesis": "이안은 헝클어진 머리를 대충 묶었다.", "label": "neutral", "category": "hair_color/unrelated"}
+{"premise": "이안의 머리색은 금발이다.", "hypothesis": "금발의 이안과 달리 델리아는 불타는 듯한 적발이었다.", "label": "neutral", "category": "hair_color/other-subject"}
+{"premise": "델리아의 머리색은 적발이다.", "hypothesis": "델리아의 머리카락은 붉은색이다.", "label": "entailment", "category": "hair_color/restatement"}
+{"premise": "델리아의 머리색은 적발이다.", "hypothesis": "델리아의 머리카락은 은색이다.", "label": "contradiction", "category": "hair_color/restatement"}
+{"premise": "델리아의 머리색은 적발이다.", "hypothesis": "델리아의 푸른 머리카락이 파도처럼 일렁였다.", "label": "contradiction", "category": "hair_color/contradiction"}
+{"premise": "루카의 신장은 작은 편이다.", "hypothesis": "거인처럼 커다란 루카가 문을 막아서자 방이 어두워졌다.", "label": "contradiction", "category": "height/contradiction"}
+{"premise": "루카의 신장은 작은 편이다.", "hypothesis": "루카는 체구가 작아 갑옷이 헐렁했다.", "label": "neutral", "category": "height/paraphrase"}
+{"premise": "루카의 신장은 작은 편이다.", "hypothesis": "루카는 키가 작다.", "label": "entailment", "category": "height/restatement"}
+{"premise": "루카의 신장은 작은 편이다.", "hypothesis": "루카는 키가 크다.", "label": "contradiction", "category": "height/restatement"}
+{"premise": "이안의 신장은 180cm이다.", "hypothesis": "150센티미터를 겨우 넘는 이안은 늘 까치발을 들었다.", "label": "contradiction", "category": "height/contradiction"}
+{"premise": "이안의 신장은 180cm이다.", "hypothesis": "이안은 180센티미터의 키로 사람들을 내려다보았다.", "label": "neutral", "category": "height/paraphrase"}
+{"premise": "이안의 신장은 180cm이다.", "hypothesis": "이안은 말에 오르며 등자를 고쳐 신었다.", "label": "neutral", "category": "height/unrelated"}
+{"premise": "델리아의 흉터는 목에 난 세 줄기 발톱 자국이다.", "hypothesis": "델리아가 옷깃을 내리자 목덜미를 긁고 지나간 세 줄의 흉터가 드러났다.", "label": "neutral", "category": "scars/paraphrase"}
+{"premise": "델리아의 흉터는 목에 난 세 줄기 발톱 자국이다.", "hypothesis": "델리아의 흉터는 이마에 난 칼자국이다.", "label": "contradiction", "category": "scars/restatement"}
+{"premise": "델리아의 흉터는 목에 난 세 줄기 발톱 자국이다.", "hypothesis": "델리아의 목은 흠 하나 없이 희고 매끄러웠다.", "label": "contradiction", "category": "scars/contradiction"}
+{"premise": "델리아의 흉터는 목에 난 세 줄기 발톱 자국이다.", "hypothesis": "델리아는 목에 두른 스카프를 풀지 않았다.", "label": "neutral", "category": "scars/unrelated"}
+{"premise": "이안의 흉터는 오른손 손등의 화상 자국이다.", "hypothesis": "이안의 왼손 손등에 남은 화상 자국이 욱신거렸다.", "label": "contradiction", "category": "scars/contradiction"}
+{"premise": "이안의 흉터는 오른손 손등의 화상 자국이다.", "hypothesis": "이안은 오른손 등의 오래된 화상 흉터를 장갑으로 가렸다.", "label": "neutral", "category": "scars/paraphrase"}
+{"premise": "이안의 흉터는 오른손 손등의 화상 자국이다.", "hypothesis": "이안의 흉터는 오른손 등의 화상 자국이다.", "label": "entailment", "category": "scars/restatement"}
+{"premise": "루카의 출신은 동방의 섬나라 하쿠이다.", "hypothesis": "대륙 서쪽 끝 산골 마을에서 태어난 루카는 바다를 본 적이 없었다.", "label": "contradiction", "category": "origin/contradiction"}
+{"premise": "루카의 출신은 동방의 섬나라 하쿠이다.", "hypothesis": "하쿠 태생인 루카는 대륙의 음식이 입에 맞지 않았다.", "label": "neutral", "category": "origin/paraphrase"}
+{"premise": "루카의 출신은 동방의 섬나라 하쿠이다.", "hypothesis": "루카는 하쿠 출신이다.", "label": "entailment", "category": "origin/restatement"}
+{"premise": "루카의 출신은 동방의 섬나라 하쿠이다.", "hypothesis": "루카는 제국 수도 출신이다.", "label": "contradiction", "category": "origin/restatement"}
+{"premise": "루카의 출신은 동방의 섬나라 하쿠이다.", "hypothesis": "루카는 고향으로 보낼 편지를 몇 번이고 고쳐 썼다.", "label": "neutral", "category": "origin/unrelated"}
+{"premise": "델리아의 출신은 몰락한 귀족 가문이다.", "hypothesis": "평민 대장장이의 딸로 태어난 델리아는 귀족을 증오했다.", "label": "contradiction", "category": "origin/contradiction"}
+{"premise": "델리아의 출신은 몰락한 귀족 가문이다.", "hypothesis": "한때 명문가였던 델리아의 집안은 이제 빚더미에 앉아 있었다.", "label": "neutral", "category": "origin/paraphrase"}
+{"premise": "델리아의 출신은 몰락한 귀족 가문이다.", "hypothesis": "델리아는 귀족 출신이었다.", "label": "entailment", "category": "origin/paraphrase"}
+{"premise": "은빛 호수는 수정처럼 맑고 잔잔한 호수이다.", "hypothesis": "은빛 호수는 흙탕물이 거칠게 소용돌이치는 늪지였다.", "label": "contradiction", "category": "features/contradiction"}
+{"premise": "은빛 호수는 수정처럼 맑고 잔잔한 호수이다.", "hypothesis": "은빛 호수의 수면에는 바닥의 조약돌까지 비쳐 보였다.", "label": "neutral", "category": "features/paraphrase"}
+{"premise": "은빛 호수는 수정처럼 맑고 잔잔한 호수이다.", "hypothesis": "은빛 호수는 물이 맑다.", "label": "entailment", "category": "features/restatement"}
+{"premise": "은빛 호수는 수정처럼 맑고 잔잔한 호수이다.", "hypothesis": "이안과 델리아는 은빛 호수에서 다시 만나기로 했다.", "label": "neutral", "category": "features/unrelated"}
+{"premise": "하쿠 성채는 험준한 산꼭대기에 지어진 요새이다.", "hypothesis": "하쿠 성채는 드넓은 평야 한가운데 낮게 엎드린 성이었다.", "label": "contradiction", "category": "features/contradiction"}
+{"premise": "하쿠 성채는 험준한 산꼭대기에 지어진 요새이다.", "hypothesis": "하쿠 성채에 오르려면 가파른 절벽 길을 하루 종일 걸어야 했다.", "label": "neutral", "category": "features/paraphrase"}
+{"premise": "하쿠 성채는 험준한 산꼭대기에 지어진 요새이다.", "hypothesis": "하쿠 성채는 바닷가 모래사장 위에 세워져 있다.", "label": "contradiction", "category": "features/restatement"}
+{"premise": "하쿠 성채는 험준한 산꼭대기에 지어진 요새이다.", "hypothesis": "하쿠 성채의 병사들은 오랜 평화에 지쳐 있었다.", "label": "neutral", "category": "features/unrelated"}
+{"premise": "붉은 사막은 낮에는 타는 듯 뜨겁고 밤에는 얼어붙는 사막이다.", "hypothesis": "붉은 사막에는 사시사철 부드러운 비가 내려 풀이 무성했다.", "label": "contradiction", "category": "features/contradiction"}
+{"premise": "붉은 사막은 낮에는 타는 듯 뜨겁고 밤에는 얼어붙는 사막이다.", "hypothesis": "해가 지자 붉은 사막의 모래는 순식간에 차갑게 식었다.", "label": "neutral", "category": "features/paraphrase"}
+{"premise": "붉은 사막은 낮에는 타는 듯 뜨겁고 밤에는 얼어붙는 사막이다.", "hypothesis": "붉은 사막을 건너던 상단이 모래 폭풍을 만났다.", "label": "neutral", "category": "features/unrelated"}
+{"premise": "붉은 사막은 낮에는 타는 듯 뜨겁고 밤에는 얼어붙는 사막이다.", "hypothesis": "붉은 사막은 일 년 내내 서늘하고 쾌적했다.", "label": "contradiction", "category": "features/contradiction"}
+{"premise": "로웰 마을은 강가에 자리한 조용한 농촌이다.", "hypothesis": "로웰 마을은 밤낮없이 마차가 오가는 번화한 상업 도시였다.", "label": "contradiction", "category": "features/contradiction"}
+{"premise": "로웰 마을은 강가에 자리한 조용한 농촌이다.", "hypothesis": "로웰 마을 사람들은 강물을 끌어다 밀밭에 물을 댔다.", "label": "neutral", "category": "features/paraphrase"}
+{"premise": "로웰 마을은 강가에 자리한 조용한 농촌이다.", "hypothesis": "로웰 마을은 한적한 시골이다.", "label": "entailment", "category": "features/restatement"}
+{"premise": "로웰 마을은 강가에 자리한 조용한 농촌이다.", "hypothesis": "로웰 마을의 촌장은 이안을 반갑게 맞았다.", "label": "neutral", "category": "features/unrelated"}
+{"premise": "로웰 마을은 강가에 자리한 조용한 농촌이다.", "hypothesis": "로웰 마을은 강에서 멀리 떨어진 메마른 고원에 있었다.", "label": "contradiction", "category": "features/contradiction"}
+{"premise": "레온의 눈 색깔은 푸른색이다.", "hypothesis": "\"내 눈이 원래 이렇게 붉었던가.\" 레온이 거울을 보며 중얼거렸다.", "label": "contradiction", "category": "eye_color/contradiction"}
+{"premise": "레온의 나이는 17살이다.", "hypothesis": "레온은 열일곱 번째 겨울을 맞이했다.", "label": "neutral", "category": "age/paraphrase"}
+{"premise": "세라의 머리색은 흑발이다.", "hypothesis": "세라는 흑발을 단정하게 땋아 내렸고, 그 곁의 레온은 은발을 휘날렸다.", "label": "neutral", "category": "hair_color/other-subject"}
+{"premise": "카엘의 흉터는 등에 난 화상 자국이다.", "hypothesis": "카엘의 흉터는 등의 화상 자국이다.", "label": "entailment", "category": "scars/restatement"}
+{"premise": "카엘의 흉터는 등에 난 화상 자국이다.", "hypothesis": "카엘의 흉터는 턱에 난 칼자국이다.", "label": "contradiction", "category": "scars/restatement"}

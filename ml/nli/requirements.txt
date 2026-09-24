@@ -1,0 +1,10 @@
+# NLI fine-tuning environment (ml/nli), separate from the backend's.
+# PyTorch with CUDA comes from PyTorch's own index, for the driver's CUDA
+# version (see README.md), e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu126
+# transformers matches the backend's (backend/pyproject.toml), so what's
+# trained here loads there the same way.
+transformers==5.17.0
+accelerate>=1.0
+numpy
+scikit-learn

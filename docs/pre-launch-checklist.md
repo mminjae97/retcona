@@ -59,3 +59,26 @@ confirm it arrives within a minute and not in spam, and that a failure at the
 mail server shows the "인증 메일을 보내지 못했습니다" message.
 
 Code: `backend/infra/email_client.py`, `backend/auth/email_verification.py`.
+
+## 3. NLI model: hosting and attribution
+
+**Now:** the appearance/location judgment uses the NLI model trained in
+`ml/nli` (`mixed` in `ml/nli/RESULTS.md`), kept only on the machine that
+trained it, in `ml/nli/runs/mixed` (not committed). A worker without that
+directory falls back to a weaker public checkpoint (with a warning in its log).
+
+**To do:**
+- [ ] Host the model where production workers can load it, e.g. a private
+      Hugging Face Hub repository (then `NLI_MODEL=<repo id>` plus an access
+      token) or a GCS bucket (needs a download step at worker startup).
+- [ ] Set `NLI_MODEL` in the production environment, and make sure production
+      can't silently run on the fallback checkpoint (fail startup, or alert).
+- [ ] Attribution: the training data (KorNLI, KLUE-NLI) is CC BY-SA 4.0. Credit
+      both where the service lists its sources: KorNLI (Ham et al., 2020,
+      kakaobrain/kor-nlu-datasets) and KLUE (Park et al., 2021,
+      KLUE-benchmark/KLUE).
+
+**Check:** a validation run on the production worker logs no fallback
+warning, and the flags match what the same episode gives locally.
+
+Code: `backend/infra/inference_client.py`, `ml/nli/`.
