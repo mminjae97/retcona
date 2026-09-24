@@ -19,7 +19,7 @@ dependencies = [
     "email-validator>=2.0",  # pydantic EmailStr
     "redis>=5.0",           # local dev QueueClient implementation (10.4.3)
     "rank-bm25>=0.2",       # BM25 hybrid search (chapter 5)
-    "sentence-transformers>=3.0",  # KURE-v1 embedding, bge-reranker (chapter 5)
+    "sentence-transformers>=5.2",  # KURE-v1 embedding, bge-reranker (chapter 5); 5.2 is the first to allow transformers 5
     "transformers>=5.17,<6",  # NLI model (7.2); same major version as ml/nli, which saves it
     "tzdata>=2024.1",       # IANA time zones for the purge schedule on platforms without a system copy
 ]

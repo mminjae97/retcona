@@ -112,3 +112,10 @@ Chosen (2026-09-24): `mixed` is the backend's model, kept locally in `runs/mixed
 
 - `train.py` saves the model as it is at the end of training instead of the checkpoint with the best KLUE-NLI dev accuracy. That score moved against novel-prose recall in rounds 1–3, so it shouldn't pick the model. `mixed` is unaffected: its best checkpoint was the final one (epoch 1.00: 0.855).
 - An `--output` that already has checkpoints is refused unless `--resume` is given. Before, a re-run silently continued the old run, even with different `--data` or `--init`.
+- Checkpoints are deleted once the final model is saved, since they're only needed to resume. `runs/mixed` had two (2.4 GB), which were removed by hand; the model itself (`model.safetensors`, config, tokenizer) is unchanged.
+
+## Caveat: the novel set picked the model it reports on
+
+The same 150 pairs were used to choose between recipes and to report `mixed`'s numbers. The set was also grown after reading round 1's errors. So novel accuracy 0.820 and flag precision/recall 0.823 are likely optimistic for novel prose the model hasn't seen. The KLUE-NLI dev numbers don't have this problem.
+
+For the next comparison, write a separate held-out set, with new characters, places and phrasings, before looking at any model's errors on it. Keep `eval/novel.jsonl` for development, and report the held-out numbers as the ones that count.

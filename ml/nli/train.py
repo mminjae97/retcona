@@ -9,13 +9,15 @@ into one training set:
 --data klue on top of a KorNLI run — which RESULTS.md found to miss far more
 contradictions in novel prose). The run evaluates on KLUE-NLI dev as it goes,
 for the record, and saves the model as it is at the end of training to
---output, loadable by the backend (NLI_MODEL=<that directory>). An --output
-that already has checkpoints is refused, unless --resume continues the
-interrupted run that made them (with the same arguments).
+--output, loadable by the backend (NLI_MODEL=<that directory, absolute>).
+Its checkpoints are kept only until then. An --output that still has
+checkpoints (an interrupted run) is refused, unless --resume continues that
+run (with the same arguments).
 """
 
 import argparse
 import random
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -138,6 +140,10 @@ def main() -> None:
     print("KLUE-NLI dev:", trainer.evaluate())
     trainer.save_model(args.output)
     tokenizer.save_pretrained(args.output)
+    # The checkpoints (with optimizer state, over 1 GB each) were only for
+    # resuming; --output is what the backend loads and what gets hosted.
+    for checkpoint in Path(args.output).glob("checkpoint-*"):
+        shutil.rmtree(checkpoint)
 
 
 if __name__ == "__main__":

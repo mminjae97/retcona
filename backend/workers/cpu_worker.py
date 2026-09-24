@@ -50,6 +50,7 @@ def run() -> None:
     # queued behind it would wait on it (and could be given up on,
     # api/episodes.py). If it fails, the worker still starts; the first job
     # that needs it tries again.
+    logger.info("Loading the NLI model")
     try:
         logger.info("Loaded %s", load_models())
     except Exception:

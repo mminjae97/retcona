@@ -131,7 +131,10 @@ class GPUInferenceClient(InferenceClient):
 
 
 def _nli_model() -> str:
-    if configured := os.environ.get("NLI_MODEL"):
+    # A directory is best given as an absolute path: the worker runs from
+    # backend/, and a relative one that isn't found there reads as a Hugging
+    # Face id.
+    if configured := os.environ.get("NLI_MODEL", "").strip():
         return configured
     if (LOCAL_NLI_MODEL / "config.json").is_file():
         return str(LOCAL_NLI_MODEL)
