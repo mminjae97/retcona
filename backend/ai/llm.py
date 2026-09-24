@@ -33,7 +33,8 @@ Rules:
   the episode refers to one of them by another name (a nickname, a title, a
   shortened name), use the listed name as "subject".
 - "evidence" is the sentence the claim comes from, copied verbatim.
-- "text" restates the claim in one short sentence, in the manuscript's language.
+- "text" restates the claim in one short sentence, in the manuscript's language,
+  naming the subject by its "subject" name (never a pronoun or a nickname).
 - "attributes" says the claim in setting-card keys, when it maps onto one:
   characters: {", ".join(FIXED_ATTR_KEYS + MUTABLE_ATTR_KEYS)}
   locations: {", ".join(GEO_ATTR_KEYS)}

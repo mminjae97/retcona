@@ -557,9 +557,9 @@ export default function EditorPage() {
   );
 }
 
-// What the latest run found, or where it is. Contradiction judgment comes in
-// the next stage; for now a run extracts claims and registers new characters
-// and locations (7.4), which is what this reports.
+// What the latest run found, or where it is: how many of the claims it
+// extracted contradict the settings (appearance and location so far), and the
+// characters and locations it registered as new (7.4).
 function ValidationStatus({
   run,
   requestError,
@@ -599,12 +599,16 @@ function RunStatus({ run, episodeUpdatedAt, settingsPath }: { run: ValidationRun
       </p>
     );
   }
-  const { claims = 0, new_characters: characters = [], new_locations: locations = [] } = run.summary;
+  // flags is missing on runs from before contradiction judgment: those only
+  // extracted claims, and saying "nothing contradicts" would be a false all-clear.
+  const { claims = 0, flags, new_characters: characters = [], new_locations: locations = [] } = run.summary;
   const finishedAt = run.finished_at ? new Date(run.finished_at).toLocaleString() : "";
   return (
     <div className="editor-validation" role="status">
       <p>
         검증 완료{finishedAt && ` · ${finishedAt}`}: 설정과 대조할 서술 {claims}개를 찾았습니다.
+        {flags !== undefined &&
+          (flags > 0 ? ` 설정과 어긋나 보이는 곳이 ${flags}군데 있습니다.` : " 설정과 어긋나는 곳은 없습니다.")}
       </p>
       {characters.length > 0 && (
         <p>
@@ -618,7 +622,9 @@ function RunStatus({ run, episodeUpdatedAt, settingsPath }: { run: ValidationRun
           이 결과 이후 원고가 수정되어 최신 상태가 아닙니다. 다시 검증하려면 검증 실행을 눌러 주세요.
         </p>
       )}
-      <p className="editor-validation-note">설정 모순 탐지는 다음 업데이트에서 제공됩니다.</p>
+      <p className="editor-validation-note">
+        지금은 외형과 장소만 대조합니다. 어긋난 서술을 원고와 나란히 보는 검증 결과 화면은 다음 업데이트에서 제공됩니다.
+      </p>
     </div>
   );
 }

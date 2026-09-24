@@ -5,8 +5,9 @@ No model and no network: it answers the claim-extraction prompt
 JSON a model would return, so the pipeline (claims, entity matching and
 auto-registration, 7.4) can run end to end before a real model is chosen
 (chapter 5). What it finds is rough — any Korean word of 2-4 syllables used as
-a subject at least twice counts as a character — and it judges nothing. Any
-other prompt gets an empty JSON object.
+a subject at least twice counts as a character, and a sentence with a place
+as its subject describes that place — and it judges nothing. Any other
+prompt gets an empty JSON object.
 """
 
 import json
@@ -82,7 +83,11 @@ def extract(manuscript: str, known_characters: list[str], known_locations: list[
             if any(word in sentence for word in _TIME_WORDS):
                 claims.append(_claim("spacetime", "character", character, sentence, {}))
         if location:
-            claims.append(_claim("location", "location", location, sentence, {}))
+            # "검은 숲은 ..." describes the place; "... 검은 숲으로 향했다" doesn't.
+            # Its features are what follows the place's name ("어둡고 습했다.").
+            describes = re.search(rf"{re.escape(location)}(?:은|는|이|가)(?![가-힣])", sentence)
+            features = sentence[describes.end() :].strip() if describes else ""
+            claims.append(_claim("location", "location", location, sentence, {"features": features} if features else {}))
     return {"claims": claims[:_MAX_CLAIMS]}
 
 

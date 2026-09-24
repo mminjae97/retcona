@@ -4,6 +4,13 @@
 - Fixed attributes: name, age, eye color, hair color, height, scars, origin
 - Mutable attributes: hairstyle, outfit, injury/health status, belongings
 - personality: personality/speech patterns (for OOC judgment, 7.2)
+- attr_sources: where each fixed attribute validation filled in (7.4) came
+  from, for the ones the author didn't enter: {key: {"episode_id": ...,
+  "evidence": the manuscript sentence}}. Validating that episode again after
+  editing it doesn't hold it to its own earlier wording: the value is
+  replaced, or cleared once that sentence is gone from the episode
+  (pipeline/merge.py). A key leaves this map once the author changes its
+  value on the settings screen.
 """
 
 import uuid
@@ -32,6 +39,7 @@ class Character(Base, NovelScopedMixin, TimestampMixin):
     fixed_attrs: Mapped[dict] = mapped_column(JSONB, default=dict)  # age, eye color, hair color, height, scars, origin, etc.
     mutable_attrs: Mapped[dict] = mapped_column(JSONB, default=dict)  # hairstyle, outfit, injury/health status, belongings
     personality: Mapped[dict] = mapped_column(JSONB, default=dict)  # personality keywords, speech traits, goals/values
+    attr_sources: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}", nullable=False)
 
 
 class CharacterStateHistory(Base, NovelScopedMixin, TimestampMixin):

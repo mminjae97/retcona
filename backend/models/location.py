@@ -2,6 +2,8 @@
 
 Stores geographic features and distance/connection relationships to other locations.
 source: manual | auto_detected (7.4)
+attr_sources: which episode each geo_attrs key was filled in from, as on
+  characters (models/character.py)
 """
 
 import uuid
@@ -25,6 +27,7 @@ class Location(Base, NovelScopedMixin, TimestampMixin):
     name: Mapped[str] = mapped_column(String, nullable=False)
     source: Mapped[str] = mapped_column(String, default="manual")
     geo_attrs: Mapped[dict] = mapped_column(JSONB, default=dict)  # geographic features, distance/connections to other locations
+    attr_sources: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}", nullable=False)
 
 
 class LocationStateHistory(Base, NovelScopedMixin, TimestampMixin):

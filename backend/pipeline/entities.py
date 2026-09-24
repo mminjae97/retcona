@@ -5,11 +5,13 @@ name. Aliases are resolved before this, by the extraction step: the model is
 given the known names and answers with them (pipeline/extract_claims.py).
 Embedding similarity (chapter 5) isn't used yet.
 
-A subject with no match becomes a new card, source=auto_detected, its initial
-attributes taken from what this episode's claims say about it (the first
-mention of each key wins). Only new cards get attributes this way: what a
-claim says about an existing card is for the judgment modules to compare, not
-to write over it (7.4: changes to existing settings go through the author).
+A subject with no match becomes a new card, source=auto_detected. Its fixed
+attributes / features are filled in afterwards like any card's empty ones
+(pipeline/merge.py); its current state (mutable attributes) is taken from
+what this episode's claims say about it (the first mention of each key wins).
+What a claim says about an existing card is for the judgment modules to
+compare, not to write over it (7.4: changes to existing settings go through
+the author).
 
 The caller holds the novel's row lock (FOR UPDATE), which serializes this with
 the settings screen's writes and with other runs on the same novel — two
@@ -23,8 +25,8 @@ from dataclasses import dataclass, field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from models.character import FIXED_ATTR_KEYS, MUTABLE_ATTR_KEYS, Character
-from models.location import GEO_ATTR_KEYS, Location
+from models.character import MUTABLE_ATTR_KEYS, Character
+from models.location import Location
 from pipeline.extract_claims import ExtractedClaim
 
 
@@ -84,7 +86,7 @@ def match_and_register(db: Session, novel_id: uuid.UUID, claims: list[ExtractedC
                 novel_id=novel_id,
                 name=name,
                 source="auto_detected",
-                fixed_attrs=_initial_attrs(subject_claims, FIXED_ATTR_KEYS),
+                fixed_attrs={},
                 # A new card has no earlier state to contradict, so its
                 # current state starts from this episode too.
                 mutable_attrs=_initial_attrs(subject_claims, MUTABLE_ATTR_KEYS),
@@ -92,13 +94,7 @@ def match_and_register(db: Session, novel_id: uuid.UUID, claims: list[ExtractedC
             )
             registration.new_characters.append(name)
         else:
-            entity = Location(
-                id=entity_id,
-                novel_id=novel_id,
-                name=name,
-                source="auto_detected",
-                geo_attrs=_initial_attrs(subject_claims, GEO_ATTR_KEYS),
-            )
+            entity = Location(id=entity_id, novel_id=novel_id, name=name, source="auto_detected", geo_attrs={})
             registration.new_locations.append(name)
         db.add(entity)
         registration.ids[(kind, normalized)] = entity_id

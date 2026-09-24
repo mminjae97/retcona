@@ -3,6 +3,7 @@
 Saving (PATCH) never triggers the AI pipeline — that's the separate "run
 validation" step (POST .../validations), which records a run and hands it to
 the CPU worker through the job queue (10.2); the editor then polls the run.
+What the latest run found contradicting the settings is listed by GET .../flags.
 Editing a `submitted` episode's content flips it back to `draft` (2.2),
 leaving existing validation results in place.
 """
@@ -19,6 +20,7 @@ from sqlalchemy.orm import Session, load_only
 from api.deps import get_owned_novel as _get_owned_novel
 from auth.dependencies import get_current_user
 from infra.queue_client import get_queue_client
+from models.claim import Claim, ContradictionFlag
 from models.db import get_db
 from models.episode import Episode
 from models.user import User
@@ -158,9 +160,9 @@ class ValidationRunPublic(BaseModel):
     episode_id: uuid.UUID
     status: str  # queued | running | succeeded | failed
     # failed only: abandoned | queue_unavailable | episode_missing |
-    # empty_manuscript | llm_failed | bad_llm_response | internal
+    # empty_manuscript | llm_failed | bad_llm_response | inference_failed | internal
     error: str | None
-    # succeeded only: {claims, dropped_claims, new_characters, new_locations}
+    # succeeded only: {claims, dropped_claims, new_characters, new_locations, flags}
     summary: dict
     # The episode's updated_at as of the content this run validated; a later
     # one means the manuscript changed since (2.2's "out of date" banner).
@@ -257,3 +259,58 @@ def get_latest_validation(
     _abandon_if_stale(db, run)
     db.commit()
     return run
+
+
+# ---------------------------------------------------------------- contradiction flags
+
+
+class FlagPublic(BaseModel):
+    id: uuid.UUID
+    error_type: str  # appearance | location (behavior, spacetime: later stages)
+    attribute: str | None  # the setting-card key, e.g. eye_color / features
+    confidence: float
+    status: str  # open | resolved_by_revalidation | accepted | dismissed
+    evidence_text: str  # the manuscript sentence
+    reference_text: str | None  # the setting's value it contradicts
+    subject_kind: str | None  # character | location
+    subject_id: uuid.UUID | None  # None once the card is deleted
+    subject_name: str | None
+    claim_text: str
+
+
+@router.get("/{novel_id}/episodes/{episode_id}/flags", response_model=list[FlagPublic])
+def list_flags(
+    novel_id: uuid.UUID,
+    episode_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[FlagPublic]:
+    """What the episode's latest successful run found contradicting the
+    settings, most confident first (2.4, 2.5). A new run replaces them."""
+    _get_episode(db, novel_id, episode_id, user)
+    rows = db.execute(
+        select(ContradictionFlag, Claim)
+        .join(Claim, Claim.id == ContradictionFlag.claim_id)
+        .where(
+            ContradictionFlag.novel_id == novel_id,
+            Claim.novel_id == novel_id,
+            Claim.episode_id == episode_id,
+        )
+        .order_by(ContradictionFlag.confidence.desc(), ContradictionFlag.id)
+    )
+    return [
+        FlagPublic(
+            id=flag.id,
+            error_type=flag.error_type,
+            attribute=flag.attribute,
+            confidence=flag.confidence,
+            status=flag.status,
+            evidence_text=flag.evidence_text,
+            reference_text=flag.reference_text,
+            subject_kind=claim.subject_kind,
+            subject_id=claim.subject_id,
+            subject_name=claim.subject_name,
+            claim_text=claim.text,
+        )
+        for flag, claim in rows
+    ]
