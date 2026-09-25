@@ -624,8 +624,9 @@ function RunStatus({
       <p>
         검증 완료{finishedAt && ` · ${finishedAt}`}: 설정과 대조할 서술 {claims}개를 찾았습니다.
         {flags !== undefined &&
-          (flags > 0 ? ` 설정과 어긋나 보이는 곳이 ${flags}군데 있습니다.` : " 설정과 어긋나는 곳은 없습니다.")}
-        {flags !== undefined && flags > 0 && (
+          (flags > 0 ? ` 설정과 어긋나 보이는 곳이 ${flags}군데 있습니다.` : " 확인할 모순 후보는 없습니다.")}
+        {/* Also when nothing is left to look at: dismissed flags are there to reopen. */}
+        {flags !== undefined && (
           <>
             {" "}
             <Link to={resultPath}>검증 결과 보기</Link>

@@ -43,7 +43,7 @@ from models.location import Location
 from models.novel import Novel
 from models.validation_run import ValidationRun
 from pipeline.context_bundle import get_context_bundle
-from pipeline.entities import match_and_register
+from pipeline.entities import comparable_text, match_and_register
 from pipeline.extract_claims import Extraction, ExtractionError, extract_claims
 from pipeline.judges import Flag, judge_appearance, judge_location
 from pipeline.merge import apply_new_information, merge_and_dedupe
@@ -145,11 +145,12 @@ def _store(
         # author dismissed as a false positive stays dismissed when the same
         # sentence is flagged again against the same setting (same card,
         # attribute, sentence and setting value — a changed setting is judged
-        # afresh).
+        # afresh). The sentence is compared by letters and digits: the model's
+        # copy of it can differ between runs.
         earlier = select(Claim.id).where(Claim.novel_id == novel_id, Claim.episode_id == episode_id)
         dismissed = {
-            tuple(row)
-            for row in db.execute(
+            (subject_id, attribute, comparable_text(evidence), reference)
+            for subject_id, attribute, evidence, reference in db.execute(
                 select(
                     Claim.subject_id,
                     ContradictionFlag.attribute,
@@ -192,7 +193,13 @@ def _store(
         )
         statuses = [
             "dismissed"
-            if (subject_ids[flag.claim_index], flag.attribute, flag.evidence_text, flag.reference_text) in dismissed
+            if (
+                subject_ids[flag.claim_index],
+                flag.attribute,
+                comparable_text(flag.evidence_text),
+                flag.reference_text,
+            )
+            in dismissed
             else "open"
             for flag in flags
         ]

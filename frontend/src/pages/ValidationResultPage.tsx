@@ -37,6 +37,7 @@ function describeActionError(err: unknown): string {
   if (err instanceof ApiError && err.status === 409) {
     if (err.message === "flag_card_missing") return "설정 카드가 삭제되어 반영할 수 없습니다.";
     if (err.message === "flag_no_value") return "이 항목은 반영할 값이 없습니다.";
+    if (err.message === "flag_run_active") return "이 화의 검증이 진행 중입니다. 검증이 끝난 뒤 반영해 주세요.";
     return "이미 처리된 항목입니다. 새로고침해 주세요.";
   }
   return describeError(err);
@@ -136,6 +137,9 @@ export default function ValidationResultPage() {
   const [busyFlagId, setBusyFlagId] = useState<string | null>(null);
   const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
   const highlightRefs = useRef(new Map<string, HTMLElement>());
+  // Set the moment a request starts, so a second click before the next
+  // render (a double click) doesn't send another.
+  const actingRef = useRef(false);
 
   const load = useCallback(() => {
     if (!novelId || !episodeId) return () => {};
@@ -174,7 +178,7 @@ export default function ValidationResultPage() {
   }
 
   async function act(flag: Flag, action: FlagAction) {
-    if (!novelId || !episodeId || busyFlagId) return;
+    if (!novelId || !episodeId || actingRef.current) return;
     if (action === "accept") {
       const attribute = ATTRIBUTES[flag.attribute ?? ""] ?? flag.attribute;
       const confirmed = window.confirm(
@@ -184,20 +188,30 @@ export default function ValidationResultPage() {
       );
       if (!confirmed) return;
     }
+    actingRef.current = true;
     setBusyFlagId(flag.id);
     setActionErrors(({ [flag.id]: _, ...rest }) => rest);
     try {
       const updated = await actOnFlag(novelId, episodeId, flag.id, action);
+      setFlags((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       if (action === "accept") {
         // Accepting also updates the episode's other flags on the same
-        // attribute (the new setting value, or accepted with it).
-        setFlags(sortFlags(await listFlags(novelId, episodeId)));
-      } else {
-        setFlags((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+        // attribute (the new setting value, or accepted with it). If this
+        // fails, the accept itself still went through and is shown; the
+        // others catch up on the next load.
+        try {
+          setFlags(sortFlags(await listFlags(novelId, episodeId)));
+        } catch {
+          setActionErrors((current) => ({
+            ...current,
+            [flag.id]: "반영했습니다. 같은 속성의 다른 항목은 새로고침하면 갱신됩니다.",
+          }));
+        }
       }
     } catch (err) {
       setActionErrors((current) => ({ ...current, [flag.id]: describeActionError(err) }));
     } finally {
+      actingRef.current = false;
       setBusyFlagId(null);
     }
   }

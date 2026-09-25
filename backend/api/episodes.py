@@ -29,7 +29,7 @@ from models.episode import Episode
 from models.location import Location
 from models.user import User
 from models.validation_run import ValidationRun
-from pipeline.entities import normalize_name
+from pipeline.judges import repeats
 
 logger = logging.getLogger(__name__)
 
@@ -343,6 +343,9 @@ class FlagAction(BaseModel):
 FLAG_HANDLED = "flag_handled"  # not open (accept/dismiss) or not dismissed (reopen)
 FLAG_NO_VALUE = "flag_no_value"  # the claim has no value for the attribute
 FLAG_CARD_MISSING = "flag_card_missing"  # the setting card was deleted
+# accept while the episode is being validated: that run judged against the
+# card as it was, and would bring the flag back when it finishes
+FLAG_RUN_ACTIVE = "flag_run_active"
 
 
 # Which card attribute a flag's attribute lives in, by subject kind.
@@ -384,6 +387,11 @@ def act_on_flag(
     elif body.action == "dismiss":
         flag.status = "dismissed"
     else:
+        latest = _latest_run(db, novel_id, episode_id)
+        if latest is not None:
+            _abandon_if_stale(db, latest)
+            if latest.status in _ACTIVE_STATUSES:
+                raise HTTPException(status.HTTP_409_CONFLICT, FLAG_RUN_ACTIVE)
         _accept(db, novel_id, flag, claim)
         flag.status = "accepted"
     db.commit()
@@ -409,9 +417,10 @@ def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Cl
     # As an edit on the settings screen does (api/settings.py).
     card.source = "manual"
 
-    # The episode's other open flags on the same attribute were judged against
-    # the old value. One that says the same as what was just accepted is
-    # accepted with it; the rest now show the new value, for the author to
+    # The episode's other flags on the same attribute were judged against the
+    # old value. An open one that says the same as what was just accepted (by
+    # the judges' rule: one value contains the other) is accepted with it; the
+    # rest, dismissed ones included, now show the new value, for the author to
     # judge (accepting one of those replaces it again, knowingly).
     siblings = db.execute(
         select(ContradictionFlag, Claim)
@@ -419,7 +428,7 @@ def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Cl
         .where(
             ContradictionFlag.novel_id == novel_id,
             ContradictionFlag.id != flag.id,
-            ContradictionFlag.status == "open",
+            ContradictionFlag.status.in_(("open", "dismissed")),
             ContradictionFlag.attribute == flag.attribute,
             Claim.novel_id == novel_id,
             Claim.episode_id == claim.episode_id,
@@ -428,7 +437,8 @@ def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Cl
         )
     )
     for sibling, sibling_claim in siblings:
-        if normalize_name(_flag_value(sibling, sibling_claim) or "") == normalize_name(value):
+        sibling_value = _flag_value(sibling, sibling_claim) or ""
+        if sibling.status == "open" and sibling_value and (repeats(sibling_value, value) or repeats(value, sibling_value)):
             sibling.status = "accepted"
         else:
             sibling.reference_text = value

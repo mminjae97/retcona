@@ -110,7 +110,7 @@ def _premise(card: Card, attribute: str, value: str) -> str:
     return f"{card.name}{_topic_particle(card.name)} {_as_statement(value)}"
 
 
-def _repeats(value: str, setting: str) -> bool:
+def repeats(value: str, setting: str) -> bool:
     """Whether the claim's value just repeats the setting ("푸른색 눈동자" /
     "푸른색") — not as part of a longer number ("17살" doesn't repeat "7살")."""
     pattern = rf"(?<!\d){re.escape(normalize_name(setting))}(?!\d)"
@@ -137,7 +137,7 @@ def _pairs(claims: list[ExtractedClaim], bundle: ContextBundle, kind: str, keys:
             setting = card.attrs.get(attribute)
             if attribute not in keys or not setting or card.sources.get(attribute) == this_episode:
                 continue
-            if _repeats(value, setting):
+            if repeats(value, setting):
                 continue
             pairs.append(_Pair(index, card, attribute, _premise(card, attribute, setting), hypothesis, evidence))
     return pairs
