@@ -93,8 +93,9 @@ export interface Flag {
   error_type: "appearance" | "location" | string;
   // The setting-card key it contradicts (eye_color, features, ...).
   attribute: string | null;
-  // The model's contradiction probability, 0-1.
-  confidence: number;
+  // The model's contradiction probability, 0-1; null once the setting it was
+  // judged against changed (accepting another flag): to be validated again.
+  confidence: number | null;
   status: FlagStatus;
   // The manuscript sentence.
   evidence_text: string;

@@ -43,7 +43,7 @@ from models.location import Location
 from models.novel import Novel
 from models.validation_run import ValidationRun
 from pipeline.context_bundle import get_context_bundle
-from pipeline.entities import comparable_text, match_and_register
+from pipeline.entities import comparable_text, match_and_register, normalize_name
 from pipeline.extract_claims import Extraction, ExtractionError, extract_claims
 from pipeline.judges import Flag, judge_appearance, judge_location
 from pipeline.merge import apply_new_information, merge_and_dedupe
@@ -117,6 +117,15 @@ def _judge(novel_id: uuid.UUID, episode_id: uuid.UUID, extraction: Extraction) -
         raise RunFailed("inference_failed") from exc
 
 
+def _dismissal_key(
+    subject_id: uuid.UUID | None, attribute: str | None, evidence: str | None, value: str | None, reference: str | None
+) -> tuple:
+    # The claim's card is the one entity matching links it to, on both sides
+    # (the stored claim's subject_id, and this run's registration).
+    said = f"sentence:{comparable_text(evidence)}" if evidence else f"value:{normalize_name(value or '')}"
+    return (subject_id, attribute, said, normalize_name(reference or ""))
+
+
 def _store(
     novel_id: uuid.UUID,
     run_id: uuid.UUID,
@@ -146,15 +155,18 @@ def _store(
         # sentence is flagged again against the same setting (same card,
         # attribute, sentence and setting value — a changed setting is judged
         # afresh). The sentence is compared by letters and digits: the model's
-        # copy of it can differ between runs.
+        # copy of it can differ between runs. A claim that came with no
+        # sentence (its flag shows the claim's restatement, which differs
+        # between runs) is compared by what it says for the attribute.
         earlier = select(Claim.id).where(Claim.novel_id == novel_id, Claim.episode_id == episode_id)
         dismissed = {
-            (subject_id, attribute, comparable_text(evidence), reference)
-            for subject_id, attribute, evidence, reference in db.execute(
+            _dismissal_key(subject_id, attribute, evidence, (attributes or {}).get(attribute), reference)
+            for subject_id, attribute, evidence, attributes, reference in db.execute(
                 select(
                     Claim.subject_id,
                     ContradictionFlag.attribute,
-                    ContradictionFlag.evidence_text,
+                    Claim.evidence_text,
+                    Claim.attributes,
                     ContradictionFlag.reference_text,
                 )
                 .join(Claim, Claim.id == ContradictionFlag.claim_id)
@@ -193,10 +205,11 @@ def _store(
         )
         statuses = [
             "dismissed"
-            if (
+            if _dismissal_key(
                 subject_ids[flag.claim_index],
                 flag.attribute,
-                comparable_text(flag.evidence_text),
+                extraction.claims[flag.claim_index].evidence,
+                extraction.claims[flag.claim_index].attributes.get(flag.attribute),
                 flag.reference_text,
             )
             in dismissed

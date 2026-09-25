@@ -566,11 +566,12 @@ export default function EditorPage() {
 // registered as new (7.4).
 // How many flags the episode has now, and how many are still open: the
 // result screen's accept/dismiss changes them after the run's summary was
-// written. Fetched again whenever the latest run changes state. null until
-// known (or if the request fails — the summary stands in).
+// written. Fetched again when the latest run finishes (not while it's queued
+// or running, when nothing shows them). null until known (or if the request
+// fails — the summary stands in).
 function useFlagCounts(novelId: string | undefined, episodeId: string | undefined, run: ValidationRun | null) {
   const [counts, setCounts] = useState<{ total: number; open: number } | null>(null);
-  const runKey = run ? `${run.id}:${run.status}` : "";
+  const runKey = run && (run.status === "succeeded" || run.status === "failed") ? `${run.id}:${run.status}` : "";
   useEffect(() => {
     setCounts(null);
     if (!novelId || !episodeId || !runKey) return;

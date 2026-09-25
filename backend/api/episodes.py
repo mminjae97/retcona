@@ -274,7 +274,7 @@ class FlagPublic(BaseModel):
     id: uuid.UUID
     error_type: str  # appearance | location (behavior, spacetime: later stages)
     attribute: str | None  # the setting-card key, e.g. eye_color / features
-    confidence: float
+    confidence: float | None  # None: to be judged again (the setting changed since)
     status: str  # open | resolved_by_revalidation | accepted | dismissed
     evidence_text: str  # the manuscript sentence
     reference_text: str | None  # the setting's value it contradicts
@@ -304,7 +304,7 @@ def list_flags(
             Claim.novel_id == novel_id,
             Claim.episode_id == episode_id,
         )
-        .order_by(ContradictionFlag.confidence.desc(), ContradictionFlag.id)
+        .order_by(ContradictionFlag.confidence.desc().nulls_last(), ContradictionFlag.id)
     )
     return [_flag_public(flag, claim) for flag, claim in rows]
 
@@ -431,11 +431,12 @@ def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Cl
     card.source = "manual"
 
     # The episode's other flags on the same attribute were judged against the
-    # old value. An open one whose value repeats the new setting (the judges'
-    # rule, judges.repeats: a run wouldn't flag it now) is accepted with it.
-    # The rest show the new value for the author to judge — a dismissed one
-    # reopened, since its dismissal was about the old value (accepting one of
-    # them replaces the value again, knowingly).
+    # old value. One whose value repeats the new setting (the judges' rule,
+    # judges.repeats: a run wouldn't flag it now) is accepted with it, open or
+    # dismissed. The rest show the new value for the author to judge, with no
+    # confidence (it was about the old value) until the episode is validated
+    # again — a dismissed one reopened, since its dismissal was about the old
+    # value too (accepting one of them replaces the value again, knowingly).
     siblings = db.execute(
         select(ContradictionFlag, Claim)
         .join(Claim, Claim.id == ContradictionFlag.claim_id)
@@ -452,8 +453,9 @@ def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Cl
     )
     for sibling, sibling_claim in siblings:
         sibling_value = _flag_value(sibling, sibling_claim) or ""
-        if sibling.status == "open" and sibling_value and repeats(sibling_value, value):
+        if sibling_value and repeats(sibling_value, value):
             sibling.status = "accepted"
         else:
             sibling.reference_text = value
+            sibling.confidence = None
             sibling.status = "open"

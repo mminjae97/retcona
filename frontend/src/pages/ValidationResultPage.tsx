@@ -380,9 +380,15 @@ function FlagCard({
     <li className={`flag-card flag-${flag.status}${active ? " flag-active" : ""}`}>
       <div className="flag-title">
         <strong>{ERROR_TYPES[flag.error_type] ?? flag.error_type}</strong>
-        <span className="flag-confidence" title="판정 모델이 모순이라고 본 확률">
-          모순 가능성 {Math.round(flag.confidence * 100)}%
-        </span>
+        {flag.confidence === null ? (
+          <span className="flag-confidence" title="설정이 바뀌어 아직 새 설정과 비교하지 않았습니다">
+            다시 검증 필요
+          </span>
+        ) : (
+          <span className="flag-confidence" title="판정 모델이 모순이라고 본 확률">
+            모순 가능성 {Math.round(flag.confidence * 100)}%
+          </span>
+        )}
       </div>
       <p className="flag-subject">
         {flag.subject_name}
@@ -397,7 +403,11 @@ function FlagCard({
             </button>
           ) : (
             <>
-              {flag.evidence_text} <span className="flag-missing">(지금 원고에서 찾을 수 없음)</span>
+              {flag.evidence_text}{" "}
+              <span className="flag-missing">
+                {/* Unedited, it's the model's own wording (a claim with no sentence) that isn't there. */}
+                {outdated ? "(지금 원고에서 찾을 수 없음)" : "(원고에서 이 문장의 위치를 찾지 못함)"}
+              </span>
             </>
           )}
         </dd>
@@ -411,8 +421,8 @@ function FlagCard({
             onClick={() => onAct("accept")}
             // Only against the manuscript this run validated: after an edit the
             // sentence may be gone, and its value with it.
-            disabled={disabled || !flag.value || !flag.subject_id || outdated || !located}
-            title={outdated || !located ? "원고가 검증 이후 수정되었습니다. 다시 검증한 뒤 반영할 수 있습니다." : undefined}
+            disabled={disabled || !flag.value || !flag.subject_id || outdated}
+            title={outdated ? "원고가 검증 이후 수정되었습니다. 다시 검증한 뒤 반영할 수 있습니다." : undefined}
           >
             {busy ? "처리 중..." : "반영"}
           </button>
