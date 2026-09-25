@@ -28,7 +28,6 @@ from auth.dependencies import get_current_user
 from models.character import Character, CharacterStateHistory
 from models.claim import Claim
 from models.db import get_db
-from models.flag_dismissal import FlagDismissal
 from models.relation import Relation
 from models.story_event import EventParticipant
 from models.user import User
@@ -339,10 +338,9 @@ def delete_character(
             or_(Relation.from_entity_id == character_id, Relation.to_entity_id == character_id),
         )
     )
-    # The author's dismissals of flags about it have nothing left to match.
-    db.execute(
-        delete(FlagDismissal).where(FlagDismissal.novel_id == novel_id, FlagDismissal.subject_id == character_id)
-    )
+    # The author's dismissals of flags about it stay: they're about sentences
+    # of the manuscript, by name (models/flag_dismissal.py), and apply again
+    # if the character comes back.
     # Claims about it stay (they're the episode's), named but no longer linked.
     db.execute(
         update(Claim)

@@ -176,7 +176,8 @@ def _store(
         statuses = [
             "dismissed"
             if dismissal_key(
-                subject_ids[flag.claim_index],
+                extraction.claims[flag.claim_index].subject_kind,
+                extraction.claims[flag.claim_index].subject,
                 flag.attribute,
                 extraction.claims[flag.claim_index].evidence,
                 extraction.claims[flag.claim_index].attributes.get(flag.attribute),
