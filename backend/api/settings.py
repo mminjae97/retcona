@@ -234,43 +234,52 @@ def _get_character(db: Session, novel_id: uuid.UUID, character_id: uuid.UUID) ->
     return character
 
 
+def _name_taken(db: Session, novel_id: uuid.UUID, name: str, *, except_id: uuid.UUID | None = None) -> bool:
+    # Compared as matching and dismissals compare them (normalized: "Leon" and
+    # "leon" are one name). A novel has tens of characters at most, so they're
+    # compared here rather than in SQL.
+    wanted = normalize_name(name)
+    others = db.execute(select(Character.id, Character.name).where(Character.novel_id == novel_id))
+    return any(other_id != except_id and normalize_name(other) == wanted for other_id, other in others)
+
+
 def _reject_duplicate_name(
     db: Session, novel_id: uuid.UUID, name: str, *, except_id: uuid.UUID | None = None
 ) -> None:
     # One card per name within a novel: entity matching (7.4) looks characters
     # up by name, and two cards with the same one would split what the
-    # manuscript says about that character between them. Compared as matching
-    # and dismissals compare them (normalized: "Leon" and "leon" are one name).
-    # A novel has tens of characters at most, so they're compared here rather
-    # than in SQL. Race-free because every caller holds the novel's row lock.
-    wanted = normalize_name(name)
-    others = db.execute(select(Character.id, Character.name).where(Character.novel_id == novel_id))
-    if any(other_id != except_id and normalize_name(other) == wanted for other_id, other in others):
+    # manuscript says about that character between them. Race-free because
+    # every caller holds the novel's row lock.
+    if _name_taken(db, novel_id, name, except_id=except_id):
         raise HTTPException(status.HTTP_409_CONFLICT, "A character with this name already exists")
 
 
-def _rename_claims(db: Session, novel_id: uuid.UUID, character: Character, name: str) -> None:
-    # Its claims, and the unlinked ones by its old name (a card by that name,
-    # since deleted): the dismissals under that name moved to the new one,
-    # whichever of them they were about, and each claim's flags must still
-    # find theirs to reopen them. Unlinked claims are few; compared here, as
-    # names are normalized.
+def _rename_claims(db: Session, novel_id: uuid.UUID, character: Character, name: str, *, unlinked: bool) -> None:
+    # Its claims, and (unlinked=True) the unlinked ones by its old name (a card
+    # by that name, since deleted): the dismissals under that name moved to
+    # the new one, whichever of them they were about, and each claim's flags
+    # must still find theirs to reopen them. Unlinked claims are few; compared
+    # here, as names are normalized.
     old = normalize_name(character.name)
-    unlinked = [
-        claim_id
-        for claim_id, subject_name in db.execute(
-            select(Claim.id, Claim.subject_name).where(
-                Claim.novel_id == novel_id, Claim.subject_kind == "character", Claim.subject_id.is_(None)
+    unlinked_ids = (
+        [
+            claim_id
+            for claim_id, subject_name in db.execute(
+                select(Claim.id, Claim.subject_name).where(
+                    Claim.novel_id == novel_id, Claim.subject_kind == "character", Claim.subject_id.is_(None)
+                )
             )
-        )
-        if normalize_name(subject_name or "") == old
-    ]
+            if normalize_name(subject_name or "") == old
+        ]
+        if unlinked
+        else []
+    )
     db.execute(
         update(Claim)
         .where(
             Claim.novel_id == novel_id,
             Claim.subject_kind == "character",
-            or_(Claim.subject_id == character.id, Claim.id.in_(unlinked)),
+            or_(Claim.subject_id == character.id, Claim.id.in_(unlinked_ids)),
         )
         .values(subject_name=name)
     )
@@ -338,9 +347,14 @@ def update_character(
     if character.name != body.name:
         # Later runs name it by the new name (extraction answers with the
         # card's name): its dismissals and claims follow, so the current flags
-        # and the next run's agree on who they're about.
-        rename_subject(db, novel_id, "character", character.name, body.name)
-        _rename_claims(db, novel_id, character, body.name)
+        # and the next run's agree on who they're about. Unless another card
+        # still has the old name (two saved before names were compared
+        # normalized): matching gives that name to the older one, so what's
+        # recorded under it stays.
+        shared = _name_taken(db, novel_id, character.name, except_id=character_id)
+        if not shared:
+            rename_subject(db, novel_id, "character", character.name, body.name)
+        _rename_claims(db, novel_id, character, body.name, unlinked=not shared)
     _apply(character, body)
     # An auto-detected card the author has now edited is theirs (7.4: changes
     # to existing settings always go through the author).

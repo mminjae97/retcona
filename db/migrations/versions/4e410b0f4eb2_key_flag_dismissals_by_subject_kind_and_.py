@@ -40,6 +40,18 @@ def upgrade() -> None:
             {"subject": f"{kind}:{_normalized(name)}", "id": dismissal_id},
         )
     bind.execute(sa.text("DELETE FROM flag_dismissals WHERE subject IS NULL"))
+    # A card renamed before now kept its claims' old name; reopen and dismiss
+    # key a flag by its claim's name, so the claims take the card's current
+    # one, as the dismissals just did (renaming renames them from now on).
+    for table, kind in (("characters", "character"), ("locations", "location")):
+        bind.execute(
+            sa.text(
+                f"UPDATE claims SET subject_name = c.name FROM {table} c "
+                "WHERE claims.subject_kind = :kind AND claims.subject_id = c.id "
+                "AND claims.subject_name IS DISTINCT FROM c.name"
+            ),
+            {"kind": kind},
+        )
     # Two cards with one name now make one key: keep one row of each.
     bind.execute(
         sa.text(
