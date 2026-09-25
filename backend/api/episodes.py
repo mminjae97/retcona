@@ -29,6 +29,7 @@ from models.episode import Episode
 from models.location import Location
 from models.user import User
 from models.validation_run import ValidationRun
+from pipeline.dismissals import dismissal_key, record_dismissal, remove_dismissal
 from pipeline.entities import normalize_name
 from pipeline.judges import repeats
 
@@ -174,12 +175,12 @@ class ValidationRunPublic(BaseModel):
     # empty_manuscript | llm_failed | bad_llm_response | inference_failed | internal
     error: str | None
     # succeeded only: {claims, dropped_claims, new_characters, new_locations,
-    # flags}. flags is how many were open when the run finished (absent on
-    # runs from before contradiction judgment): a record, which the author's
-    # accepts and dismissals leave behind — flag_counts is the current state.
+    # flags}. flags is how many flags the run found (absent on runs from
+    # before contradiction judgment) — a record; flag_counts is the state now.
     summary: dict
     # The episode's flags as they are now (those of its latest successful
-    # run), and how many are still open.
+    # run, after the author's accepts and dismissals), and how many are still
+    # open. Counted for a finished run only: 0/0 while one is queued or running.
     flag_counts: FlagCounts = FlagCounts()
     # The episode's updated_at as of the content this run validated; a later
     # one means the manuscript changed since (2.2's "out of date" banner).
@@ -190,6 +191,9 @@ class ValidationRunPublic(BaseModel):
 
 
 def _run_public(db: Session, novel_id: uuid.UUID, run: ValidationRun) -> ValidationRunPublic:
+    if run.status in _ACTIVE_STATUSES:
+        # The editor polls these and shows only progress; not worth the count.
+        return ValidationRunPublic.model_validate(run)
     counts = FlagCounts()
     for flag_status, count in db.execute(
         select(ContradictionFlag.status, func.count())
@@ -304,7 +308,7 @@ class FlagPublic(BaseModel):
     error_type: str  # appearance | location (behavior, spacetime: later stages)
     attribute: str | None  # the setting-card key, e.g. eye_color / features
     confidence: float | None  # None: to be judged again (the setting changed since)
-    status: str  # open | resolved_by_revalidation | accepted | dismissed
+    status: str  # open | accepted | dismissed | resolved | resolved_by_revalidation (models/claim.py)
     evidence_text: str  # the manuscript sentence
     reference_text: str | None  # the setting's value it contradicts
     subject_kind: str | None  # character | location
@@ -417,10 +421,15 @@ def act_on_flag(
         if flag.status != "dismissed":
             raise HTTPException(status.HTTP_409_CONFLICT, FLAG_HANDLED)
         flag.status = "open"
+        _forget_dismissal(db, novel_id, episode_id, flag, claim)
     elif flag.status != "open":
         raise HTTPException(status.HTTP_409_CONFLICT, FLAG_HANDLED)
     elif body.action == "dismiss":
         flag.status = "dismissed"
+        # Kept apart from this run's flags, so later runs honor it too.
+        key = _dismissal_key_of(flag, claim)
+        if key is not None:
+            record_dismissal(db, novel_id, episode_id, key)
     else:
         latest = _latest_run(db, novel_id, episode_id)
         if latest is not None:
@@ -435,6 +444,18 @@ def act_on_flag(
         flag.status = "accepted"
     db.commit()
     return _flag_public(flag, claim)
+
+
+def _dismissal_key_of(flag: ContradictionFlag, claim: Claim):
+    return dismissal_key(claim.subject_id, flag.attribute, claim.evidence_text, _flag_value(flag, claim), flag.reference_text)
+
+
+def _forget_dismissal(
+    db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, flag: ContradictionFlag, claim: Claim
+) -> None:
+    key = _dismissal_key_of(flag, claim)
+    if key is not None:
+        remove_dismissal(db, novel_id, episode_id, key)
 
 
 def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Claim) -> None:
@@ -454,15 +475,14 @@ def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Cl
     # Reassigned, not mutated: SQLAlchemy doesn't see changes inside a JSONB value.
     setattr(card, attrs_field, {**(getattr(card, attrs_field) or {}), flag.attribute: value})
     # The author chose this value: it's theirs now, not an episode's to
-    # replace or clear on a later run (models/character.py).
+    # replace or clear on a later run (models/character.py). The card's
+    # source stays: its other attributes are still as detected.
     card.attr_sources = {key: record for key, record in (card.attr_sources or {}).items() if key != flag.attribute}
-    # As an edit on the settings screen does (api/settings.py).
-    card.source = "manual"
 
     # The episode's other flags on the same attribute were judged against the
     # old value. One whose value repeats the new setting (the judges' rule,
-    # judges.repeats: a run wouldn't flag it now) is accepted with it, open or
-    # dismissed. The rest show the new value for the author to judge, with no
+    # judges.repeats: a run wouldn't flag it now) is resolved, open or
+    # dismissed — not "accepted": the author didn't accept it. The rest show the new value for the author to judge, with no
     # confidence (it was about the old value) until the episode is validated
     # again — a dismissed one reopened, since its dismissal was about the old
     # value too (accepting one of them replaces the value again, knowingly).
@@ -481,9 +501,13 @@ def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Cl
         )
     )
     for sibling, sibling_claim in siblings:
+        if sibling.status == "dismissed":
+            # About the old value; left in place it would silently dismiss
+            # this sentence again if the setting ever went back to that value.
+            _forget_dismissal(db, novel_id, claim.episode_id, sibling, sibling_claim)
         sibling_value = _flag_value(sibling, sibling_claim) or ""
         if sibling_value and repeats(sibling_value, value):
-            sibling.status = "accepted"
+            sibling.status = "resolved"
         else:
             sibling.reference_text = value
             sibling.confidence = None

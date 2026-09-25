@@ -46,19 +46,44 @@ function describeActionError(err: unknown): string {
   return describeError(err);
 }
 
-// Where `sentence` is in `content`: as written, or else comparing letters and
-// digits only — the model's copy of a sentence may differ from the manuscript
-// in spacing, quotes or punctuation (as backend/pipeline/merge.py allows).
-// `text` is wordChars(content), made once for all of a manuscript's flags.
-function locate(content: string, text: WordChars, sentence: string): { start: number; end: number } | null {
-  if (!sentence) return null;
+type Range = { start: number; end: number };
+
+// Where `sentence` is in `content`, every occurrence (a short line of dialogue
+// can repeat, and nothing says which one the model meant): as written, or else
+// comparing letters and digits only — the model's copy of a sentence may
+// differ from the manuscript in spacing, quotes or punctuation (as
+// backend/pipeline/merge.py allows). `text` is wordChars(content), made once
+// for all of a manuscript's flags.
+function locateAll(content: string, text: WordChars, sentence: string): Range[] {
+  if (!sentence) return [];
   sentence = sentence.normalize("NFC");
-  const exact = content.indexOf(sentence);
-  if (exact !== -1) return { start: exact, end: exact + sentence.length };
+  const whole = (range: Range) => standsAlone(content, range);
+  const found = occurrences(content, sentence)
+    .map((at) => ({ start: at, end: at + sentence.length }))
+    .filter(whole);
+  if (found.length) return found;
   const wanted = wordChars(sentence).chars;
-  const at = wanted ? text.chars.indexOf(wanted) : -1;
-  if (at === -1) return null;
-  return { start: text.starts[at], end: text.ends[at + wanted.length - 1] };
+  if (!wanted) return [];
+  return occurrences(text.chars, wanted)
+    .map((at) => ({ start: text.starts[at], end: text.ends[at + wanted.length - 1] }))
+    .filter(whole);
+}
+
+// Whether a match is the sentence itself, not the tail or head of a longer
+// word or sentence: no letter or digit runs on into it on either side ("네."
+// isn't in "그렇네.").
+function standsAlone(content: string, { start, end }: Range): boolean {
+  const before = Array.from(content.slice(Math.max(0, start - 2), start)).pop() ?? "";
+  const after = Array.from(content.slice(end, end + 2))[0] ?? "";
+  return !/[\p{L}\p{N}]/u.test(before) && !/[\p{L}\p{N}]/u.test(after);
+}
+
+function occurrences(haystack: string, needle: string): number[] {
+  const found: number[] = [];
+  for (let at = haystack.indexOf(needle); at !== -1; at = haystack.indexOf(needle, at + needle.length)) {
+    found.push(at);
+  }
+  return found;
 }
 
 // The letters and digits of `text`, lowercased, with where each came from
@@ -88,21 +113,20 @@ function wordChars(text: string): WordChars {
 // point at (those flags' ids).
 type Segment = { text: string; flagIds: string[] };
 
-// Splits the manuscript around each flag's sentence (its first occurrence).
-// Flags whose sentence isn't in the text any more (the manuscript was edited
-// after the run) are left out, and their cards say so. `content` is NFC and
-// `text` its wordChars, made once per manuscript.
-function segment(content: string, text: WordChars, flags: Flag[]): { segments: Segment[]; located: Set<string> } {
-  const ranges = new Map<string, { start: number; end: number; flagIds: string[] }>();
-  const located = new Set<string>();
+// Splits the manuscript around each flag's sentence, at every place it occurs.
+// Returns, per flag, the indexes of the segments holding it, in reading order
+// (empty for a flag whose sentence isn't in the text: the manuscript was
+// edited after the run, or the model worded it its own way; its card says
+// so). `content` is NFC and `text` its wordChars, made once per manuscript.
+function segment(content: string, text: WordChars, flags: Flag[]): { segments: Segment[]; places: Map<string, number[]> } {
+  const ranges = new Map<string, Range & { flagIds: string[] }>();
   for (const flag of flags) {
-    const found = locate(content, text, flag.evidence_text);
-    if (!found) continue;
-    located.add(flag.id);
-    const key = `${found.start}:${found.end}`;
-    const range = ranges.get(key);
-    if (range) range.flagIds.push(flag.id);
-    else ranges.set(key, { ...found, flagIds: [flag.id] });
+    for (const found of locateAll(content, text, flag.evidence_text)) {
+      const key = `${found.start}:${found.end}`;
+      const range = ranges.get(key);
+      if (range) range.flagIds.push(flag.id);
+      else ranges.set(key, { ...found, flagIds: [flag.id] });
+    }
   }
   // Overlapping sentences (one inside another) are drawn as one highlight
   // starting at the earlier one; the later one's flags join it.
@@ -126,7 +150,11 @@ function segment(content: string, text: WordChars, flags: Flag[]): { segments: S
     at = range.end;
   }
   if (at < content.length) segments.push({ text: content.slice(at), flagIds: [] });
-  return { segments, located };
+  const places = new Map<string, number[]>(flags.map((flag) => [flag.id, []]));
+  segments.forEach((part, index) => {
+    for (const id of new Set(part.flagIds)) places.get(id)?.push(index);
+  });
+  return { segments, places };
 }
 
 export default function ValidationResultPage() {
@@ -138,9 +166,17 @@ export default function ValidationResultPage() {
   const [loading, setLoading] = useState(true);
   // The flag whose sentence was last jumped to, drawn more strongly.
   const [activeFlagId, setActiveFlagId] = useState<string | null>(null);
-  const [busyFlagId, setBusyFlagId] = useState<string | null>(null);
+  // The flag being acted on, and how (to label the right button).
+  const [busy, setBusy] = useState<{ flagId: string; action: FlagAction } | null>(null);
   const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
-  const highlightRefs = useRef(new Map<string, HTMLElement>());
+  // Not errors: e.g. an accept that went through but whose follow-up refresh didn't.
+  const [actionNotices, setActionNotices] = useState<Record<string, string>>({});
+  // The highlighted segments, by segment index.
+  const highlightRefs = useRef(new Map<number, HTMLElement>());
+  // The segment last jumped to (drawn more strongly), and for each flag which
+  // of its occurrences a click goes to next.
+  const [activeSegment, setActiveSegment] = useState<number | null>(null);
+  const jumpCursor = useRef(new Map<string, number>());
   // Set the moment a request starts, so a second click before the next
   // render (a double click) doesn't send another.
   const actingRef = useRef(false);
@@ -157,6 +193,11 @@ export default function ValidationResultPage() {
         setRun(latest);
         setFlags(sortFlags(loadedFlags));
         setActionErrors({});
+        setActionNotices({});
+        // Segment indexes and jump positions belong to the text just replaced.
+        setActiveFlagId(null);
+        setActiveSegment(null);
+        jumpCursor.current.clear();
       })
       .catch((err) => {
         if (!cancelled) setLoadError(describeError(err));
@@ -176,14 +217,22 @@ export default function ValidationResultPage() {
   // Shown as NFC too, which reads the same.
   const content = useMemo(() => (episode?.content ?? "").normalize("NFC"), [episode?.content]);
   const contentWords = useMemo(() => wordChars(content), [content]);
-  const { segments, located } = useMemo(
+  const { segments, places } = useMemo(
     () => segment(content, contentWords, flags),
     [content, contentWords, flags],
   );
 
+  // Scrolls to the flag's sentence; with the sentence in several places, each
+  // click goes to the next one.
   function jumpTo(flag: Flag) {
+    const indexes = places.get(flag.id) ?? [];
+    if (!indexes.length) return;
+    const next = (jumpCursor.current.get(flag.id) ?? -1) + 1;
+    const index = indexes[next % indexes.length];
+    jumpCursor.current.set(flag.id, next % indexes.length);
     setActiveFlagId(flag.id);
-    highlightRefs.current.get(flag.id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setActiveSegment(index);
+    highlightRefs.current.get(index)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   async function act(flag: Flag, action: FlagAction) {
@@ -198,20 +247,21 @@ export default function ValidationResultPage() {
       if (!confirmed) return;
     }
     actingRef.current = true;
-    setBusyFlagId(flag.id);
+    setBusy({ flagId: flag.id, action });
     setActionErrors(({ [flag.id]: _, ...rest }) => rest);
+    setActionNotices(({ [flag.id]: _, ...rest }) => rest);
     try {
       const updated = await actOnFlag(novelId, episodeId, flag.id, action);
       setFlags((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       if (action === "accept") {
         // Accepting also updates the episode's other flags on the same
-        // attribute (the new setting value, or accepted with it). If this
+        // attribute (the new setting value, or resolved with it). If this
         // fails, the accept itself still went through and is shown; the
         // others catch up on the next load.
         try {
           setFlags(sortFlags(await listFlags(novelId, episodeId)));
         } catch {
-          setActionErrors((current) => ({
+          setActionNotices((current) => ({
             ...current,
             [flag.id]: "반영했습니다. 같은 속성의 다른 항목은 새로고침하면 갱신됩니다.",
           }));
@@ -221,7 +271,7 @@ export default function ValidationResultPage() {
       setActionErrors((current) => ({ ...current, [flag.id]: describeActionError(err) }));
     } finally {
       actingRef.current = false;
-      setBusyFlagId(null);
+      setBusy(null);
     }
   }
 
@@ -282,16 +332,14 @@ export default function ValidationResultPage() {
                 <mark
                   key={index}
                   ref={(element) => {
-                    for (const id of part.flagIds) {
-                      if (element) highlightRefs.current.set(id, element);
-                      else highlightRefs.current.delete(id);
-                    }
+                    if (element) highlightRefs.current.set(index, element);
+                    else highlightRefs.current.delete(index);
                   }}
                   className={[
                     "result-highlight",
                     part.flagIds.every((id) => flags.find((flag) => flag.id === id)?.status !== "open") &&
                       "result-highlight-handled",
-                    activeFlagId !== null && part.flagIds.includes(activeFlagId) && "result-highlight-active",
+                    index === activeSegment && "result-highlight-active",
                   ]
                     .filter(Boolean)
                     .join(" ")}
@@ -319,12 +367,14 @@ export default function ValidationResultPage() {
                 <FlagCard
                   key={flag.id}
                   flag={flag}
-                  located={located.has(flag.id)}
+                  places={places.get(flag.id)?.length ?? 0}
                   outdated={outdated}
+                  runActive={isRunActive(run)}
                   active={flag.id === activeFlagId}
-                  busy={busyFlagId === flag.id}
-                  disabled={busyFlagId !== null}
+                  busy={busy?.flagId === flag.id ? busy.action : null}
+                  disabled={busy !== null}
                   error={actionErrors[flag.id]}
+                  notice={actionNotices[flag.id]}
                   settingsPath={`/novels/${novelId}/settings`}
                   onJump={() => jumpTo(flag)}
                   onAct={(action) => act(flag, action)}
@@ -354,28 +404,41 @@ function describeNoFlags(run: ValidationRun | null): string {
 
 function FlagCard({
   flag,
-  located,
+  places,
   outdated,
+  runActive,
   active,
   busy,
   disabled,
   error,
+  notice,
   settingsPath,
   onJump,
   onAct,
 }: {
   flag: Flag;
-  located: boolean;
+  // How many places in the manuscript hold its sentence.
+  places: number;
   outdated: boolean;
+  runActive: boolean;
   active: boolean;
-  busy: boolean;
+  // The action in progress on this flag, if any.
+  busy: FlagAction | null;
   disabled: boolean;
   error: string | undefined;
+  notice: string | undefined;
   settingsPath: string;
   onJump: () => void;
   onAct: (action: FlagAction) => void;
 }) {
   const attribute = ATTRIBUTES[flag.attribute ?? ""] ?? flag.attribute;
+  // Why accept can't be pressed now, if it can't: the run would bring the
+  // flag back, or the sentence (and its value) may be gone.
+  const acceptBlocked = runActive
+    ? "이 화의 검증이 진행 중입니다. 검증이 끝난 뒤 반영할 수 있습니다."
+    : outdated
+      ? "원고가 검증 이후 수정되었습니다. 다시 검증한 뒤 반영할 수 있습니다."
+      : undefined;
   return (
     <li className={`flag-card flag-${flag.status}${active ? " flag-active" : ""}`}>
       <div className="flag-title">
@@ -397,10 +460,13 @@ function FlagCard({
       <dl className="flag-body">
         <dt>원고</dt>
         <dd>
-          {located ? (
-            <button type="button" className="flag-evidence" onClick={onJump} title="원고에서 이 문장 보기">
-              {flag.evidence_text}
-            </button>
+          {places > 0 ? (
+            <>
+              <button type="button" className="flag-evidence" onClick={onJump} title="원고에서 이 문장 보기">
+                {flag.evidence_text}
+              </button>
+              {places > 1 && <span className="flag-missing"> (원고에 {places}번 나옴 · 누를 때마다 다음 위치)</span>}
+            </>
           ) : (
             <>
               {flag.evidence_text}{" "}
@@ -421,13 +487,13 @@ function FlagCard({
             onClick={() => onAct("accept")}
             // Only against the manuscript this run validated: after an edit the
             // sentence may be gone, and its value with it.
-            disabled={disabled || !flag.value || !flag.subject_id || outdated}
-            title={outdated ? "원고가 검증 이후 수정되었습니다. 다시 검증한 뒤 반영할 수 있습니다." : undefined}
+            disabled={disabled || !flag.value || !flag.subject_id || acceptBlocked !== undefined}
+            title={acceptBlocked}
           >
-            {busy ? "처리 중..." : "반영"}
+            {busy === "accept" ? "처리 중..." : "반영"}
           </button>
           <button type="button" onClick={() => onAct("dismiss")} disabled={disabled}>
-            오탐 해제
+            {busy === "dismiss" ? "처리 중..." : "오탐 해제"}
           </button>
           {flag.subject_kind === "character" && <Link to={settingsPath}>설정 보완</Link>}
         </div>
@@ -436,15 +502,21 @@ function FlagCard({
         <div className="flag-actions">
           <span className="flag-state">오탐으로 해제함</span>
           <button type="button" onClick={() => onAct("reopen")} disabled={disabled}>
-            {busy ? "처리 중..." : "다시 열기"}
+            {busy === "reopen" ? "처리 중..." : "다시 열기"}
           </button>
         </div>
       )}
       {flag.status === "accepted" && <p className="flag-state">설정에 반영함</p>}
+      {flag.status === "resolved" && <p className="flag-state">같은 속성의 다른 항목을 반영해 설정과 맞게 됨</p>}
       {flag.status === "resolved_by_revalidation" && <p className="flag-state">재검증으로 해소됨</p>}
       {error && (
         <p className="result-error" role="alert">
           {error}
+        </p>
+      )}
+      {notice && (
+        <p className="flag-state" role="status">
+          {notice}
         </p>
       )}
     </li>
