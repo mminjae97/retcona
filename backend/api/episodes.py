@@ -159,6 +159,11 @@ def save_episode(
 # ---------------------------------------------------------------- validation runs
 
 
+class FlagCounts(BaseModel):
+    open: int = 0
+    total: int = 0
+
+
 class ValidationRunPublic(BaseModel):
     model_config = {"from_attributes": True}
 
@@ -168,14 +173,38 @@ class ValidationRunPublic(BaseModel):
     # failed only: abandoned | queue_unavailable | episode_missing |
     # empty_manuscript | llm_failed | bad_llm_response | inference_failed | internal
     error: str | None
-    # succeeded only: {claims, dropped_claims, new_characters, new_locations, flags}
+    # succeeded only: {claims, dropped_claims, new_characters, new_locations,
+    # flags}. flags is how many were open when the run finished (absent on
+    # runs from before contradiction judgment): a record, which the author's
+    # accepts and dismissals leave behind — flag_counts is the current state.
     summary: dict
+    # The episode's flags as they are now (those of its latest successful
+    # run), and how many are still open.
+    flag_counts: FlagCounts = FlagCounts()
     # The episode's updated_at as of the content this run validated; a later
     # one means the manuscript changed since (2.2's "out of date" banner).
     content_updated_at: datetime | None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+
+
+def _run_public(db: Session, novel_id: uuid.UUID, run: ValidationRun) -> ValidationRunPublic:
+    counts = FlagCounts()
+    for flag_status, count in db.execute(
+        select(ContradictionFlag.status, func.count())
+        .join(Claim, Claim.id == ContradictionFlag.claim_id)
+        .where(
+            ContradictionFlag.novel_id == novel_id,
+            Claim.novel_id == novel_id,
+            Claim.episode_id == run.episode_id,
+        )
+        .group_by(ContradictionFlag.status)
+    ):
+        counts.total += count
+        if flag_status == "open":
+            counts.open += count
+    return ValidationRunPublic.model_validate(run).model_copy(update={"flag_counts": counts})
 
 
 def _latest_run(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID) -> ValidationRun | None:
@@ -212,7 +241,7 @@ def request_validation(
     episode_id: uuid.UUID,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> ValidationRun:
+) -> ValidationRunPublic:
     """Validates the episode's saved content (the editor saves first). While
     a run for the episode is queued or running, returns that one instead of
     starting another — a double click, or a second tab, doesn't validate twice.
@@ -225,7 +254,7 @@ def request_validation(
     if latest is not None:
         _abandon_if_stale(db, latest)
         if latest.status in _ACTIVE_STATUSES:
-            return latest
+            return _run_public(db, novel_id, latest)
 
     run = ValidationRun(novel_id=novel_id, episode_id=episode_id, status="queued")
     db.add(run)
@@ -244,7 +273,7 @@ def request_validation(
         run.finished_at = func.now()
         db.commit()
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Validation is unavailable right now")
-    return run
+    return _run_public(db, novel_id, run)
 
 
 @router.get(
@@ -257,14 +286,14 @@ def get_latest_validation(
     episode_id: uuid.UUID,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> ValidationRun | Response:
+) -> ValidationRunPublic | Response:
     _get_episode(db, novel_id, episode_id, user)
     run = _latest_run(db, novel_id, episode_id)
     if run is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     _abandon_if_stale(db, run)
     db.commit()
-    return run
+    return _run_public(db, novel_id, run)
 
 
 # ---------------------------------------------------------------- contradiction flags

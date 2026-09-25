@@ -65,7 +65,10 @@ export interface ValidationRun {
   episode_id: string;
   status: ValidationRunStatus;
   error: ValidationRunError | string | null;
+  // flags there is how many were open when the run finished; flag_counts is
+  // the episode's flags as they are now (accepts and dismissals included).
   summary: ValidationRunSummary;
+  flag_counts: { open: number; total: number };
   // The episode's updated_at as of the content this run validated.
   content_updated_at: string | null;
   created_at: string;
