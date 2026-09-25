@@ -57,14 +57,25 @@ type Range = { start: number; end: number };
 function locateAll(content: string, text: WordChars, sentence: string): Range[] {
   if (!sentence) return [];
   sentence = sentence.normalize("NFC");
-  const found = occurrences(content, sentence).map((at) => ({ start: at, end: at + sentence.length }));
+  const whole = (range: Range) => standsAlone(content, range);
+  const found = occurrences(content, sentence)
+    .map((at) => ({ start: at, end: at + sentence.length }))
+    .filter(whole);
   if (found.length) return found;
   const wanted = wordChars(sentence).chars;
   if (!wanted) return [];
-  return occurrences(text.chars, wanted).map((at) => ({
-    start: text.starts[at],
-    end: text.ends[at + wanted.length - 1],
-  }));
+  return occurrences(text.chars, wanted)
+    .map((at) => ({ start: text.starts[at], end: text.ends[at + wanted.length - 1] }))
+    .filter(whole);
+}
+
+// Whether a match is the sentence itself, not the tail or head of a longer
+// word or sentence: no letter or digit runs on into it on either side ("네."
+// isn't in "그렇네.").
+function standsAlone(content: string, { start, end }: Range): boolean {
+  const before = Array.from(content.slice(Math.max(0, start - 2), start)).pop() ?? "";
+  const after = Array.from(content.slice(end, end + 2))[0] ?? "";
+  return !/[\p{L}\p{N}]/u.test(before) && !/[\p{L}\p{N}]/u.test(after);
 }
 
 function occurrences(haystack: string, needle: string): number[] {
@@ -183,6 +194,10 @@ export default function ValidationResultPage() {
         setFlags(sortFlags(loadedFlags));
         setActionErrors({});
         setActionNotices({});
+        // Segment indexes and jump positions belong to the text just replaced.
+        setActiveFlagId(null);
+        setActiveSegment(null);
+        jumpCursor.current.clear();
       })
       .catch((err) => {
         if (!cancelled) setLoadError(describeError(err));

@@ -191,10 +191,10 @@ class ValidationRunPublic(BaseModel):
 
 
 def _run_public(db: Session, novel_id: uuid.UUID, run: ValidationRun) -> ValidationRunPublic:
-    counts = FlagCounts()
     if run.status in _ACTIVE_STATUSES:
         # The editor polls these and shows only progress; not worth the count.
         return ValidationRunPublic.model_validate(run)
+    counts = FlagCounts()
     for flag_status, count in db.execute(
         select(ContradictionFlag.status, func.count())
         .join(Claim, Claim.id == ContradictionFlag.claim_id)
@@ -417,20 +417,17 @@ def act_on_flag(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Flag not found")
     flag, claim = row
 
-    key = dismissal_key(
-        claim.subject_id, flag.attribute, claim.evidence_text, _flag_value(flag, claim), flag.reference_text
-    )
     if body.action == "reopen":
         if flag.status != "dismissed":
             raise HTTPException(status.HTTP_409_CONFLICT, FLAG_HANDLED)
         flag.status = "open"
-        if key is not None:
-            remove_dismissal(db, novel_id, episode_id, key)
+        _forget_dismissal(db, novel_id, episode_id, flag, claim)
     elif flag.status != "open":
         raise HTTPException(status.HTTP_409_CONFLICT, FLAG_HANDLED)
     elif body.action == "dismiss":
         flag.status = "dismissed"
         # Kept apart from this run's flags, so later runs honor it too.
+        key = _dismissal_key_of(flag, claim)
         if key is not None:
             record_dismissal(db, novel_id, episode_id, key)
     else:
@@ -447,6 +444,18 @@ def act_on_flag(
         flag.status = "accepted"
     db.commit()
     return _flag_public(flag, claim)
+
+
+def _dismissal_key_of(flag: ContradictionFlag, claim: Claim):
+    return dismissal_key(claim.subject_id, flag.attribute, claim.evidence_text, _flag_value(flag, claim), flag.reference_text)
+
+
+def _forget_dismissal(
+    db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, flag: ContradictionFlag, claim: Claim
+) -> None:
+    key = _dismissal_key_of(flag, claim)
+    if key is not None:
+        remove_dismissal(db, novel_id, episode_id, key)
 
 
 def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Claim) -> None:
@@ -492,6 +501,10 @@ def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Cl
         )
     )
     for sibling, sibling_claim in siblings:
+        if sibling.status == "dismissed":
+            # About the old value; left in place it would silently dismiss
+            # this sentence again if the setting ever went back to that value.
+            _forget_dismissal(db, novel_id, claim.episode_id, sibling, sibling_claim)
         sibling_value = _flag_value(sibling, sibling_claim) or ""
         if sibling_value and repeats(sibling_value, value):
             sibling.status = "resolved"
