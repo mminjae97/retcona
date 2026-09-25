@@ -43,7 +43,7 @@ from models.location import Location
 from models.novel import Novel
 from models.validation_run import ValidationRun
 from pipeline.context_bundle import get_context_bundle
-from pipeline.entities import match_and_register
+from pipeline.entities import comparable_text, match_and_register, normalize_name
 from pipeline.extract_claims import Extraction, ExtractionError, extract_claims
 from pipeline.judges import Flag, judge_appearance, judge_location
 from pipeline.merge import apply_new_information, merge_and_dedupe
@@ -117,6 +117,15 @@ def _judge(novel_id: uuid.UUID, episode_id: uuid.UUID, extraction: Extraction) -
         raise RunFailed("inference_failed") from exc
 
 
+def _dismissal_key(
+    subject_id: uuid.UUID | None, attribute: str | None, evidence: str | None, value: str | None, reference: str | None
+) -> tuple:
+    # The claim's card is the one entity matching links it to, on both sides
+    # (the stored claim's subject_id, and this run's registration).
+    said = f"sentence:{comparable_text(evidence)}" if evidence else f"value:{normalize_name(value or '')}"
+    return (subject_id, attribute, said, normalize_name(reference or ""))
+
+
 def _store(
     novel_id: uuid.UUID,
     run_id: uuid.UUID,
@@ -141,8 +150,34 @@ def _store(
             raise RunFailed("episode_missing")
 
         # A new run replaces the episode's earlier claims (and their flags):
-        # they describe content that has since been validated again.
+        # they describe content that has since been validated again. What the
+        # author dismissed as a false positive stays dismissed when the same
+        # sentence is flagged again against the same setting (same card,
+        # attribute, sentence and setting value — a changed setting is judged
+        # afresh). The sentence is compared by letters and digits: the model's
+        # copy of it can differ between runs. A claim that came with no
+        # sentence (its flag shows the claim's restatement, which differs
+        # between runs) is compared by what it says for the attribute.
         earlier = select(Claim.id).where(Claim.novel_id == novel_id, Claim.episode_id == episode_id)
+        dismissed = {
+            _dismissal_key(subject_id, attribute, evidence, (attributes or {}).get(attribute), reference)
+            for subject_id, attribute, evidence, attributes, reference in db.execute(
+                select(
+                    Claim.subject_id,
+                    ContradictionFlag.attribute,
+                    Claim.evidence_text,
+                    Claim.attributes,
+                    ContradictionFlag.reference_text,
+                )
+                .join(Claim, Claim.id == ContradictionFlag.claim_id)
+                .where(
+                    ContradictionFlag.novel_id == novel_id,
+                    Claim.novel_id == novel_id,
+                    Claim.episode_id == episode_id,
+                    ContradictionFlag.status == "dismissed",
+                )
+            )
+        }
         db.execute(
             delete(ContradictionFlag).where(
                 ContradictionFlag.novel_id == novel_id, ContradictionFlag.claim_id.in_(earlier)
@@ -168,6 +203,19 @@ def _store(
             )
             for claim_id, claim, subject_id in zip(claim_ids, extraction.claims, subject_ids, strict=True)
         )
+        statuses = [
+            "dismissed"
+            if _dismissal_key(
+                subject_ids[flag.claim_index],
+                flag.attribute,
+                extraction.claims[flag.claim_index].evidence,
+                extraction.claims[flag.claim_index].attributes.get(flag.attribute),
+                flag.reference_text,
+            )
+            in dismissed
+            else "open"
+            for flag in flags
+        ]
         db.add_all(
             ContradictionFlag(
                 novel_id=novel_id,
@@ -177,9 +225,9 @@ def _store(
                 confidence=flag.confidence,
                 evidence_text=flag.evidence_text,
                 reference_text=flag.reference_text,
-                status="open",
+                status=flag_status,
             )
-            for flag in flags
+            for flag, flag_status in zip(flags, statuses, strict=True)
         )
         apply_new_information(db, novel_id, episode_id, episode_index, content, extraction.claims, subject_ids, flags)
 
@@ -191,7 +239,8 @@ def _store(
             "dropped_claims": extraction.dropped,
             "new_characters": registration.new_characters,
             "new_locations": registration.new_locations,
-            "flags": len(flags),
+            # Left for the author to look at: not the ones still dismissed.
+            "flags": statuses.count("open"),
         }
         # "submitted" means validated (2.2) — only if what was validated is
         # still what's saved (a save during the run already made it a draft).

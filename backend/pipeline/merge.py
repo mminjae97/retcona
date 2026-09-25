@@ -15,7 +15,6 @@
   (Only then: a run whose extraction merely missed it this time keeps it.)
 """
 
-import re
 import uuid
 
 from sqlalchemy import Text, cast, delete, or_, select
@@ -29,7 +28,7 @@ from models.character import (
 )
 from models.location import GEO_ATTR_KEYS, Location
 from pipeline.context_bundle import source_episodes
-from pipeline.entities import normalize_name
+from pipeline.entities import comparable_text
 from pipeline.extract_claims import ExtractedClaim
 from pipeline.judges import Flag
 
@@ -46,21 +45,12 @@ def merge_and_dedupe(flags_by_module: list[list[Flag]]) -> list[Flag]:
     return sorted(best.values(), key=lambda flag: flag.confidence, reverse=True)
 
 
-# What's compared of a sentence: letters and digits only, so a copy that
-# differs in spacing, quotes or punctuation is still the same sentence.
-_NOT_WORD = re.compile(r"[\W_]+")
-
-
-def _words(text: str) -> str:
-    return _NOT_WORD.sub("", normalize_name(text))
-
-
 def _gone_from(record: dict, content: str) -> bool:
     """Whether the manuscript sentence a value was taken from is no longer in
     the episode. Without a recorded sentence there's no telling, and the value
     is kept."""
-    evidence = _words(record.get("evidence") or "")
-    return bool(evidence) and evidence not in _words(content)
+    evidence = comparable_text(record.get("evidence") or "")
+    return bool(evidence) and evidence not in comparable_text(content)
 
 
 def apply_new_information(

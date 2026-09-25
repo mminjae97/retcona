@@ -3,7 +3,8 @@
 Saving (PATCH) never triggers the AI pipeline — that's the separate "run
 validation" step (POST .../validations), which records a run and hands it to
 the CPU worker through the job queue (10.2); the editor then polls the run.
-What the latest run found contradicting the settings is listed by GET .../flags.
+What the latest run found contradicting the settings is listed by GET .../flags,
+and the author acts on each flag with PATCH .../flags/{id} (2.4).
 Editing a `submitted` episode's content flips it back to `draft` (2.2),
 leaving existing validation results in place.
 """
@@ -11,6 +12,7 @@ leaving existing validation results in place.
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
@@ -20,11 +22,15 @@ from sqlalchemy.orm import Session, load_only
 from api.deps import get_owned_novel as _get_owned_novel
 from auth.dependencies import get_current_user
 from infra.queue_client import get_queue_client
+from models.character import Character
 from models.claim import Claim, ContradictionFlag
 from models.db import get_db
 from models.episode import Episode
+from models.location import Location
 from models.user import User
 from models.validation_run import ValidationRun
+from pipeline.entities import normalize_name
+from pipeline.judges import repeats
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +159,11 @@ def save_episode(
 # ---------------------------------------------------------------- validation runs
 
 
+class FlagCounts(BaseModel):
+    open: int = 0
+    total: int = 0
+
+
 class ValidationRunPublic(BaseModel):
     model_config = {"from_attributes": True}
 
@@ -162,14 +173,38 @@ class ValidationRunPublic(BaseModel):
     # failed only: abandoned | queue_unavailable | episode_missing |
     # empty_manuscript | llm_failed | bad_llm_response | inference_failed | internal
     error: str | None
-    # succeeded only: {claims, dropped_claims, new_characters, new_locations, flags}
+    # succeeded only: {claims, dropped_claims, new_characters, new_locations,
+    # flags}. flags is how many were open when the run finished (absent on
+    # runs from before contradiction judgment): a record, which the author's
+    # accepts and dismissals leave behind — flag_counts is the current state.
     summary: dict
+    # The episode's flags as they are now (those of its latest successful
+    # run), and how many are still open.
+    flag_counts: FlagCounts = FlagCounts()
     # The episode's updated_at as of the content this run validated; a later
     # one means the manuscript changed since (2.2's "out of date" banner).
     content_updated_at: datetime | None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+
+
+def _run_public(db: Session, novel_id: uuid.UUID, run: ValidationRun) -> ValidationRunPublic:
+    counts = FlagCounts()
+    for flag_status, count in db.execute(
+        select(ContradictionFlag.status, func.count())
+        .join(Claim, Claim.id == ContradictionFlag.claim_id)
+        .where(
+            ContradictionFlag.novel_id == novel_id,
+            Claim.novel_id == novel_id,
+            Claim.episode_id == run.episode_id,
+        )
+        .group_by(ContradictionFlag.status)
+    ):
+        counts.total += count
+        if flag_status == "open":
+            counts.open += count
+    return ValidationRunPublic.model_validate(run).model_copy(update={"flag_counts": counts})
 
 
 def _latest_run(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID) -> ValidationRun | None:
@@ -206,7 +241,7 @@ def request_validation(
     episode_id: uuid.UUID,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> ValidationRun:
+) -> ValidationRunPublic:
     """Validates the episode's saved content (the editor saves first). While
     a run for the episode is queued or running, returns that one instead of
     starting another — a double click, or a second tab, doesn't validate twice.
@@ -219,7 +254,7 @@ def request_validation(
     if latest is not None:
         _abandon_if_stale(db, latest)
         if latest.status in _ACTIVE_STATUSES:
-            return latest
+            return _run_public(db, novel_id, latest)
 
     run = ValidationRun(novel_id=novel_id, episode_id=episode_id, status="queued")
     db.add(run)
@@ -238,7 +273,7 @@ def request_validation(
         run.finished_at = func.now()
         db.commit()
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Validation is unavailable right now")
-    return run
+    return _run_public(db, novel_id, run)
 
 
 @router.get(
@@ -251,14 +286,14 @@ def get_latest_validation(
     episode_id: uuid.UUID,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> ValidationRun | Response:
+) -> ValidationRunPublic | Response:
     _get_episode(db, novel_id, episode_id, user)
     run = _latest_run(db, novel_id, episode_id)
     if run is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     _abandon_if_stale(db, run)
     db.commit()
-    return run
+    return _run_public(db, novel_id, run)
 
 
 # ---------------------------------------------------------------- contradiction flags
@@ -268,7 +303,7 @@ class FlagPublic(BaseModel):
     id: uuid.UUID
     error_type: str  # appearance | location (behavior, spacetime: later stages)
     attribute: str | None  # the setting-card key, e.g. eye_color / features
-    confidence: float
+    confidence: float | None  # None: to be judged again (the setting changed since)
     status: str  # open | resolved_by_revalidation | accepted | dismissed
     evidence_text: str  # the manuscript sentence
     reference_text: str | None  # the setting's value it contradicts
@@ -276,6 +311,8 @@ class FlagPublic(BaseModel):
     subject_id: uuid.UUID | None  # None once the card is deleted
     subject_name: str | None
     claim_text: str
+    # What the manuscript says for the attribute — what "accept" writes to the card
+    value: str | None
 
 
 @router.get("/{novel_id}/episodes/{episode_id}/flags", response_model=list[FlagPublic])
@@ -296,21 +333,158 @@ def list_flags(
             Claim.novel_id == novel_id,
             Claim.episode_id == episode_id,
         )
-        .order_by(ContradictionFlag.confidence.desc(), ContradictionFlag.id)
+        .order_by(ContradictionFlag.confidence.desc().nulls_last(), ContradictionFlag.id)
     )
-    return [
-        FlagPublic(
-            id=flag.id,
-            error_type=flag.error_type,
-            attribute=flag.attribute,
-            confidence=flag.confidence,
-            status=flag.status,
-            evidence_text=flag.evidence_text,
-            reference_text=flag.reference_text,
-            subject_kind=claim.subject_kind,
-            subject_id=claim.subject_id,
-            subject_name=claim.subject_name,
-            claim_text=claim.text,
+    return [_flag_public(flag, claim) for flag, claim in rows]
+
+
+def _flag_public(flag: ContradictionFlag, claim: Claim) -> FlagPublic:
+    return FlagPublic(
+        id=flag.id,
+        error_type=flag.error_type,
+        attribute=flag.attribute,
+        confidence=flag.confidence,
+        status=flag.status,
+        evidence_text=flag.evidence_text,
+        reference_text=flag.reference_text,
+        subject_kind=claim.subject_kind,
+        subject_id=claim.subject_id,
+        subject_name=claim.subject_name,
+        claim_text=claim.text,
+        value=_flag_value(flag, claim),
+    )
+
+
+def _flag_value(flag: ContradictionFlag, claim: Claim) -> str | None:
+    """What the manuscript says for the flagged attribute: shown to the author,
+    and what accepting writes to the card."""
+    return (claim.attributes or {}).get(flag.attribute) if flag.attribute else None
+
+
+class FlagAction(BaseModel):
+    # accept: the manuscript is right — its value replaces the card's (7.4:
+    #   changing an existing setting goes through the author, and this is that)
+    # dismiss: a false positive; the flag is closed and the card left as it is
+    # reopen: undoes a dismissal
+    action: Literal["accept", "dismiss", "reopen"]
+
+
+# 409 details, as codes the result screen turns into messages.
+FLAG_HANDLED = "flag_handled"  # not open (accept/dismiss) or not dismissed (reopen)
+FLAG_NO_VALUE = "flag_no_value"  # the claim has no value for the attribute
+FLAG_CARD_MISSING = "flag_card_missing"  # the setting card was deleted
+# accept while the episode is being validated: that run judged against the
+# card as it was, and would bring the flag back when it finishes
+FLAG_RUN_ACTIVE = "flag_run_active"
+# accept after the manuscript was edited since the run: the sentence may be gone
+FLAG_OUTDATED = "flag_outdated"
+# accept after the card's value changed since the run (the settings screen, or
+# an accept in another episode): the author hasn't seen what would be replaced
+FLAG_SETTING_CHANGED = "flag_setting_changed"
+
+
+# Which card attribute a flag's attribute lives in, by subject kind.
+_CARD_FIELDS = {"character": (Character, "fixed_attrs"), "location": (Location, "geo_attrs")}
+
+
+@router.patch("/{novel_id}/episodes/{episode_id}/flags/{flag_id}", response_model=FlagPublic)
+def act_on_flag(
+    novel_id: uuid.UUID,
+    episode_id: uuid.UUID,
+    flag_id: uuid.UUID,
+    body: FlagAction,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FlagPublic:
+    # The novel's row lock: accepting writes a setting card, as the settings
+    # screen and validation runs do under the same lock.
+    episode = _get_episode(db, novel_id, episode_id, user, for_update=True)
+    row = db.execute(
+        select(ContradictionFlag, Claim)
+        .join(Claim, Claim.id == ContradictionFlag.claim_id)
+        .where(
+            ContradictionFlag.id == flag_id,
+            ContradictionFlag.novel_id == novel_id,
+            Claim.novel_id == novel_id,
+            Claim.episode_id == episode_id,
         )
-        for flag, claim in rows
-    ]
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Flag not found")
+    flag, claim = row
+
+    if body.action == "reopen":
+        if flag.status != "dismissed":
+            raise HTTPException(status.HTTP_409_CONFLICT, FLAG_HANDLED)
+        flag.status = "open"
+    elif flag.status != "open":
+        raise HTTPException(status.HTTP_409_CONFLICT, FLAG_HANDLED)
+    elif body.action == "dismiss":
+        flag.status = "dismissed"
+    else:
+        latest = _latest_run(db, novel_id, episode_id)
+        if latest is not None:
+            _abandon_if_stale(db, latest)
+            if latest.status in _ACTIVE_STATUSES:
+                raise HTTPException(status.HTTP_409_CONFLICT, FLAG_RUN_ACTIVE)
+        # "submitted": the saved manuscript is what the last successful run
+        # validated (a save since made it a draft, 2.2).
+        if episode.status != "submitted":
+            raise HTTPException(status.HTTP_409_CONFLICT, FLAG_OUTDATED)
+        _accept(db, novel_id, flag, claim)
+        flag.status = "accepted"
+    db.commit()
+    return _flag_public(flag, claim)
+
+
+def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Claim) -> None:
+    value = _flag_value(flag, claim)
+    fields = _CARD_FIELDS.get(claim.subject_kind or "")
+    if not value or fields is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, FLAG_NO_VALUE)
+    model, attrs_field = fields
+    card = None
+    if claim.subject_id is not None:
+        card = db.scalar(select(model).where(model.id == claim.subject_id, model.novel_id == novel_id))
+    if card is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, FLAG_CARD_MISSING)
+    current = (getattr(card, attrs_field) or {}).get(flag.attribute)
+    if normalize_name(str(current or "")) != normalize_name(flag.reference_text or ""):
+        raise HTTPException(status.HTTP_409_CONFLICT, FLAG_SETTING_CHANGED)
+    # Reassigned, not mutated: SQLAlchemy doesn't see changes inside a JSONB value.
+    setattr(card, attrs_field, {**(getattr(card, attrs_field) or {}), flag.attribute: value})
+    # The author chose this value: it's theirs now, not an episode's to
+    # replace or clear on a later run (models/character.py).
+    card.attr_sources = {key: record for key, record in (card.attr_sources or {}).items() if key != flag.attribute}
+    # As an edit on the settings screen does (api/settings.py).
+    card.source = "manual"
+
+    # The episode's other flags on the same attribute were judged against the
+    # old value. One whose value repeats the new setting (the judges' rule,
+    # judges.repeats: a run wouldn't flag it now) is accepted with it, open or
+    # dismissed. The rest show the new value for the author to judge, with no
+    # confidence (it was about the old value) until the episode is validated
+    # again — a dismissed one reopened, since its dismissal was about the old
+    # value too (accepting one of them replaces the value again, knowingly).
+    siblings = db.execute(
+        select(ContradictionFlag, Claim)
+        .join(Claim, Claim.id == ContradictionFlag.claim_id)
+        .where(
+            ContradictionFlag.novel_id == novel_id,
+            ContradictionFlag.id != flag.id,
+            ContradictionFlag.status.in_(("open", "dismissed")),
+            ContradictionFlag.attribute == flag.attribute,
+            Claim.novel_id == novel_id,
+            Claim.episode_id == claim.episode_id,
+            Claim.subject_kind == claim.subject_kind,
+            Claim.subject_id == claim.subject_id,
+        )
+    )
+    for sibling, sibling_claim in siblings:
+        sibling_value = _flag_value(sibling, sibling_claim) or ""
+        if sibling_value and repeats(sibling_value, value):
+            sibling.status = "accepted"
+        else:
+            sibling.reference_text = value
+            sibling.confidence = None
+            sibling.status = "open"

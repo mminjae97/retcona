@@ -1,0 +1,190 @@
+.result-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.result-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.result-header h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.result-meta {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+.result-notice {
+  margin: 4px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  font-size: 13px;
+}
+
+.result-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-danger);
+}
+
+.result-empty,
+.result-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
+
+/* Manuscript and flags side by side (2.4); stacked on narrow screens. */
+.result-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .result-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.result-manuscript {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 16px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 75vh;
+  overflow-y: auto;
+}
+
+.result-highlight {
+  background: #f6dcc6;
+  border-radius: 3px;
+  color: inherit;
+  padding: 1px 0;
+}
+
+.result-highlight-handled {
+  background: #ece8e1;
+}
+
+.result-highlight-active {
+  outline: 2px solid var(--color-primary-active);
+}
+
+.result-flags {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.result-flags h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.flag-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.flag-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.flag-card.flag-active {
+  border-color: var(--color-primary-active);
+}
+
+.flag-card:not(.flag-open) {
+  opacity: 0.75;
+}
+
+.flag-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.flag-confidence,
+.flag-subject,
+.flag-state,
+.flag-missing {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.flag-subject,
+.flag-state {
+  margin: 0;
+}
+
+.flag-body {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 8px;
+}
+
+.flag-body dt {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.flag-body dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The sentence reads as text but jumps to it in the manuscript. */
+.flag-evidence {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 14px;
+  text-align: left;
+  text-decoration: underline dotted;
+}
+
+.flag-evidence:hover,
+.flag-evidence:active {
+  background: none;
+  text-decoration: underline;
+}
+
+.flag-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.flag-actions a {
+  font-size: 13px;
+}

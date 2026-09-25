@@ -18,6 +18,7 @@ the settings screen's writes and with other runs on the same novel — two
 episodes of one novel validated at once can't both create the same character.
 """
 
+import re
 import unicodedata
 import uuid
 from dataclasses import dataclass, field
@@ -35,6 +36,16 @@ def normalize_name(name: str) -> str:
     # whitespace collapsed and case folded, so "레온 하트" / "레온  하트" and
     # "Leon" / "leon" are one entity.
     return " ".join(unicodedata.normalize("NFC", name).split()).casefold()
+
+
+_NOT_WORD = re.compile(r"[\W_]+")
+
+
+def comparable_text(text: str) -> str:
+    # Letters and digits only: the model's copy of a manuscript sentence may
+    # differ from the manuscript (and between runs) in spacing, quotes or
+    # punctuation, and is still the same sentence.
+    return _NOT_WORD.sub("", normalize_name(text))
 
 
 @dataclass
