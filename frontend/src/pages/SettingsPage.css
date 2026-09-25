@@ -116,6 +116,10 @@
   color: var(--color-text-muted);
 }
 
+.alias-hint {
+  font-size: 12px;
+}
+
 .setting-form input,
 .setting-form select,
 .setting-form textarea {

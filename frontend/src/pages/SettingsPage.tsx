@@ -1,14 +1,16 @@
 // World/character preset screen (design doc 2.3)
 // World: category + title + free-form description
-// Character: three sections — fixed attributes / mutable attributes / personality·speech
+// Character: name and aliases, then three sections — fixed attributes / mutable attributes / personality·speech
 // All fields are optional; if left blank, they're auto-filled from the editor (7.4)
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, describeError } from "../api/client";
 import {
+  ALIASES_MAX,
   FIXED_ATTR_FIELDS,
   MUTABLE_ATTR_FIELDS,
+  NAME_MAX_LENGTH,
   PERSONALITY_FIELDS,
   WORLD_CATEGORIES,
   createCharacter,
@@ -299,6 +301,7 @@ type SectionForm<Fields> = { [K in keyof Fields]: string };
 
 interface CharacterForm {
   name: string;
+  aliases: string; // comma-separated, as typed
   fixed_attrs: SectionForm<typeof FIXED_ATTR_FIELDS>;
   mutable_attrs: SectionForm<typeof MUTABLE_ATTR_FIELDS>;
   personality: SectionForm<typeof PERSONALITY_FIELDS>;
@@ -316,10 +319,18 @@ function sectionForm<Fields extends Record<string, string>>(
 function characterForm(character?: CharacterPublic): CharacterForm {
   return {
     name: character?.name ?? "",
+    aliases: character?.aliases.join(", ") ?? "",
     fixed_attrs: sectionForm(FIXED_ATTR_FIELDS, character?.fixed_attrs),
     mutable_attrs: sectionForm(MUTABLE_ATTR_FIELDS, character?.mutable_attrs),
     personality: sectionForm(PERSONALITY_FIELDS, character?.personality),
   };
+}
+
+function splitAliases(text: string): string[] {
+  return text
+    .split(",")
+    .map((alias) => alias.trim())
+    .filter(Boolean);
 }
 
 const SECTIONS = [
@@ -360,9 +371,17 @@ function CharactersSection({ novelId }: { novelId: string }) {
   async function handleSave(e: FormEvent) {
     e.preventDefault();
     if (busy || selected === null) return;
-    const input: CharacterInput = { ...form, name: form.name.trim() };
+    const input: CharacterInput = { ...form, name: form.name.trim(), aliases: splitAliases(form.aliases) };
     if (!input.name) {
       setFormError("이름을 입력해주세요.");
+      return;
+    }
+    if (input.aliases.length > ALIASES_MAX) {
+      setFormError(`별칭은 ${ALIASES_MAX}개까지 입력할 수 있습니다.`);
+      return;
+    }
+    if (input.aliases.some((alias) => alias.length > NAME_MAX_LENGTH)) {
+      setFormError(`별칭은 하나에 ${NAME_MAX_LENGTH}자까지 입력할 수 있습니다.`);
       return;
     }
     rememberFocus();
@@ -382,7 +401,9 @@ function CharactersSection({ novelId }: { novelId: string }) {
       setInitial(values);
     } catch (err) {
       setFormError(
-        err instanceof ApiError && err.status === 409 ? "같은 이름의 캐릭터가 이미 있습니다." : describeError(err),
+        err instanceof ApiError && err.status === 409
+          ? "같은 이름이나 별칭을 쓰는 캐릭터가 이미 있습니다."
+          : describeError(err),
       );
     } finally {
       setSaving(false);
@@ -456,9 +477,21 @@ function CharactersSection({ novelId }: { novelId: string }) {
                     type="text"
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    maxLength={100}
+                    maxLength={NAME_MAX_LENGTH}
                     autoFocus={selected === "new"}
                   />
+                </label>
+                <label>
+                  별칭
+                  <input
+                    type="text"
+                    value={form.aliases}
+                    onChange={(e) => setForm({ ...form, aliases: e.target.value })}
+                    placeholder="꼬맹이, 백발의 기사"
+                  />
+                  <span className="alias-hint">
+                    원고에서 이 캐릭터를 부르는 다른 이름(별명·직함 등)을 쉼표로 구분해 입력하세요.
+                  </span>
                 </label>
                 {SECTIONS.map((section) => (
                   <fieldset key={section.key} className="attr-section">

@@ -1,11 +1,14 @@
 """Extract verification-target claims from the manuscript (design doc 7.1, first step).
 
 Input: novel_id, manuscript text, the novel's known character/location names
+  (characters with their aliases)
 Output: list of ExtractedClaims (claim_type: appearance | behavior (OOC) | location | spacetime)
 
 The model is asked to name each claim's subject by its listed name when the
 manuscript refers to a known character or location by another name, so entity
-matching (pipeline/entities.py, 7.4) can match on names alone.
+matching (pipeline/entities.py, 7.4) can match on names alone. A character the
+model still names by one of its listed aliases is renamed after it
+(pipeline/entities.py resolve_aliases).
 
 What the model returns is checked here, item by item: a malformed claim is
 dropped (and counted in the log) rather than failing the whole episode, but a
@@ -113,7 +116,7 @@ def parse_extraction(raw: str) -> Extraction:
 
 
 def extract_claims(
-    novel_id: uuid.UUID, manuscript: str, known_characters: list[str], known_locations: list[str]
+    novel_id: uuid.UUID, manuscript: str, known_characters: dict[str, list[str]], known_locations: list[str]
 ) -> Extraction:
     extraction = parse_extraction(llm.extract_claims(manuscript, known_characters, known_locations))
     if extraction.dropped:

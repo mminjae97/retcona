@@ -9,7 +9,8 @@ The run row (models/validation_run.py) carries the job through
 queued -> running -> succeeded | failed. Steps:
 1. Claim the run: queued -> running, in one conditional UPDATE, so a job
    delivered twice runs once (10.4.4).
-2. Read the episode and the novel's known names, in a short transaction.
+2. Read the episode and the novel's known names (characters' aliases too),
+   in a short transaction.
 3. Call the model with no transaction open: it can take a while, and holding
    the novel's row lock through it would block the author's saves.
 4. Read the setting cards the claims are about (the context bundle), and
@@ -44,7 +45,7 @@ from models.novel import Novel
 from models.validation_run import ValidationRun
 from pipeline.context_bundle import get_context_bundle
 from pipeline.dismissals import dismissal_key, dismissed_keys
-from pipeline.entities import match_and_register
+from pipeline.entities import match_and_register, resolve_aliases
 from pipeline.extract_claims import Extraction, ExtractionError, extract_claims
 from pipeline.judges import Flag, judge_appearance, judge_location
 from pipeline.merge import apply_new_information, merge_and_dedupe
@@ -89,7 +90,9 @@ def _lock_novel(db: Session, novel_id: uuid.UUID) -> None:
         raise RunFailed("episode_missing")
 
 
-def _read_input(novel_id: uuid.UUID, episode_id: uuid.UUID) -> tuple[str, datetime, list[str], list[str]]:
+def _read_input(
+    novel_id: uuid.UUID, episode_id: uuid.UUID
+) -> tuple[str, datetime, dict[str, list[str]], list[str]]:
     with SessionLocal() as db:
         row = db.execute(
             select(Episode.content, Episode.updated_at)
@@ -100,7 +103,9 @@ def _read_input(novel_id: uuid.UUID, episode_id: uuid.UUID) -> tuple[str, dateti
             raise RunFailed("episode_missing")
         if not row.content.strip():
             raise RunFailed("empty_manuscript")
-        characters = list(db.scalars(select(Character.name).where(Character.novel_id == novel_id)))
+        # name -> aliases; a name is one card's (api/settings.py).
+        rows = db.execute(select(Character.name, Character.aliases).where(Character.novel_id == novel_id))
+        characters = {name: list(aliases or []) for name, aliases in rows}
         # Distinct: nothing stops two locations sharing a name, and the model needs it once.
         locations = list(db.scalars(select(Location.name).where(Location.novel_id == novel_id).distinct()))
         return row.content, row.updated_at, characters, locations
@@ -245,6 +250,7 @@ def validate_episode(novel_id: uuid.UUID, run_id: uuid.UUID) -> None:
         except Exception as exc:
             logger.exception("Validation run %s: the model call failed", run_id)
             raise RunFailed("llm_failed") from exc
+        resolve_aliases(extraction.claims, characters)
         flags = _judge(novel_id, episode_id, extraction)
         _store(novel_id, run_id, episode_id, content, content_updated_at, extraction, flags)
     except RunFailed as exc:

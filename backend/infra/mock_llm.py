@@ -58,18 +58,25 @@ def _claim(claim_type: str, subject_kind: str, subject: str, sentence: str, attr
     }
 
 
-def extract(manuscript: str, known_characters: list[str], known_locations: list[str]) -> dict:
+def extract(manuscript: str, known_characters: list[dict], known_locations: list[str]) -> dict:
     sentences = [s.strip() for s in _SENTENCE_BREAK.split(manuscript) if s.strip()]
     counts: dict[str, int] = {}
     for word in _SUBJECT.findall(manuscript):
         if word not in _NOT_NAMES:
             counts[word] = counts.get(word, 0) + 1
-    characters = list(dict.fromkeys(known_characters + [w for w, n in counts.items() if n >= 2]))
+    # A known character is found by its name or any of its aliases, and named
+    # by its name, as the prompt asks a model to.
+    by_word = {
+        word: known["name"] for known in known_characters for word in [known["name"], *known.get("aliases", [])]
+    }
+    for word, n in counts.items():
+        if n >= 2:
+            by_word.setdefault(word, word)
     locations = list(dict.fromkeys(known_locations + _PLACE.findall(manuscript)))
 
     claims = []
     for sentence in sentences:
-        character = next((name for name in characters if name in sentence), None)
+        character = next((name for word, name in by_word.items() if word in sentence), None)
         location = next((name for name in locations if name in sentence), None)
         if character:
             attributes = {key: sentence for word, key in _APPEARANCE.items() if word in sentence}

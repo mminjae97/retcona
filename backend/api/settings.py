@@ -2,7 +2,7 @@
 
 Both are optional, author-entered context for the validation pipeline: world
 settings are a category + title + free-form description; a character card is
-a name plus three sections — fixed attributes, mutable attributes, and
+a name and aliases plus three sections — fixed attributes, mutable attributes, and
 personality/speech (the last one is what OOC judgment reads, 7.2). Cards left
 unwritten are meant to be filled in from the manuscript later
 (source=auto_detected, 7.4); editing one here makes it the author's
@@ -11,7 +11,7 @@ unwritten are meant to be filled in from the manuscript later
 Every write locks the novel row first, for the same reason as the novel and
 episode endpoints: a concurrent soft-delete of the novel can't land between
 this request's ownership check and its commit (10.1). The same lock also
-serializes the duplicate-name check on characters.
+serializes the duplicate name/alias check on characters.
 """
 
 import uuid
@@ -19,7 +19,14 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
@@ -42,6 +49,8 @@ router = APIRouter()
 WorldCategory = Literal["era", "power_system", "faction", "history", "other"]
 
 _ATTR_MAX_LENGTH = 500
+_NAME_MAX_LENGTH = 100
+_ALIASES_MAX = 20
 
 
 def _strip_required(value: str) -> str:
@@ -186,7 +195,9 @@ class Personality(_AttrSection):
 
 
 class CharacterInput(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=_NAME_MAX_LENGTH)
+    # Other names the manuscript calls it by (models/character.py).
+    aliases: list[str] = Field(default_factory=list, max_length=_ALIASES_MAX)
     fixed_attrs: FixedAttrs = Field(default_factory=lambda: FixedAttrs())
     mutable_attrs: MutableAttrs = Field(default_factory=lambda: MutableAttrs())
     personality: Personality = Field(default_factory=lambda: Personality())
@@ -196,17 +207,42 @@ class CharacterInput(BaseModel):
     def _not_blank(cls, value: str) -> str:
         return _strip_required(value)
 
+    @field_validator("aliases")
+    @classmethod
+    def _clean_aliases(cls, value: list[str]) -> list[str]:
+        # Blank ones dropped, and one of each as matching compares them.
+        cleaned: dict[str, str] = {}
+        for alias in value:
+            alias = alias.strip()
+            if len(alias) > _NAME_MAX_LENGTH:
+                raise ValueError(f"An alias can be at most {_NAME_MAX_LENGTH} characters")
+            if alias:
+                cleaned.setdefault(normalize_name(alias), alias)
+        return list(cleaned.values())
+
+    @model_validator(mode="after")
+    def _aliases_other_than_name(self) -> "CharacterInput":
+        name = normalize_name(self.name)
+        self.aliases = [alias for alias in self.aliases if normalize_name(alias) != name]
+        return self
+
 
 class CharacterPublic(BaseModel):
     model_config = {"from_attributes": True}
 
     id: uuid.UUID
     name: str
+    aliases: list[str]
     source: str  # manual | auto_detected
     fixed_attrs: FixedAttrs
     mutable_attrs: MutableAttrs
     personality: Personality
     created_at: datetime
+
+    @field_validator("aliases", mode="before")
+    @classmethod
+    def _stored_aliases(cls, value: object) -> object:
+        return [str(alias) for alias in value] if isinstance(value, list) else []
 
     @field_validator("fixed_attrs", "mutable_attrs", "personality", mode="before")
     @classmethod
@@ -234,30 +270,44 @@ def _get_character(db: Session, novel_id: uuid.UUID, character_id: uuid.UUID) ->
     return character
 
 
-def _reject_duplicate_name(
-    db: Session, novel_id: uuid.UUID, name: str, *, except_id: uuid.UUID | None = None
+def _names(name: str, aliases: list[str]) -> set[str]:
+    # A card's names as matching and dismissals compare them (normalized:
+    # "Leon" and "leon" are one name).
+    return {normalize_name(each) for each in [name, *aliases]}
+
+
+def _reject_taken_names(
+    db: Session, novel_id: uuid.UUID, names: set[str], *, except_id: uuid.UUID | None = None
 ) -> None:
-    # One card per name within a novel: entity matching (7.4) looks characters
-    # up by name, and two cards with the same one would split what the
-    # manuscript says about that character between them. Compared as matching
-    # and dismissals compare them (normalized: "Leon" and "leon" are one name).
-    # A novel has tens of characters at most, so they're compared here rather
+    # One card per name within a novel, aliases included: entity matching
+    # (7.4) looks characters up by them, and two cards with the same one would
+    # split what the manuscript says about that character between them. A
+    # novel has tens of characters at most, so they're compared here rather
     # than in SQL. Race-free because every caller holds the novel's row lock.
-    # Renaming relies on this: a name's dismissals and unlinked claims belong
-    # to the one card by that name (_rename_claims, rename_subject).
-    wanted = normalize_name(name)
-    others = db.execute(select(Character.id, Character.name).where(Character.novel_id == novel_id))
-    if any(other_id != except_id and normalize_name(other) == wanted for other_id, other in others):
-        raise HTTPException(status.HTTP_409_CONFLICT, "A character with this name already exists")
+    # Renaming and adding aliases rely on this: a name's dismissals and
+    # unlinked claims belong to the one card by that name (_take_over_names).
+    if not names:
+        return
+    others = db.execute(
+        select(Character.id, Character.name, Character.aliases).where(Character.novel_id == novel_id)
+    )
+    if any(other_id != except_id and names & _names(name, aliases or []) for other_id, name, aliases in others):
+        raise HTTPException(status.HTTP_409_CONFLICT, "A character with this name or alias already exists")
 
 
-def _rename_claims(db: Session, novel_id: uuid.UUID, character: Character, name: str) -> None:
-    # Its claims, and the unlinked ones by its old name (a card by that name,
-    # since deleted): the dismissals under that name moved to the new one,
-    # whichever of them they were about, and each claim's flags must still
-    # find theirs to reopen them. Unlinked claims are few; compared here, as
+def _take_over_names(
+    db: Session, novel_id: uuid.UUID, character_id: uuid.UUID | None, old_names: list[str], name: str
+) -> None:
+    # Later runs name the character by its name (extraction answers with it,
+    # aliases resolved to it), so what was recorded under its old name, or
+    # under a name it now has as an alias (a card by that name, since
+    # deleted), follows: the dismissals, its own claims, and the unlinked
+    # claims by those names — each claim's flags must still find their
+    # dismissals to reopen them. Unlinked claims are few; compared here, as
     # names are normalized.
-    old = normalize_name(character.name)
+    for old_name in old_names:
+        rename_subject(db, novel_id, "character", old_name, name)
+    old = {normalize_name(old_name) for old_name in old_names}
     unlinked = [
         claim_id
         for claim_id, subject_name in db.execute(
@@ -265,15 +315,16 @@ def _rename_claims(db: Session, novel_id: uuid.UUID, character: Character, name:
                 Claim.novel_id == novel_id, Claim.subject_kind == "character", Claim.subject_id.is_(None)
             )
         )
-        if normalize_name(subject_name or "") == old
+        if normalize_name(subject_name or "") in old
     ]
+    # A card being created has no claims of its own yet (and `== None` would
+    # match every unlinked claim).
+    claims = Claim.id.in_(unlinked)
+    if character_id is not None:
+        claims = or_(Claim.subject_id == character_id, claims)
     db.execute(
         update(Claim)
-        .where(
-            Claim.novel_id == novel_id,
-            Claim.subject_kind == "character",
-            or_(Claim.subject_id == character.id, Claim.id.in_(unlinked)),
-        )
+        .where(Claim.novel_id == novel_id, Claim.subject_kind == "character", claims)
         .values(subject_name=name)
     )
 
@@ -289,6 +340,7 @@ def _apply(character: Character, body: CharacterInput) -> None:
         if fixed_attrs.get(key) == previous.get(key)
     }
     character.name = body.name
+    character.aliases = body.aliases
     character.fixed_attrs = fixed_attrs
     character.mutable_attrs = body.mutable_attrs.stored()
     character.personality = body.personality.stored()
@@ -314,7 +366,9 @@ def create_character(
     user: User = Depends(get_current_user),
 ) -> Character:
     _get_owned_novel(db, novel_id, user, for_update=True)
-    _reject_duplicate_name(db, novel_id, body.name)
+    _reject_taken_names(db, novel_id, _names(body.name, body.aliases))
+    if body.aliases:
+        _take_over_names(db, novel_id, None, body.aliases, body.name)
     character = Character(novel_id=novel_id, source="manual")
     _apply(character, body)
     db.add(character)
@@ -333,16 +387,16 @@ def update_character(
 ) -> Character:
     _get_owned_novel(db, novel_id, user, for_update=True)
     character = _get_character(db, novel_id, character_id)
-    # Only when the name changes as matching sees it: two cards saved before
-    # names were compared normalized ("Leon", "leon") stay editable.
-    if normalize_name(character.name) != normalize_name(body.name):
-        _reject_duplicate_name(db, novel_id, body.name, except_id=character_id)
-    if character.name != body.name:
-        # Later runs name it by the new name (extraction answers with the
-        # card's name): its dismissals and claims follow, so the current flags
-        # and the next run's agree on who they're about.
-        rename_subject(db, novel_id, "character", character.name, body.name)
-        _rename_claims(db, novel_id, character, body.name)
+    # Only the names it didn't have yet are checked: one it keeps is its own.
+    current = _names(character.name, character.aliases or [])
+    _reject_taken_names(db, novel_id, _names(body.name, body.aliases) - current, except_id=character_id)
+    # What's recorded under its old name and under its new aliases moves to
+    # its name, so the current flags and the next run's agree on who they're
+    # about.
+    old_names = [character.name] if character.name != body.name else []
+    old_names += [alias for alias in body.aliases if normalize_name(alias) not in current]
+    if old_names:
+        _take_over_names(db, novel_id, character_id, old_names, body.name)
     _apply(character, body)
     # An auto-detected card the author has now edited is theirs (7.4: changes
     # to existing settings always go through the author).

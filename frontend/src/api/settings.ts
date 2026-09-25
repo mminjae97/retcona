@@ -55,8 +55,14 @@ export type FixedAttrs = Section<typeof FIXED_ATTR_FIELDS>;
 export type MutableAttrs = Section<typeof MUTABLE_ATTR_FIELDS>;
 export type Personality = Section<typeof PERSONALITY_FIELDS>;
 
+// Aliases: other names the manuscript calls the character by (nicknames,
+// titles). The backend drops blank ones and ones repeating the name.
+export const ALIASES_MAX = 20;
+export const NAME_MAX_LENGTH = 100;
+
 export interface CharacterInput {
   name: string;
+  aliases: string[];
   fixed_attrs: Partial<FixedAttrs>;
   mutable_attrs: Partial<MutableAttrs>;
   personality: Partial<Personality>;
@@ -65,6 +71,7 @@ export interface CharacterInput {
 export interface CharacterPublic {
   id: string;
   name: string;
+  aliases: string[];
   source: "manual" | "auto_detected";
   fixed_attrs: FixedAttrs;
   mutable_attrs: MutableAttrs;

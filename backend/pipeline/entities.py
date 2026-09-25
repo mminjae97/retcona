@@ -2,8 +2,11 @@
 
 Each claim's subject is matched against the novel's characters/locations by
 name. Aliases are resolved before this, by the extraction step: the model is
-given the known names and answers with them (pipeline/extract_claims.py).
-Embedding similarity (chapter 5) isn't used yet.
+given the known names, with the aliases the author listed for each character,
+and answers with the names (pipeline/extract_claims.py); a subject it still
+gives as a listed alias is renamed after its character (resolve_aliases). A
+card's aliases match here too, in case the author added one while the run was
+under way. Embedding similarity (chapter 5) isn't used yet.
 
 A subject with no match becomes a new card, source=auto_detected. Its fixed
 attributes / features are filled in afterwards like any card's empty ones
@@ -59,6 +62,20 @@ class Registration:
         return self.ids[(claim.subject_kind, normalize_name(claim.subject))]
 
 
+def resolve_aliases(claims: list[ExtractedClaim], known_characters: dict[str, list[str]]) -> None:
+    """Names a claim about a character by the character's name where the model
+    gave one of its listed aliases, so everything after extraction (judgment,
+    matching, dismissals) sees one name per character."""
+    names = {normalize_name(name) for name in known_characters}
+    by_alias = {normalize_name(alias): name for name, aliases in known_characters.items() for alias in aliases}
+    for claim in claims:
+        if claim.subject_kind != "character":
+            continue
+        key = normalize_name(claim.subject)
+        if key not in names and key in by_alias:
+            claim.subject = by_alias[key]
+
+
 def _initial_attrs(claims: list[ExtractedClaim], keys: tuple[str, ...]) -> dict[str, str]:
     attrs: dict[str, str] = {}
     for claim in claims:
@@ -76,6 +93,8 @@ def match_and_register(db: Session, novel_id: uuid.UUID, claims: list[ExtractedC
         select(Character).where(Character.novel_id == novel_id).order_by(Character.created_at, Character.id)
     ):
         registration.ids.setdefault(("character", normalize_name(character.name)), character.id)
+        for alias in character.aliases or []:
+            registration.ids.setdefault(("character", normalize_name(alias)), character.id)
     for location in db.scalars(
         select(Location).where(Location.novel_id == novel_id).order_by(Location.created_at, Location.id)
     ):
