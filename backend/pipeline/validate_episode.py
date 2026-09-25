@@ -43,7 +43,8 @@ from models.location import Location
 from models.novel import Novel
 from models.validation_run import ValidationRun
 from pipeline.context_bundle import get_context_bundle
-from pipeline.entities import comparable_text, match_and_register, normalize_name
+from pipeline.dismissals import dismissal_key, dismissed_keys
+from pipeline.entities import match_and_register
 from pipeline.extract_claims import Extraction, ExtractionError, extract_claims
 from pipeline.judges import Flag, judge_appearance, judge_location
 from pipeline.merge import apply_new_information, merge_and_dedupe
@@ -117,15 +118,6 @@ def _judge(novel_id: uuid.UUID, episode_id: uuid.UUID, extraction: Extraction) -
         raise RunFailed("inference_failed") from exc
 
 
-def _dismissal_key(
-    subject_id: uuid.UUID | None, attribute: str | None, evidence: str | None, value: str | None, reference: str | None
-) -> tuple:
-    # The claim's card is the one entity matching links it to, on both sides
-    # (the stored claim's subject_id, and this run's registration).
-    said = f"sentence:{comparable_text(evidence)}" if evidence else f"value:{normalize_name(value or '')}"
-    return (subject_id, attribute, said, normalize_name(reference or ""))
-
-
 def _store(
     novel_id: uuid.UUID,
     run_id: uuid.UUID,
@@ -151,33 +143,11 @@ def _store(
 
         # A new run replaces the episode's earlier claims (and their flags):
         # they describe content that has since been validated again. What the
-        # author dismissed as a false positive stays dismissed when the same
-        # sentence is flagged again against the same setting (same card,
-        # attribute, sentence and setting value — a changed setting is judged
-        # afresh). The sentence is compared by letters and digits: the model's
-        # copy of it can differ between runs. A claim that came with no
-        # sentence (its flag shows the claim's restatement, which differs
-        # between runs) is compared by what it says for the attribute.
+        # author dismissed as a false positive is kept apart
+        # (pipeline/dismissals.py): a flag this run finds that matches a
+        # dismissal is stored dismissed.
         earlier = select(Claim.id).where(Claim.novel_id == novel_id, Claim.episode_id == episode_id)
-        dismissed = {
-            _dismissal_key(subject_id, attribute, evidence, (attributes or {}).get(attribute), reference)
-            for subject_id, attribute, evidence, attributes, reference in db.execute(
-                select(
-                    Claim.subject_id,
-                    ContradictionFlag.attribute,
-                    Claim.evidence_text,
-                    Claim.attributes,
-                    ContradictionFlag.reference_text,
-                )
-                .join(Claim, Claim.id == ContradictionFlag.claim_id)
-                .where(
-                    ContradictionFlag.novel_id == novel_id,
-                    Claim.novel_id == novel_id,
-                    Claim.episode_id == episode_id,
-                    ContradictionFlag.status == "dismissed",
-                )
-            )
-        }
+        dismissed = dismissed_keys(db, novel_id, episode_id)
         db.execute(
             delete(ContradictionFlag).where(
                 ContradictionFlag.novel_id == novel_id, ContradictionFlag.claim_id.in_(earlier)
@@ -205,7 +175,7 @@ def _store(
         )
         statuses = [
             "dismissed"
-            if _dismissal_key(
+            if dismissal_key(
                 subject_ids[flag.claim_index],
                 flag.attribute,
                 extraction.claims[flag.claim_index].evidence,
@@ -239,8 +209,9 @@ def _store(
             "dropped_claims": extraction.dropped,
             "new_characters": registration.new_characters,
             "new_locations": registration.new_locations,
-            # Left for the author to look at: not the ones still dismissed.
-            "flags": statuses.count("open"),
+            # How many the run found — a record; what's open now, after the
+            # author's accepts and dismissals, is the API's flag_counts.
+            "flags": len(flags),
         }
         # "submitted" means validated (2.2) — only if what was validated is
         # still what's saved (a save during the run already made it a draft).

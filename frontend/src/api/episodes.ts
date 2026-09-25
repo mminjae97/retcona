@@ -89,7 +89,9 @@ export async function getLatestValidation(novelId: string, episodeId: string): P
 
 // Contradiction flags (2.4): what the latest successful run found
 // contradicting the settings, most confident first.
-export type FlagStatus = "open" | "resolved_by_revalidation" | "accepted" | "dismissed";
+// resolved: accepting another flag on the same attribute set the setting to
+// what this one says too (the author didn't accept this one).
+export type FlagStatus = "open" | "accepted" | "dismissed" | "resolved" | "resolved_by_revalidation";
 
 export interface Flag {
   id: string;

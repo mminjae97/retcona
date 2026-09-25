@@ -20,7 +20,11 @@ contradiction_flags: a claim that contradicts the novel's settings (7.2)
     screen sorts by it (2.5). None once the setting it was judged against
     changed (accepting another flag on the same attribute): not judged
     against the new value until the episode is validated again
-  - status: open | resolved_by_revalidation | accepted | dismissed (2.4, 7.5)
+  - status: open | accepted | dismissed | resolved | resolved_by_revalidation
+    (2.4, 7.5). resolved: accepting another flag on the same attribute set the
+    setting to what this one says too, so it no longer contradicts — the
+    author didn't accept it. A dismissal is also recorded in flag_dismissals,
+    which outlasts the run (models/flag_dismissal.py).
 """
 
 import uuid
@@ -58,4 +62,4 @@ class ContradictionFlag(Base, NovelScopedMixin, TimestampMixin):
     evidence_text: Mapped[str] = mapped_column(Text, nullable=False)
     reference_text: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String, default="open")
-    # open | resolved_by_revalidation | accepted | dismissed
+    # open | accepted | dismissed | resolved | resolved_by_revalidation

@@ -6,6 +6,7 @@ from models import (  # noqa: F401
     claim,
     email_verification,
     episode,
+    flag_dismissal,
     location,
     novel,
     relation,
