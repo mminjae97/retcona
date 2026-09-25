@@ -1,15 +1,16 @@
 """The author's false-positive dismissals, kept across validation runs (models/flag_dismissal.py).
 
 The result screen's dismiss records one; reopen removes it; a validation run
-marks the flags it finds that match one as dismissed. The caller commits.
+marks the flags it finds that match one as dismissed; renaming a card moves
+its dismissals to the new name. The caller commits.
 """
 
 import uuid
 from typing import NamedTuple
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, exists, select, update
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from models.flag_dismissal import FlagDismissal
 from pipeline.entities import comparable_text, normalize_name
@@ -40,8 +41,11 @@ def dismissal_key(
     if not subject_kind or not subject_name or not attribute:
         return None
     said = f"sentence:{comparable_text(evidence)}" if evidence else f"value:{normalize_name(value or '')}"
-    subject = f"{subject_kind}:{normalize_name(subject_name)}"
-    return DismissalKey(subject, attribute, said, normalize_name(reference or ""))
+    return DismissalKey(_subject(subject_kind, subject_name), attribute, said, normalize_name(reference or ""))
+
+
+def _subject(subject_kind: str, subject_name: str) -> str:
+    return f"{subject_kind}:{normalize_name(subject_name)}"
 
 
 def dismissed_keys(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID) -> set[DismissalKey]:
@@ -73,4 +77,33 @@ def remove_dismissal(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, ke
             FlagDismissal.said == key.said,
             FlagDismissal.reference == key.reference,
         )
+    )
+
+
+def rename_subject(db: Session, novel_id: uuid.UUID, subject_kind: str, old_name: str, new_name: str) -> None:
+    """A card renamed: extraction answers with the card's name, not the
+    manuscript's wording (pipeline/extract_claims.py), so later runs name its
+    flags by the new one. A dismissal already recorded under the new name (a
+    card by that name, since deleted) stands for its twin under the old one."""
+    old, new = _subject(subject_kind, old_name), _subject(subject_kind, new_name)
+    if old == new:
+        return
+    twin = aliased(FlagDismissal)
+    db.execute(
+        delete(FlagDismissal).where(
+            FlagDismissal.novel_id == novel_id,
+            FlagDismissal.subject == old,
+            exists().where(
+                twin.episode_id == FlagDismissal.episode_id,
+                twin.subject == new,
+                twin.attribute == FlagDismissal.attribute,
+                twin.said == FlagDismissal.said,
+                twin.reference == FlagDismissal.reference,
+            ),
+        )
+    )
+    db.execute(
+        update(FlagDismissal)
+        .where(FlagDismissal.novel_id == novel_id, FlagDismissal.subject == old)
+        .values(subject=new)
     )

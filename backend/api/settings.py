@@ -32,6 +32,7 @@ from models.relation import Relation
 from models.story_event import EventParticipant
 from models.user import User
 from models.world_setting import WorldSetting
+from pipeline.dismissals import rename_subject
 
 router = APIRouter()
 
@@ -302,6 +303,16 @@ def update_character(
     _get_owned_novel(db, novel_id, user, for_update=True)
     character = _get_character(db, novel_id, character_id)
     _reject_duplicate_name(db, novel_id, body.name, except_id=character_id)
+    if character.name != body.name:
+        # Later runs name it by the new name (extraction answers with the
+        # card's name): its dismissals and the claims linked to it follow, so
+        # the current flags and the next run's agree on who they're about.
+        rename_subject(db, novel_id, "character", character.name, body.name)
+        db.execute(
+            update(Claim)
+            .where(Claim.novel_id == novel_id, Claim.subject_kind == "character", Claim.subject_id == character_id)
+            .values(subject_name=body.name)
+        )
     _apply(character, body)
     # An auto-detected card the author has now edited is theirs (7.4: changes
     # to existing settings always go through the author).

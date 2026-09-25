@@ -9,10 +9,11 @@ finds it here (pipeline/dismissals.py).
 One row per (episode, subject, attribute, what the manuscript said, setting it
 was judged against) — the same sentence judged against a changed setting is a
 new question for the author, so the setting is part of it.
-- subject: who or what the claim is about, by kind and name as the manuscript
-  names it ("character:레온", normalized) — not the card's id: entity matching
-  goes by name, so a card deleted and made again (a new id), or renamed, still
-  meets its dismissals when the manuscript names it the same way.
+- subject: who or what the claim is about, by kind and name as extraction
+  gives it ("character:레온", normalized) — not the card's id: entity matching
+  goes by name, so a card deleted and made again (a new id) still meets its
+  dismissals. Extraction answers with the card's name, so renaming a card
+  moves its dismissals to the new name (api/settings.py).
 - said: the sentence by its letters and digits ("sentence:..."), or, for a
   claim that came with no sentence, what it said for the attribute ("value:...")
 - reference: the setting value, normalized
