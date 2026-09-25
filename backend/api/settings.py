@@ -331,7 +331,10 @@ def update_character(
 ) -> Character:
     _get_owned_novel(db, novel_id, user, for_update=True)
     character = _get_character(db, novel_id, character_id)
-    _reject_duplicate_name(db, novel_id, body.name, except_id=character_id)
+    # Only when the name changes as matching sees it: two cards saved before
+    # names were compared normalized ("Leon", "leon") stay editable.
+    if normalize_name(character.name) != normalize_name(body.name):
+        _reject_duplicate_name(db, novel_id, body.name, except_id=character_id)
     if character.name != body.name:
         # Later runs name it by the new name (extraction answers with the
         # card's name): its dismissals and claims follow, so the current flags
