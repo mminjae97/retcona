@@ -33,6 +33,7 @@ from models.story_event import EventParticipant
 from models.user import User
 from models.world_setting import WorldSetting
 from pipeline.dismissals import rename_subject
+from pipeline.entities import normalize_name
 
 router = APIRouter()
 
@@ -238,13 +239,41 @@ def _reject_duplicate_name(
 ) -> None:
     # One card per name within a novel: entity matching (7.4) looks characters
     # up by name, and two cards with the same one would split what the
-    # manuscript says about that character between them. Race-free because
-    # every caller holds the novel's row lock.
-    query = select(Character.id).where(Character.novel_id == novel_id, Character.name == name)
-    if except_id is not None:
-        query = query.where(Character.id != except_id)
-    if db.scalar(query) is not None:
+    # manuscript says about that character between them. Compared as matching
+    # and dismissals compare them (normalized: "Leon" and "leon" are one name).
+    # A novel has tens of characters at most, so they're compared here rather
+    # than in SQL. Race-free because every caller holds the novel's row lock.
+    wanted = normalize_name(name)
+    others = db.execute(select(Character.id, Character.name).where(Character.novel_id == novel_id))
+    if any(other_id != except_id and normalize_name(other) == wanted for other_id, other in others):
         raise HTTPException(status.HTTP_409_CONFLICT, "A character with this name already exists")
+
+
+def _rename_claims(db: Session, novel_id: uuid.UUID, character: Character, name: str) -> None:
+    # Its claims, and the unlinked ones by its old name (a card by that name,
+    # since deleted): the dismissals under that name moved to the new one,
+    # whichever of them they were about, and each claim's flags must still
+    # find theirs to reopen them. Unlinked claims are few; compared here, as
+    # names are normalized.
+    old = normalize_name(character.name)
+    unlinked = [
+        claim_id
+        for claim_id, subject_name in db.execute(
+            select(Claim.id, Claim.subject_name).where(
+                Claim.novel_id == novel_id, Claim.subject_kind == "character", Claim.subject_id.is_(None)
+            )
+        )
+        if normalize_name(subject_name or "") == old
+    ]
+    db.execute(
+        update(Claim)
+        .where(
+            Claim.novel_id == novel_id,
+            Claim.subject_kind == "character",
+            or_(Claim.subject_id == character.id, Claim.id.in_(unlinked)),
+        )
+        .values(subject_name=name)
+    )
 
 
 def _apply(character: Character, body: CharacterInput) -> None:
@@ -305,14 +334,10 @@ def update_character(
     _reject_duplicate_name(db, novel_id, body.name, except_id=character_id)
     if character.name != body.name:
         # Later runs name it by the new name (extraction answers with the
-        # card's name): its dismissals and the claims linked to it follow, so
-        # the current flags and the next run's agree on who they're about.
+        # card's name): its dismissals and claims follow, so the current flags
+        # and the next run's agree on who they're about.
         rename_subject(db, novel_id, "character", character.name, body.name)
-        db.execute(
-            update(Claim)
-            .where(Claim.novel_id == novel_id, Claim.subject_kind == "character", Claim.subject_id == character_id)
-            .values(subject_name=body.name)
-        )
+        _rename_claims(db, novel_id, character, body.name)
     _apply(character, body)
     # An auto-detected card the author has now edited is theirs (7.4: changes
     # to existing settings always go through the author).
