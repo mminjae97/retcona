@@ -5,7 +5,8 @@ claims: verification-target claim units extracted from the manuscript by the ext
     matched or auto-registered by entity matching (7.4). No foreign key, like
     relations: it points at either table. subject_name keeps the name as the
     extraction gave it, so a claim still reads right after its card is deleted
-    (subject_id is then cleared).
+    (subject_id is then cleared); renaming a card renames its claims, and
+    the unlinked ones by its old name (api/settings.py).
   - evidence_text: the manuscript sentence the claim came from (shown as the
     basis on the result screen, 2.4)
   - attributes: what the claim says as setting-card keys (e.g. {"eye_color": ...}),
