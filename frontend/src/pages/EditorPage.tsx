@@ -12,7 +12,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Link, useBlocker, useParams } from "react-router-dom";
 import { fetchCurrentUserId } from "../api/auth";
 import { describeError } from "../api/client";
-import { getEpisode, saveEpisode } from "../api/episodes";
+import { getEpisode, listFlags, saveEpisode } from "../api/episodes";
 import type { EpisodePublic, ValidationRun } from "../api/episodes";
 import {
   MAX_DRAFTS_PER_EPISODE,
@@ -548,6 +548,8 @@ export default function EditorPage() {
       </div>
 
       <ValidationStatus
+        novelId={novelId}
+        episodeId={episodeId}
         run={validation.run}
         requestError={validation.requestError}
         episodeUpdatedAt={episode.updated_at}
@@ -562,19 +564,47 @@ export default function EditorPage() {
 // extracted contradict the settings (appearance and location so far), with a
 // link to the result screen (2.4), and the characters and locations it
 // registered as new (7.4).
+// How many flags the episode has now, and how many are still open: the
+// result screen's accept/dismiss changes them after the run's summary was
+// written. Fetched again whenever the latest run changes state. null until
+// known (or if the request fails — the summary stands in).
+function useFlagCounts(novelId: string | undefined, episodeId: string | undefined, run: ValidationRun | null) {
+  const [counts, setCounts] = useState<{ total: number; open: number } | null>(null);
+  const runKey = run ? `${run.id}:${run.status}` : "";
+  useEffect(() => {
+    setCounts(null);
+    if (!novelId || !episodeId || !runKey) return;
+    let cancelled = false;
+    listFlags(novelId, episodeId)
+      .then((flags) => {
+        if (!cancelled) setCounts({ total: flags.length, open: flags.filter((flag) => flag.status === "open").length });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [novelId, episodeId, runKey]);
+  return counts;
+}
+
 function ValidationStatus({
+  novelId,
+  episodeId,
   run,
   requestError,
   episodeUpdatedAt,
   settingsPath,
   resultPath,
 }: {
+  novelId: string | undefined;
+  episodeId: string | undefined;
   run: ValidationRun | null;
   requestError: string | null;
   episodeUpdatedAt: string;
   settingsPath: string;
   resultPath: string;
 }) {
+  const counts = useFlagCounts(novelId, episodeId, run);
   return (
     <>
       {/* A request that failed leaves the previous run's result in place below it. */}
@@ -584,7 +614,13 @@ function ValidationStatus({
         </p>
       )}
       {run && (
-        <RunStatus run={run} episodeUpdatedAt={episodeUpdatedAt} settingsPath={settingsPath} resultPath={resultPath} />
+        <RunStatus
+          run={run}
+          counts={counts}
+          episodeUpdatedAt={episodeUpdatedAt}
+          settingsPath={settingsPath}
+          resultPath={resultPath}
+        />
       )}
     </>
   );
@@ -592,11 +628,13 @@ function ValidationStatus({
 
 function RunStatus({
   run,
+  counts,
   episodeUpdatedAt,
   settingsPath,
   resultPath,
 }: {
   run: ValidationRun;
+  counts: { total: number; open: number } | null;
   episodeUpdatedAt: string;
   settingsPath: string;
   resultPath: string;
@@ -611,13 +649,22 @@ function RunStatus({
   if (run.status === "failed") {
     return (
       <p className="editor-validation editor-error" role="alert">
-        {describeRunError(run.error)} <Link to={resultPath}>이전 검증 결과 보기</Link>
+        {describeRunError(run.error)}
+        {/* Only when an earlier run left something to show. */}
+        {counts !== null && counts.total > 0 && (
+          <>
+            {" "}
+            <Link to={resultPath}>이전 검증 결과 보기</Link>
+          </>
+        )}
       </p>
     );
   }
   // flags is missing on runs from before contradiction judgment: those only
   // extracted claims, and saying "nothing contradicts" would be a false all-clear.
-  const { claims = 0, flags, new_characters: characters = [], new_locations: locations = [] } = run.summary;
+  const { claims = 0, new_characters: characters = [], new_locations: locations = [] } = run.summary;
+  // Open flags as they are now, once known; until then, as the run left them.
+  const flags = run.summary.flags === undefined ? undefined : (counts?.open ?? run.summary.flags);
   const finishedAt = run.finished_at ? new Date(run.finished_at).toLocaleString() : "";
   return (
     <div className="editor-validation" role="status">

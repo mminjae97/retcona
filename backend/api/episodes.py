@@ -29,6 +29,7 @@ from models.episode import Episode
 from models.location import Location
 from models.user import User
 from models.validation_run import ValidationRun
+from pipeline.entities import normalize_name
 from pipeline.judges import repeats
 
 logger = logging.getLogger(__name__)
@@ -346,6 +347,11 @@ FLAG_CARD_MISSING = "flag_card_missing"  # the setting card was deleted
 # accept while the episode is being validated: that run judged against the
 # card as it was, and would bring the flag back when it finishes
 FLAG_RUN_ACTIVE = "flag_run_active"
+# accept after the manuscript was edited since the run: the sentence may be gone
+FLAG_OUTDATED = "flag_outdated"
+# accept after the card's value changed since the run (the settings screen, or
+# an accept in another episode): the author hasn't seen what would be replaced
+FLAG_SETTING_CHANGED = "flag_setting_changed"
 
 
 # Which card attribute a flag's attribute lives in, by subject kind.
@@ -363,7 +369,7 @@ def act_on_flag(
 ) -> FlagPublic:
     # The novel's row lock: accepting writes a setting card, as the settings
     # screen and validation runs do under the same lock.
-    _get_episode(db, novel_id, episode_id, user, for_update=True)
+    episode = _get_episode(db, novel_id, episode_id, user, for_update=True)
     row = db.execute(
         select(ContradictionFlag, Claim)
         .join(Claim, Claim.id == ContradictionFlag.claim_id)
@@ -392,6 +398,10 @@ def act_on_flag(
             _abandon_if_stale(db, latest)
             if latest.status in _ACTIVE_STATUSES:
                 raise HTTPException(status.HTTP_409_CONFLICT, FLAG_RUN_ACTIVE)
+        # "submitted": the saved manuscript is what the last successful run
+        # validated (a save since made it a draft, 2.2).
+        if episode.status != "submitted":
+            raise HTTPException(status.HTTP_409_CONFLICT, FLAG_OUTDATED)
         _accept(db, novel_id, flag, claim)
         flag.status = "accepted"
     db.commit()
@@ -409,6 +419,9 @@ def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Cl
         card = db.scalar(select(model).where(model.id == claim.subject_id, model.novel_id == novel_id))
     if card is None:
         raise HTTPException(status.HTTP_409_CONFLICT, FLAG_CARD_MISSING)
+    current = (getattr(card, attrs_field) or {}).get(flag.attribute)
+    if normalize_name(str(current or "")) != normalize_name(flag.reference_text or ""):
+        raise HTTPException(status.HTTP_409_CONFLICT, FLAG_SETTING_CHANGED)
     # Reassigned, not mutated: SQLAlchemy doesn't see changes inside a JSONB value.
     setattr(card, attrs_field, {**(getattr(card, attrs_field) or {}), flag.attribute: value})
     # The author chose this value: it's theirs now, not an episode's to
@@ -418,10 +431,11 @@ def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Cl
     card.source = "manual"
 
     # The episode's other flags on the same attribute were judged against the
-    # old value. An open one that says the same as what was just accepted (by
-    # the judges' rule: one value contains the other) is accepted with it; the
-    # rest, dismissed ones included, now show the new value, for the author to
-    # judge (accepting one of those replaces it again, knowingly).
+    # old value. An open one whose value repeats the new setting (the judges'
+    # rule, judges.repeats: a run wouldn't flag it now) is accepted with it.
+    # The rest show the new value for the author to judge — a dismissed one
+    # reopened, since its dismissal was about the old value (accepting one of
+    # them replaces the value again, knowingly).
     siblings = db.execute(
         select(ContradictionFlag, Claim)
         .join(Claim, Claim.id == ContradictionFlag.claim_id)
@@ -438,7 +452,8 @@ def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Cl
     )
     for sibling, sibling_claim in siblings:
         sibling_value = _flag_value(sibling, sibling_claim) or ""
-        if sibling.status == "open" and sibling_value and (repeats(sibling_value, value) or repeats(value, sibling_value)):
+        if sibling.status == "open" and sibling_value and repeats(sibling_value, value):
             sibling.status = "accepted"
         else:
             sibling.reference_text = value
+            sibling.status = "open"

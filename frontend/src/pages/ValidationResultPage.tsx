@@ -12,7 +12,7 @@ import { ApiError, describeError } from "../api/client";
 import { actOnFlag, getEpisode, getLatestValidation, listFlags } from "../api/episodes";
 import type { EpisodePublic, Flag, FlagAction, ValidationRun } from "../api/episodes";
 import { FIXED_ATTR_FIELDS } from "../api/settings";
-import { describeRunError, isRunActive, isRunOutdated } from "../utils/validationRun";
+import { describeRunError, isRunActive } from "../utils/validationRun";
 import "./ValidationResultPage.css";
 
 const ERROR_TYPES: Record<string, string> = {
@@ -38,6 +38,9 @@ function describeActionError(err: unknown): string {
     if (err.message === "flag_card_missing") return "설정 카드가 삭제되어 반영할 수 없습니다.";
     if (err.message === "flag_no_value") return "이 항목은 반영할 값이 없습니다.";
     if (err.message === "flag_run_active") return "이 화의 검증이 진행 중입니다. 검증이 끝난 뒤 반영해 주세요.";
+    if (err.message === "flag_outdated") return "검증 이후 원고가 수정되었습니다. 다시 검증한 뒤 반영해 주세요.";
+    if (err.message === "flag_setting_changed")
+      return "검증 이후 이 설정이 바뀌었습니다. 다시 검증한 뒤 반영해 주세요.";
     return "이미 처리된 항목입니다. 새로고침해 주세요.";
   }
   return describeError(err);
@@ -49,6 +52,7 @@ function describeActionError(err: unknown): string {
 // `text` is wordChars(content), made once for all of a manuscript's flags.
 function locate(content: string, text: WordChars, sentence: string): { start: number; end: number } | null {
   if (!sentence) return null;
+  sentence = sentence.normalize("NFC");
   const exact = content.indexOf(sentence);
   if (exact !== -1) return { start: exact, end: exact + sentence.length };
   const wanted = wordChars(sentence).chars;
@@ -86,11 +90,11 @@ type Segment = { text: string; flagIds: string[] };
 
 // Splits the manuscript around each flag's sentence (its first occurrence).
 // Flags whose sentence isn't in the text any more (the manuscript was edited
-// after the run) are left out, and their cards say so.
-function segment(content: string, flags: Flag[]): { segments: Segment[]; located: Set<string> } {
+// after the run) are left out, and their cards say so. `content` is NFC and
+// `text` its wordChars, made once per manuscript.
+function segment(content: string, text: WordChars, flags: Flag[]): { segments: Segment[]; located: Set<string> } {
   const ranges = new Map<string, { start: number; end: number; flagIds: string[] }>();
   const located = new Set<string>();
-  const text = wordChars(content);
   for (const flag of flags) {
     const found = locate(content, text, flag.evidence_text);
     if (!found) continue;
@@ -167,9 +171,14 @@ export default function ValidationResultPage() {
 
   useEffect(() => load(), [load]);
 
+  // NFC, as the backend compares text: a manuscript pasted from some systems
+  // stores Hangul decomposed (NFD), and the model's sentences are composed.
+  // Shown as NFC too, which reads the same.
+  const content = useMemo(() => (episode?.content ?? "").normalize("NFC"), [episode?.content]);
+  const contentWords = useMemo(() => wordChars(content), [content]);
   const { segments, located } = useMemo(
-    () => segment(episode?.content ?? "", flags),
-    [episode?.content, flags],
+    () => segment(content, contentWords, flags),
+    [content, contentWords, flags],
   );
 
   function jumpTo(flag: Flag) {
@@ -236,9 +245,10 @@ export default function ValidationResultPage() {
   }
 
   const openCount = flags.filter((flag) => flag.status === "open").length;
-  // The flags come from the last run that succeeded; `run` is the latest one,
-  // which may be newer (still going, or failed).
-  const outdated = run !== null && run.status === "succeeded" && isRunOutdated(run, episode.updated_at);
+  // The flags come from the last run that succeeded (`run` is the latest one,
+  // which may be newer: still going, or failed). "submitted" means the saved
+  // manuscript is what that run validated; a save since made it a draft (2.2).
+  const outdated = flags.length > 0 && episode.status !== "submitted";
 
   return (
     <div className="result-page">
@@ -266,7 +276,7 @@ export default function ValidationResultPage() {
 
       <div className="result-layout">
         <section className="result-manuscript" aria-label="원고">
-          {episode.content ? (
+          {content ? (
             segments.map((part, index) =>
               part.flagIds.length ? (
                 <mark
@@ -310,6 +320,7 @@ export default function ValidationResultPage() {
                   key={flag.id}
                   flag={flag}
                   located={located.has(flag.id)}
+                  outdated={outdated}
                   active={flag.id === activeFlagId}
                   busy={busyFlagId === flag.id}
                   disabled={busyFlagId !== null}
@@ -344,6 +355,7 @@ function describeNoFlags(run: ValidationRun | null): string {
 function FlagCard({
   flag,
   located,
+  outdated,
   active,
   busy,
   disabled,
@@ -354,6 +366,7 @@ function FlagCard({
 }: {
   flag: Flag;
   located: boolean;
+  outdated: boolean;
   active: boolean;
   busy: boolean;
   disabled: boolean;
@@ -393,7 +406,14 @@ function FlagCard({
       </dl>
       {flag.status === "open" && (
         <div className="flag-actions">
-          <button type="button" onClick={() => onAct("accept")} disabled={disabled || !flag.value || !flag.subject_id}>
+          <button
+            type="button"
+            onClick={() => onAct("accept")}
+            // Only against the manuscript this run validated: after an edit the
+            // sentence may be gone, and its value with it.
+            disabled={disabled || !flag.value || !flag.subject_id || outdated || !located}
+            title={outdated || !located ? "원고가 검증 이후 수정되었습니다. 다시 검증한 뒤 반영할 수 있습니다." : undefined}
+          >
             {busy ? "처리 중..." : "반영"}
           </button>
           <button type="button" onClick={() => onAct("dismiss")} disabled={disabled}>
