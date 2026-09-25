@@ -84,7 +84,9 @@ def rename_subject(db: Session, novel_id: uuid.UUID, subject_kind: str, old_name
     """A card renamed: extraction answers with the card's name, not the
     manuscript's wording (pipeline/extract_claims.py), so later runs name its
     flags by the new one. A dismissal already recorded under the new name (a
-    card by that name, since deleted) stands for its twin under the old one."""
+    card by that name, since deleted) stands for its twin under the old one.
+    Everything under the old name moves: a novel has one card per normalized
+    name (api/settings.py _reject_duplicate_name)."""
     old, new = _subject(subject_kind, old_name), _subject(subject_kind, new_name)
     if old == new:
         return
