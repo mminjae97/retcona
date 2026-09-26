@@ -404,7 +404,8 @@ flowchart TD
 | 임베딩 | KURE-v1 + BM25 하이브리드 | 의미 기반 검색과 키워드 매칭을 함께 사용 |
 | Cross-encoder 리랭커 | bge-reranker-v2-m3-ko 계열 | 관련 과거 설정 문장 Top-K 추출용 |
 | NLI | klue-roberta + KorNLI 기반 | 소설 서술체/대사체 도메인으로 재파인튜닝 필요 |
-| LLM (외부 API) | 모델 미정 | OOC 행동 판단, 애매한 모순 최종 검증, 클레임 추출 |
+| LLM — 추출용 (외부 API) | 모델 미정 (빠르고 저렴한 모델) | 클레임 추출 — LLM 호출의 대부분 |
+| LLM — 판단용 (외부 API) | 모델 미정 (추론이 강한 모델) | OOC 행동 판단, 애매한 모순 최종 검증, 시공간 판단 보조 |
 | DB | PostgreSQL + pgvector | 벡터 검색과 정형 데이터를 단일 DB로 관리 |
 
 ### 6. 코드 구조

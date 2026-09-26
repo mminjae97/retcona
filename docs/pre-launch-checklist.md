@@ -82,3 +82,28 @@ directory falls back to a weaker public checkpoint (with a warning in its log).
 warning, and the flags match what the same episode gives locally.
 
 Code: `backend/infra/inference_client.py`, `ml/nli/`.
+
+## 4. LLMs: choose and wire up the two models
+
+**Now:** `LLM_PROVIDER=mock` — no model; `backend/infra/mock_llm.py` answers
+the claim-extraction prompt from keyword rules and judges nothing. The
+external and self-hosted clients are stubs that fail (`llm_failed`). The
+project uses two models from the start (`backend/infra/llm_client.py`):
+extraction (`LLM_MODEL_EXTRACTION`: most of the calls, a fast, cheaper model)
+and judgment (`LLM_MODEL_JUDGMENT`: OOC, the final check of ambiguous
+contradictions, spacetime assist — a stronger model).
+
+**To do:**
+- [ ] Choose the two models, trying each on real manuscripts: extraction —
+      JSON kept, claims found, characters sharing a name told apart by their
+      ref (`subject_ref`); judgment — OOC and ambiguous-contradiction calls.
+- [ ] Implement `ExternalLLMClient.complete` (and a concurrency limit + retry
+      backoff on rate limits, design doc 10.4).
+- [ ] Set `LLM_PROVIDER=external`, `LLM_API_KEY`, `LLM_MODEL_EXTRACTION`,
+      `LLM_MODEL_JUDGMENT` in the production environment (secret manager).
+
+**Check:** a validation run on a real episode succeeds with the external
+provider, its claims link to the right cards, and the provider's usage page
+shows calls on both models once OOC judgment exists.
+
+Code: `backend/infra/llm_client.py`, `backend/ai/llm.py`.
