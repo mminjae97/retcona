@@ -29,9 +29,14 @@ place, of one of these types:
 
 Rules:
 - Only named characters and places. Skip pronouns and unnamed people.
-- The known characters and locations are listed in <{KNOWN_ENTITIES_TAG}>. When
-  the episode refers to one of them by another name (a nickname, a title, a
-  shortened name), use the listed name as "subject".
+- The known characters and locations are listed in <{KNOWN_ENTITIES_TAG}>. Each
+  character has a "ref", a "name" and the other names the author has listed
+  for it ("aliases"). For a claim about a listed character, set "subject_ref"
+  to its ref and "subject" to its "name" — also when the episode calls it by
+  an alias or another nickname, title or shortened name. Two characters can
+  share a name: tell them apart by the context and their aliases. For a
+  character that isn't listed, and for places, leave "subject_ref" out; for a
+  listed place, use its listed name as "subject".
 - "evidence" is the sentence the claim comes from, copied verbatim.
 - "text" restates the claim in one short sentence, in the manuscript's language,
   naming the subject by its "subject" name (never a pronoun or a nickname).
@@ -42,12 +47,14 @@ Rules:
 
 Answer with a single JSON object and nothing else:
 {{"claims": [{{"claim_type": "appearance" | "behavior" | "location" | "spacetime",
-  "subject_kind": "character" | "location", "subject": "...", "text": "...",
+  "subject_kind": "character" | "location", "subject": "...",
+  "subject_ref": "..." (listed characters only), "text": "...",
   "evidence": "...", "attributes": {{"<key>": "..."}}}}]}}
 """
 
 
-def build_extraction_prompt(manuscript: str, known_characters: list[str], known_locations: list[str]) -> str:
+def build_extraction_prompt(manuscript: str, known_characters: list[dict], known_locations: list[str]) -> str:
+    # known_characters: {"ref", "name", "aliases"} each
     known = json.dumps({"characters": known_characters, "locations": known_locations}, ensure_ascii=False)
     return (
         f"{_EXTRACTION_INSTRUCTIONS}\n"
@@ -56,7 +63,7 @@ def build_extraction_prompt(manuscript: str, known_characters: list[str], known_
     )
 
 
-def extract_claims(manuscript: str, known_characters: list[str], known_locations: list[str]) -> str:
+def extract_claims(manuscript: str, known_characters: list[dict], known_locations: list[str]) -> str:
     """The raw model response to the claim-extraction prompt; parsing and
     checking it is pipeline/extract_claims.py's job."""
     return get_llm_client().complete(build_extraction_prompt(manuscript, known_characters, known_locations))

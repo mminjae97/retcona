@@ -2,6 +2,11 @@
 
 - source: manual (entered directly by the author) | auto_detected (auto-generated from the manuscript) (7.4)
 - Fixed attributes: name, age, eye color, hair color, height, scars, origin
+- aliases: other names the manuscript calls the character by (a nickname, a
+  title, a shortened name), as the author lists them. Claim extraction is
+  given them (pipeline/extract_claims.py). Two cards can share a name or an
+  alias, not both: cards with one name need aliases, none shared, to be told
+  apart (api/settings.py).
 - Mutable attributes: hairstyle, outfit, injury/health status, belongings
 - personality: personality/speech patterns (for OOC judgment, 7.2)
 - attr_sources: where each fixed attribute validation filled in (7.4) came
@@ -35,6 +40,7 @@ class Character(Base, NovelScopedMixin, TimestampMixin):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String, nullable=False)
+    aliases: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]", nullable=False)
     source: Mapped[str] = mapped_column(String, default="manual")  # manual | auto_detected
     fixed_attrs: Mapped[dict] = mapped_column(JSONB, default=dict)  # age, eye color, hair color, height, scars, origin, etc.
     mutable_attrs: Mapped[dict] = mapped_column(JSONB, default=dict)  # hairstyle, outfit, injury/health status, belongings

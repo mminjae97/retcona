@@ -1,11 +1,14 @@
 """Extract verification-target claims from the manuscript (design doc 7.1, first step).
 
-Input: novel_id, manuscript text, the novel's known character/location names
+Input: novel_id, manuscript text, the novel's known characters (a ref, the
+  name and aliases of each) and location names
 Output: list of ExtractedClaims (claim_type: appearance | behavior (OOC) | location | spacetime)
 
-The model is asked to name each claim's subject by its listed name when the
-manuscript refers to a known character or location by another name, so entity
-matching (pipeline/entities.py, 7.4) can match on names alone.
+The model is asked to give, for a claim about a known character, its ref
+(subject_ref) — characters can share a name — and its listed name, also when
+the manuscript calls it by an alias or another name; a known location by its
+listed name. Entity matching (pipeline/entities.py, 7.4) goes by the ref, and
+by name or alias where there's none.
 
 What the model returns is checked here, item by item: a malformed claim is
 dropped (and counted in the log) rather than failing the whole episode, but a
@@ -46,6 +49,8 @@ class ExtractedClaim(BaseModel):
     claim_type: Literal["appearance", "behavior", "location", "spacetime"]
     subject_kind: Literal["character", "location"]
     subject: str = Field(min_length=1, max_length=NAME_MAX_LENGTH)
+    # The known character's ref from the prompt; checked by entity matching.
+    subject_ref: str | None = None
     text: str = Field(min_length=1)
     evidence: str | None = None
     attributes: dict[str, str] = Field(default_factory=dict)
@@ -54,6 +59,12 @@ class ExtractedClaim(BaseModel):
     @classmethod
     def _strip(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("subject_ref", mode="before")
+    @classmethod
+    def _ref_as_text(cls, value: object) -> object:
+        # Anything that isn't a ref is no ref: the claim is matched by name.
+        return value.strip() or None if isinstance(value, str) else None
 
     @field_validator("text", "evidence")
     @classmethod
@@ -113,7 +124,7 @@ def parse_extraction(raw: str) -> Extraction:
 
 
 def extract_claims(
-    novel_id: uuid.UUID, manuscript: str, known_characters: list[str], known_locations: list[str]
+    novel_id: uuid.UUID, manuscript: str, known_characters: list[dict], known_locations: list[str]
 ) -> Extraction:
     extraction = parse_extraction(llm.extract_claims(manuscript, known_characters, known_locations))
     if extraction.dropped:

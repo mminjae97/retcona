@@ -447,9 +447,7 @@ def act_on_flag(
 
 
 def _dismissal_key_of(flag: ContradictionFlag, claim: Claim):
-    return dismissal_key(
-        claim.subject_kind, claim.subject_name, flag.attribute, claim.evidence_text, _flag_value(flag, claim), flag.reference_text
-    )
+    return dismissal_key(claim.subject_id, flag.attribute, claim.evidence_text, _flag_value(flag, claim), flag.reference_text)
 
 
 def _forget_dismissal(

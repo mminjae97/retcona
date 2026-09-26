@@ -124,7 +124,7 @@ def _pairs(claims: list[ExtractedClaim], bundle: ContextBundle, kind: str, keys:
     for index, claim in enumerate(claims):
         if claim.subject_kind != kind:
             continue
-        card = bundle.card_for(claim)
+        card = bundle.card_for(index)
         if card is None:
             continue  # a new entity: nothing to contradict yet
         evidence = claim.evidence or claim.text

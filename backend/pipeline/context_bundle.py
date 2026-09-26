@@ -5,8 +5,8 @@ querying the DB separately, they share the context bundle this function
 assembles once (avoids context silos, 7.3).
 
 Today the bundle is the setting cards of the characters/locations the
-episode's claims are about, matched by name as entity matching does
-(pipeline/entities.py). The appearance and location judgments compare a
+episode's claims are about, as entity matching found them
+(pipeline/entities.py resolve_subjects). The appearance and location judgments compare a
 claim with its card's attributes key by key, so the card is all they need.
 Narrowing past settings and state history down by similarity (pgvector +
 reranker, chapter 5) comes with the modules that read free text: behavior
@@ -23,8 +23,7 @@ from sqlalchemy.orm import Session
 
 from models.character import Character
 from models.location import Location
-from pipeline.entities import normalize_name
-from pipeline.extract_claims import ExtractedClaim
+from pipeline.entities import Match
 
 
 @dataclass(frozen=True)
@@ -43,11 +42,11 @@ class ContextBundle:
     # The episode being validated: a card value filled in from it is its own
     # earlier wording, not a setting to hold it to (models/character.py).
     episode_id: uuid.UUID
-    # (subject_kind, normalized name) -> card
-    cards: dict[tuple[str, str], Card] = field(default_factory=dict)
+    # claims[i]'s card, None for a subject with no card yet (or ambiguous)
+    claim_cards: list[Card | None] = field(default_factory=list)
 
-    def card_for(self, claim: ExtractedClaim) -> Card | None:
-        return self.cards.get((claim.subject_kind, normalize_name(claim.subject)))
+    def card_for(self, claim_index: int) -> Card | None:
+        return self.claim_cards[claim_index]
 
 
 def _text_values(attrs: object) -> dict[str, str]:
@@ -68,35 +67,27 @@ def source_episodes(attr_sources: object) -> dict[str, str]:
     }
 
 
-def get_context_bundle(
-    db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, claims: list[ExtractedClaim]
-) -> ContextBundle:
-    bundle = ContextBundle(episode_id=episode_id)
-    wanted = {(claim.subject_kind, normalize_name(claim.subject)) for claim in claims}
-    # Oldest first, as entity matching: where two locations share a name, the
-    # claims are about the first one.
-    for character in db.scalars(
-        select(Character).where(Character.novel_id == novel_id).order_by(Character.created_at, Character.id)
-    ):
-        key = ("character", normalize_name(character.name))
-        if key in wanted and key not in bundle.cards:
-            bundle.cards[key] = Card(
-                kind="character",
-                id=character.id,
-                name=character.name,
-                attrs=_text_values(character.fixed_attrs),
-                sources=source_episodes(character.attr_sources),
-            )
-    for location in db.scalars(
-        select(Location).where(Location.novel_id == novel_id).order_by(Location.created_at, Location.id)
-    ):
-        key = ("location", normalize_name(location.name))
-        if key in wanted and key not in bundle.cards:
-            bundle.cards[key] = Card(
-                kind="location",
-                id=location.id,
-                name=location.name,
-                attrs=_text_values(location.geo_attrs),
-                sources=source_episodes(location.attr_sources),
-            )
-    return bundle
+def get_context_bundle(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, matches: list[Match]) -> ContextBundle:
+    """matches[i]: claims[i]'s card, from resolve_subjects."""
+    wanted = {match.card_id for match in matches if match.card_id is not None}
+    cards: dict[uuid.UUID, Card] = {}
+    for character in db.scalars(select(Character).where(Character.novel_id == novel_id, Character.id.in_(wanted))):
+        cards[character.id] = Card(
+            kind="character",
+            id=character.id,
+            name=character.name,
+            attrs=_text_values(character.fixed_attrs),
+            sources=source_episodes(character.attr_sources),
+        )
+    for location in db.scalars(select(Location).where(Location.novel_id == novel_id, Location.id.in_(wanted))):
+        cards[location.id] = Card(
+            kind="location",
+            id=location.id,
+            name=location.name,
+            attrs=_text_values(location.geo_attrs),
+            sources=source_episodes(location.attr_sources),
+        )
+    return ContextBundle(
+        episode_id=episode_id,
+        claim_cards=[cards.get(match.card_id) if match.card_id is not None else None for match in matches],
+    )
