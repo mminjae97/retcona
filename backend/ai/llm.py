@@ -1,7 +1,8 @@
 """LLM wrapper (design doc chapter 5, 7.2).
 
-Used for OOC behavior judgment, final verification of ambiguous contradictions,
-and claim extraction. The actual provider (external/self_hosted/mock) is
+Used for claim extraction (the extraction model) and for OOC behavior
+judgment and the final verification of ambiguous contradictions (the judgment
+model). The actual provider (external/self_hosted/mock) and the two models are
 handled by infra.llm_client.
 """
 
@@ -66,11 +67,11 @@ def build_extraction_prompt(manuscript: str, known_characters: list[dict], known
 def extract_claims(manuscript: str, known_characters: list[dict], known_locations: list[str]) -> str:
     """The raw model response to the claim-extraction prompt; parsing and
     checking it is pipeline/extract_claims.py's job."""
-    return get_llm_client().complete(build_extraction_prompt(manuscript, known_characters, known_locations))
+    return get_llm_client("extraction").complete(build_extraction_prompt(manuscript, known_characters, known_locations))
 
 
 def judge_ooc(character_profile: dict, manuscript_excerpt: str) -> dict:
     prompt = f"Personality/speech profile: {character_profile}\n\nDetermine whether the following narration conflicts with the profile above:\n{manuscript_excerpt}"
-    result = get_llm_client().complete(prompt)
+    result = get_llm_client("judgment").complete(prompt)
     # TODO: parse the LLM response
     return {"raw": result}

@@ -472,7 +472,8 @@ flashback episodes) — keep them separate:
 | Embedding | KURE-v1 + BM25 hybrid | Combines semantic search with keyword matching |
 | Cross-encoder reranker | bge-reranker-v2-m3-ko family | Extracts top-K relevant past setting sentences |
 | NLI | klue-roberta + KorNLI base | Needs re-finetuning for novel narrative/dialogue register |
-| LLM (external API) | model TBD | OOC judgment, ambiguous-contradiction final check, claim extraction |
+| LLM — extraction (external API) | model TBD (fast, lower cost) | Claim extraction — most of the LLM calls |
+| LLM — judgment (external API) | model TBD (strong reasoning) | OOC judgment, ambiguous-contradiction final check, spacetime assist |
 | DB | PostgreSQL + pgvector | Vector search and structured data in one DB |
 
 ---
