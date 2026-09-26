@@ -47,7 +47,8 @@ Rules:
 
 Answer with a single JSON object and nothing else:
 {{"claims": [{{"claim_type": "appearance" | "behavior" | "location" | "spacetime",
-  "subject_kind": "character" | "location", "subject": "...", "subject_ref": "...", "text": "...",
+  "subject_kind": "character" | "location", "subject": "...",
+  "subject_ref": "..." (listed characters only), "text": "...",
   "evidence": "...", "attributes": {{"<key>": "..."}}}}]}}
 """
 

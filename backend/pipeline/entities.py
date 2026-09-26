@@ -5,7 +5,8 @@ Each claim's subject is matched against the novel's characters/locations
 (two people called 김철수, told apart by their aliases, api/settings.py), so
 the extraction step gives the model each known character with a ref, its
 name and its aliases, and the model answers with the ref of the one it means
-(pipeline/extract_claims.py). A claim with no usable ref is matched by name,
+(pipeline/extract_claims.py) — used only where the name it gives is that
+character's name or alias. A claim with no usable ref is matched by name,
 then by alias; a name that fits more than one character is ambiguous and the
 claim is left unlinked — neither guessed at nor made a new card. Locations go
 by name (where two share one, the oldest). Embedding similarity (chapter 5)
@@ -66,6 +67,8 @@ class _Cards:
 
     def __init__(self, db: Session, novel_id: uuid.UUID) -> None:
         self.character_names: dict[uuid.UUID, str] = {}
+        # id -> its name and aliases, normalized
+        self.known_as: dict[uuid.UUID, set[str]] = {}
         self.by_name: dict[str, list[uuid.UUID]] = {}
         self.by_alias: dict[str, list[uuid.UUID]] = {}
         for character in db.scalars(
@@ -73,8 +76,10 @@ class _Cards:
         ):
             self.character_names[character.id] = character.name
             self.by_name.setdefault(normalize_name(character.name), []).append(character.id)
-            for alias in {normalize_name(alias) for alias in character.aliases or []}:
+            aliases = {normalize_name(alias) for alias in character.aliases or []}
+            for alias in aliases:
                 self.by_alias.setdefault(alias, []).append(character.id)
+            self.known_as[character.id] = {normalize_name(character.name), *aliases}
         # Oldest first, so where two locations share a name (nothing stops the
         # author from making both), claims keep going to the same, first one.
         self.locations: dict[str, uuid.UUID] = {}
@@ -95,8 +100,13 @@ class _Cards:
         key = normalize_name(claim.subject)
         if claim.subject_kind == "location":
             return Match(self.locations.get(key))
+        # The ref only where the name the model gave is that character's name
+        # or alias, as it's asked to give: a model that put a character's ref
+        # on another (a new character) mustn't hold that one against this
+        # card's settings, or fill them in. A dropped ref falls back to the
+        # name, as with none.
         ref = refs.get(claim.subject_ref or "")
-        if ref is not None and ref in self.character_names:
+        if ref is not None and key in self.known_as.get(ref, set()):
             return Match(ref)
         for candidates in (self.by_name.get(key), self.by_alias.get(key)):
             if candidates:
