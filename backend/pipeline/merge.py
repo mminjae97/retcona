@@ -60,11 +60,13 @@ def apply_new_information(
     episode_index: int,
     content: str,
     claims: list[ExtractedClaim],
-    subject_ids: list[uuid.UUID],
+    subject_ids: list[uuid.UUID | None],
     flags: list[Flag],
 ) -> None:
-    """subject_ids[i] is claims[i]'s character/location. The caller holds the
-    novel's row lock, so the cards read here are the ones being written."""
+    """subject_ids[i] is claims[i]'s character/location, None where entity
+    matching couldn't tell which (pipeline/entities.py): such a claim adds
+    nothing. The caller holds the novel's row lock, so the cards read here are
+    the ones being written."""
     flagged = {(flag.claim_index, flag.attribute) for flag in flags}
     source = str(episode_id)
     # Cards entity matching just created go in first: the state history
@@ -75,6 +77,8 @@ def apply_new_information(
     card_values: dict[tuple[str, uuid.UUID], dict[str, tuple[str, str | None]]] = {}
     states: dict[uuid.UUID, dict[str, str]] = {}
     for index, (claim, subject_id) in enumerate(zip(claims, subject_ids, strict=True)):
+        if subject_id is None:
+            continue
         card_keys = FIXED_ATTR_KEYS if claim.subject_kind == "character" else GEO_ATTR_KEYS
         for key, value in claim.attributes.items():
             if key in card_keys and (index, key) not in flagged:

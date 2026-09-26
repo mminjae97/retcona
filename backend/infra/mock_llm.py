@@ -47,8 +47,10 @@ def _tagged(prompt: str, tag: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _claim(claim_type: str, subject_kind: str, subject: str, sentence: str, attributes: dict) -> dict:
-    return {
+def _claim(
+    claim_type: str, subject_kind: str, subject: str, sentence: str, attributes: dict, ref: str | None = None
+) -> dict:
+    claim = {
         "claim_type": claim_type,
         "subject_kind": subject_kind,
         "subject": subject,
@@ -56,6 +58,9 @@ def _claim(claim_type: str, subject_kind: str, subject: str, sentence: str, attr
         "evidence": sentence,
         "attributes": attributes,
     }
+    if ref:
+        claim["subject_ref"] = ref
+    return claim
 
 
 def extract(manuscript: str, known_characters: list[dict], known_locations: list[str]) -> dict:
@@ -64,19 +69,21 @@ def extract(manuscript: str, known_characters: list[dict], known_locations: list
     for word in _SUBJECT.findall(manuscript):
         if word not in _NOT_NAMES:
             counts[word] = counts.get(word, 0) + 1
-    # A known character is found by its name or any of its aliases, and named
-    # by its name, as the prompt asks a model to.
-    by_word = {
-        word: known["name"] for known in known_characters for word in [known["name"], *known.get("aliases", [])]
-    }
+    # A known character is found by its name or any of its aliases, and given
+    # by its ref and name, as the prompt asks a model to (the first of two
+    # sharing a name: the mock can't read context).
+    by_word: dict[str, tuple[str, str | None]] = {}
+    for known in known_characters:
+        for word in [known["name"], *known.get("aliases", [])]:
+            by_word.setdefault(word, (known["name"], known["ref"]))
     for word, n in counts.items():
         if n >= 2:
-            by_word.setdefault(word, word)
+            by_word.setdefault(word, (word, None))
     locations = list(dict.fromkeys(known_locations + _PLACE.findall(manuscript)))
 
     claims = []
     for sentence in sentences:
-        character = next((name for word, name in by_word.items() if word in sentence), None)
+        character, ref = next((known for word, known in by_word.items() if word in sentence), (None, None))
         location = next((name for name in locations if name in sentence), None)
         if character:
             attributes = {key: sentence for word, key in _APPEARANCE.items() if word in sentence}
@@ -84,11 +91,11 @@ def extract(manuscript: str, known_characters: list[dict], known_locations: list
             if age:
                 attributes["age"] = age.group(0)
             if attributes:
-                claims.append(_claim("appearance", "character", character, sentence, attributes))
+                claims.append(_claim("appearance", "character", character, sentence, attributes, ref))
             if any(quote in sentence for quote in _QUOTES):
-                claims.append(_claim("behavior", "character", character, sentence, {}))
+                claims.append(_claim("behavior", "character", character, sentence, {}, ref))
             if any(word in sentence for word in _TIME_WORDS):
-                claims.append(_claim("spacetime", "character", character, sentence, {}))
+                claims.append(_claim("spacetime", "character", character, sentence, {}, ref))
         if location:
             # "검은 숲은 ..." describes the place; "... 검은 숲으로 향했다" doesn't.
             # Its features are what follows the place's name ("어둡고 습했다.").

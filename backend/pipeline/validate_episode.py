@@ -9,12 +9,14 @@ The run row (models/validation_run.py) carries the job through
 queued -> running -> succeeded | failed. Steps:
 1. Claim the run: queued -> running, in one conditional UPDATE, so a job
    delivered twice runs once (10.4.4).
-2. Read the episode and the novel's known names (characters' aliases too),
-   in a short transaction.
+2. Read the episode and the novel's known characters (each with a ref for
+   the model to answer with, its name and aliases) and location names, in a
+   short transaction.
 3. Call the model with no transaction open: it can take a while, and holding
    the novel's row lock through it would block the author's saves.
-4. Read the setting cards the claims are about (the context bundle), and
-   judge the claims against them — NLI, also with no transaction open.
+4. Find the card each claim is about (pipeline/entities.py), read those
+   setting cards (the context bundle), and judge the claims against them —
+   NLI, also with no transaction open.
 5. Write everything in one transaction under the novel's row lock: replace
    this episode's earlier claims and flags, match or register entities,
    store the new claims and their flags, fill in what the episode adds to the
@@ -31,6 +33,7 @@ inference_failed, internal.
 import logging
 import uuid
 from datetime import datetime
+from typing import NamedTuple
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
@@ -45,7 +48,7 @@ from models.novel import Novel
 from models.validation_run import ValidationRun
 from pipeline.context_bundle import get_context_bundle
 from pipeline.dismissals import dismissal_key, dismissed_keys
-from pipeline.entities import match_and_register, resolve_aliases
+from pipeline.entities import Match, match_and_register, resolve_subjects
 from pipeline.extract_claims import Extraction, ExtractionError, extract_claims
 from pipeline.judges import Flag, judge_appearance, judge_location
 from pipeline.merge import apply_new_information, merge_and_dedupe
@@ -90,9 +93,17 @@ def _lock_novel(db: Session, novel_id: uuid.UUID) -> None:
         raise RunFailed("episode_missing")
 
 
-def _read_input(
-    novel_id: uuid.UUID, episode_id: uuid.UUID
-) -> tuple[str, datetime, dict[str, list[str]], list[str]]:
+class _Input(NamedTuple):
+    content: str
+    content_updated_at: datetime
+    # {"ref", "name", "aliases"} each, for the extraction prompt
+    characters: list[dict]
+    # the prompt's refs -> card ids
+    refs: dict[str, uuid.UUID]
+    locations: list[str]
+
+
+def _read_input(novel_id: uuid.UUID, episode_id: uuid.UUID) -> _Input:
     with SessionLocal() as db:
         row = db.execute(
             select(Episode.content, Episode.updated_at)
@@ -103,19 +114,33 @@ def _read_input(
             raise RunFailed("episode_missing")
         if not row.content.strip():
             raise RunFailed("empty_manuscript")
-        # name -> aliases; a name is one card's (api/settings.py).
-        rows = db.execute(select(Character.name, Character.aliases).where(Character.novel_id == novel_id))
-        characters = {name: list(aliases or []) for name, aliases in rows}
+        # A short ref per character rather than its id: characters can share a
+        # name, so the model answers with the ref of the one it means.
+        characters, refs = [], {}
+        for number, (character_id, name, aliases) in enumerate(
+            db.execute(
+                select(Character.id, Character.name, Character.aliases)
+                .where(Character.novel_id == novel_id)
+                .order_by(Character.created_at, Character.id)
+            ),
+            start=1,
+        ):
+            ref = f"c{number}"
+            characters.append({"ref": ref, "name": name, "aliases": list(aliases or [])})
+            refs[ref] = character_id
         # Distinct: nothing stops two locations sharing a name, and the model needs it once.
         locations = list(db.scalars(select(Location.name).where(Location.novel_id == novel_id).distinct()))
-        return row.content, row.updated_at, characters, locations
+        return _Input(row.content, row.updated_at, characters, refs, locations)
 
 
-def _judge(novel_id: uuid.UUID, episode_id: uuid.UUID, extraction: Extraction) -> list[Flag]:
+def _judge(
+    novel_id: uuid.UUID, episode_id: uuid.UUID, extraction: Extraction, refs: dict[str, uuid.UUID]
+) -> tuple[list[Match], list[Flag]]:
     with SessionLocal() as db:
-        bundle = get_context_bundle(db, novel_id, episode_id, extraction.claims)
+        matches = resolve_subjects(db, novel_id, extraction.claims, refs)
+        bundle = get_context_bundle(db, novel_id, episode_id, matches)
     try:
-        return merge_and_dedupe(
+        return matches, merge_and_dedupe(
             [judge_appearance(extraction.claims, bundle), judge_location(extraction.claims, bundle)]
         )
     except InferenceError as exc:
@@ -130,6 +155,7 @@ def _store(
     content: str,
     content_updated_at: datetime,
     extraction: Extraction,
+    matches: list[Match],
     flags: list[Flag],
 ) -> None:
     with SessionLocal() as db:
@@ -160,8 +186,8 @@ def _store(
         )
         db.execute(delete(Claim).where(Claim.novel_id == novel_id, Claim.episode_id == episode_id))
 
-        registration = match_and_register(db, novel_id, extraction.claims)
-        subject_ids = [registration.subject_id(claim) for claim in extraction.claims]
+        registration = match_and_register(db, novel_id, extraction.claims, matches)
+        subject_ids = registration.subject_ids
         claim_ids = [uuid.uuid4() for _ in extraction.claims]
         db.add_all(
             Claim(
@@ -181,8 +207,7 @@ def _store(
         statuses = [
             "dismissed"
             if dismissal_key(
-                extraction.claims[flag.claim_index].subject_kind,
-                extraction.claims[flag.claim_index].subject,
+                subject_ids[flag.claim_index],
                 flag.attribute,
                 extraction.claims[flag.claim_index].evidence,
                 extraction.claims[flag.claim_index].attributes.get(flag.attribute),
@@ -241,18 +266,26 @@ def validate_episode(novel_id: uuid.UUID, run_id: uuid.UUID) -> None:
         logger.info("Validation run %s isn't queued (already taken, or given up on); skipping", run_id)
         return
     try:
-        content, content_updated_at, characters, locations = _read_input(novel_id, episode_id)
+        run_input = _read_input(novel_id, episode_id)
         try:
-            extraction = extract_claims(novel_id, content, characters, locations)
+            extraction = extract_claims(novel_id, run_input.content, run_input.characters, run_input.locations)
         except ExtractionError as exc:
             logger.warning("Validation run %s: couldn't read the model's response (%s)", run_id, exc)
             raise RunFailed("bad_llm_response") from exc
         except Exception as exc:
             logger.exception("Validation run %s: the model call failed", run_id)
             raise RunFailed("llm_failed") from exc
-        resolve_aliases(extraction.claims, characters)
-        flags = _judge(novel_id, episode_id, extraction)
-        _store(novel_id, run_id, episode_id, content, content_updated_at, extraction, flags)
+        matches, flags = _judge(novel_id, episode_id, extraction, run_input.refs)
+        _store(
+            novel_id,
+            run_id,
+            episode_id,
+            run_input.content,
+            run_input.content_updated_at,
+            extraction,
+            matches,
+            flags,
+        )
     except RunFailed as exc:
         _finish_failed(novel_id, run_id, exc.code)
     except Exception:

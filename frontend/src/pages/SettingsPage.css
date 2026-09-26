@@ -120,6 +120,17 @@
   font-size: 12px;
 }
 
+.character-aliases {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.character-item.selected .character-aliases {
+  color: inherit;
+  opacity: 0.8;
+}
+
 .setting-form input,
 .setting-form select,
 .setting-form textarea {

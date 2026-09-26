@@ -11,7 +11,7 @@ unwritten are meant to be filled in from the manuscript later
 Every write locks the novel row first, for the same reason as the novel and
 episode endpoints: a concurrent soft-delete of the novel can't land between
 this request's ownership check and its commit (10.1). The same lock also
-serializes the duplicate name/alias check on characters.
+serializes the name/alias check on characters.
 """
 
 import uuid
@@ -35,11 +35,11 @@ from auth.dependencies import get_current_user
 from models.character import Character, CharacterStateHistory
 from models.claim import Claim
 from models.db import get_db
+from models.flag_dismissal import FlagDismissal
 from models.relation import Relation
 from models.story_event import EventParticipant
 from models.user import User
 from models.world_setting import WorldSetting
-from pipeline.dismissals import rename_subject
 from pipeline.entities import normalize_name
 
 router = APIRouter()
@@ -270,63 +270,27 @@ def _get_character(db: Session, novel_id: uuid.UUID, character_id: uuid.UUID) ->
     return character
 
 
-def _names(name: str, aliases: list[str]) -> set[str]:
-    # A card's names as matching and dismissals compare them (normalized:
-    # "Leon" and "leon" are one name).
-    return {normalize_name(each) for each in [name, *aliases]}
-
-
-def _reject_taken_names(
-    db: Session, novel_id: uuid.UUID, names: set[str], *, except_id: uuid.UUID | None = None
+def _reject_indistinguishable(
+    db: Session, novel_id: uuid.UUID, body: CharacterInput, *, except_id: uuid.UUID | None = None
 ) -> None:
-    # One card per name within a novel, aliases included: entity matching
-    # (7.4) looks characters up by them, and two cards with the same one would
-    # split what the manuscript says about that character between them. A
-    # novel has tens of characters at most, so they're compared here rather
-    # than in SQL. Race-free because every caller holds the novel's row lock.
-    # Renaming and adding aliases rely on this: a name's dismissals and
-    # unlinked claims belong to the one card by that name (_take_over_names).
-    if not names:
-        return
+    # Two characters can share a name (two people called 김철수), or an alias,
+    # but not both: cards with one name are told apart by their aliases — the
+    # model, given both, picks one by the context and them (pipeline/entities.py)
+    # — so each needs some, none shared. Compared as matching compares names
+    # (normalized: "Leon" and "leon" are one name). A novel has tens of
+    # characters at most, so they're compared here rather than in SQL.
+    # Race-free because every caller holds the novel's row lock.
+    name = normalize_name(body.name)
+    aliases = {normalize_name(alias) for alias in body.aliases}
     others = db.execute(
         select(Character.id, Character.name, Character.aliases).where(Character.novel_id == novel_id)
     )
-    if any(other_id != except_id and names & _names(name, aliases or []) for other_id, name, aliases in others):
-        raise HTTPException(status.HTTP_409_CONFLICT, "A character with this name or alias already exists")
-
-
-def _take_over_names(
-    db: Session, novel_id: uuid.UUID, character_id: uuid.UUID | None, old_names: list[str], name: str
-) -> None:
-    # Later runs name the character by its name (extraction answers with it,
-    # aliases resolved to it), so what was recorded under its old name, or
-    # under a name it now has as an alias (a card by that name, since
-    # deleted), follows: the dismissals, its own claims, and the unlinked
-    # claims by those names — each claim's flags must still find their
-    # dismissals to reopen them. Unlinked claims are few; compared here, as
-    # names are normalized.
-    for old_name in old_names:
-        rename_subject(db, novel_id, "character", old_name, name)
-    old = {normalize_name(old_name) for old_name in old_names}
-    unlinked = [
-        claim_id
-        for claim_id, subject_name in db.execute(
-            select(Claim.id, Claim.subject_name).where(
-                Claim.novel_id == novel_id, Claim.subject_kind == "character", Claim.subject_id.is_(None)
-            )
-        )
-        if normalize_name(subject_name or "") in old
-    ]
-    # A card being created has no claims of its own yet (and `== None` would
-    # match every unlinked claim).
-    claims = Claim.id.in_(unlinked)
-    if character_id is not None:
-        claims = or_(Claim.subject_id == character_id, claims)
-    db.execute(
-        update(Claim)
-        .where(Claim.novel_id == novel_id, Claim.subject_kind == "character", claims)
-        .values(subject_name=name)
-    )
+    for other_id, other_name, other_aliases in others:
+        if other_id == except_id or normalize_name(other_name) != name:
+            continue
+        other = {normalize_name(alias) for alias in other_aliases or []}
+        if not aliases or not other or aliases & other:
+            raise HTTPException(status.HTTP_409_CONFLICT, "A character with this name and alias already exists")
 
 
 def _apply(character: Character, body: CharacterInput) -> None:
@@ -366,9 +330,7 @@ def create_character(
     user: User = Depends(get_current_user),
 ) -> Character:
     _get_owned_novel(db, novel_id, user, for_update=True)
-    _reject_taken_names(db, novel_id, _names(body.name, body.aliases))
-    if body.aliases:
-        _take_over_names(db, novel_id, None, body.aliases, body.name)
+    _reject_indistinguishable(db, novel_id, body)
     character = Character(novel_id=novel_id, source="manual")
     _apply(character, body)
     db.add(character)
@@ -387,16 +349,15 @@ def update_character(
 ) -> Character:
     _get_owned_novel(db, novel_id, user, for_update=True)
     character = _get_character(db, novel_id, character_id)
-    # Only the names it didn't have yet are checked: one it keeps is its own.
-    current = _names(character.name, character.aliases or [])
-    _reject_taken_names(db, novel_id, _names(body.name, body.aliases) - current, except_id=character_id)
-    # What's recorded under its old name and under its new aliases moves to
-    # its name, so the current flags and the next run's agree on who they're
-    # about.
-    old_names = [character.name] if character.name != body.name else []
-    old_names += [alias for alias in body.aliases if normalize_name(alias) not in current]
-    if old_names:
-        _take_over_names(db, novel_id, character_id, old_names, body.name)
+    _reject_indistinguishable(db, novel_id, body, except_id=character_id)
+    if character.name != body.name:
+        # Its claims show the name it has now; what identifies them is the
+        # card's id (flag dismissals too), which doesn't change.
+        db.execute(
+            update(Claim)
+            .where(Claim.novel_id == novel_id, Claim.subject_kind == "character", Claim.subject_id == character_id)
+            .values(subject_name=body.name)
+        )
     _apply(character, body)
     # An auto-detected card the author has now edited is theirs (7.4: changes
     # to existing settings always go through the author).
@@ -433,9 +394,10 @@ def delete_character(
             or_(Relation.from_entity_id == character_id, Relation.to_entity_id == character_id),
         )
     )
-    # The author's dismissals of flags about it stay: they're about sentences
-    # of the manuscript, by name (models/flag_dismissal.py), and apply again
-    # if the character comes back.
+    # The author's dismissals of flags about it have nothing left to match.
+    db.execute(
+        delete(FlagDismissal).where(FlagDismissal.novel_id == novel_id, FlagDismissal.subject_id == character_id)
+    )
     # Claims about it stay (they're the episode's), named but no longer linked.
     db.execute(
         update(Claim)

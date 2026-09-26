@@ -402,7 +402,7 @@ function CharactersSection({ novelId }: { novelId: string }) {
     } catch (err) {
       setFormError(
         err instanceof ApiError && err.status === 409
-          ? "같은 이름이나 별칭을 쓰는 캐릭터가 이미 있습니다."
+          ? "같은 이름의 캐릭터가 있습니다. 두 캐릭터 모두 별칭을 입력하고, 서로 겹치지 않게 해주세요."
           : describeError(err),
       );
     } finally {
@@ -459,7 +459,13 @@ function CharactersSection({ novelId }: { novelId: string }) {
                   onClick={() => select(character.id, character)}
                   disabled={busy}
                 >
-                  {character.name}
+                  <span>
+                    {character.name}
+                    {/* Tells characters sharing a name apart. */}
+                    {character.aliases.length > 0 && (
+                      <span className="character-aliases">{character.aliases.join(", ")}</span>
+                    )}
+                  </span>
                   {character.source === "auto_detected" && <span className="source-badge">자동 생성</span>}
                 </button>
               </li>
@@ -490,7 +496,8 @@ function CharactersSection({ novelId }: { novelId: string }) {
                     placeholder="꼬맹이, 백발의 기사"
                   />
                   <span className="alias-hint">
-                    원고에서 이 캐릭터를 부르는 다른 이름(별명·직함 등)을 쉼표로 구분해 입력하세요.
+                    원고에서 이 캐릭터를 부르는 다른 이름(별명·직함 등)을 쉼표로 구분해 입력하세요. 이름이 같은
+                    캐릭터(동명이인)는 서로 다른 별칭으로 구분합니다.
                   </span>
                 </label>
                 {SECTIONS.map((section) => (

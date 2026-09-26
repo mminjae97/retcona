@@ -4,8 +4,9 @@
 - Fixed attributes: name, age, eye color, hair color, height, scars, origin
 - aliases: other names the manuscript calls the character by (a nickname, a
   title, a shortened name), as the author lists them. Claim extraction is
-  given them and names the character by its name (pipeline/extract_claims.py);
-  within a novel no two cards share a name or alias (api/settings.py).
+  given them (pipeline/extract_claims.py). Two cards can share a name or an
+  alias, not both: cards with one name need aliases, none shared, to be told
+  apart (api/settings.py).
 - Mutable attributes: hairstyle, outfit, injury/health status, belongings
 - personality: personality/speech patterns (for OOC judgment, 7.2)
 - attr_sources: where each fixed attribute validation filled in (7.4) came
