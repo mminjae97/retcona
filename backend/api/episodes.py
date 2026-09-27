@@ -649,10 +649,9 @@ def revalidate_flag(
             card.attr_sources = {
                 key: record for key, record in (card.attr_sources or {}).items() if key != flag.attribute
             }
-            to_judge += [
-                sibling
-                for sibling, _ in db.execute(
-                    select(ContradictionFlag, Claim)
+            to_judge += list(
+                db.scalars(
+                    select(ContradictionFlag)
                     .join(Claim, Claim.id == ContradictionFlag.claim_id)
                     .where(
                         ContradictionFlag.novel_id == novel_id,
@@ -665,7 +664,14 @@ def revalidate_flag(
                         Claim.subject_id == claim.subject_id,
                     )
                 )
-            ]
+            )
+            # Held against the new value from now on, not judged against it
+            # yet (as accepting leaves the other flags): kept even if the
+            # revalidation then fails, so another one — with the value as it
+            # now is — can still be asked for.
+            for each in to_judge:
+                each.reference_text = body.setting
+                each.confidence = None
     elif (active := _latest_revalidations(db, novel_id, [flag.id]).get(flag.id)) is not None and (
         active.status in _ACTIVE_STATUSES
     ):

@@ -337,6 +337,11 @@ export default function ValidationResultPage() {
       return true;
     } catch (err) {
       setActionErrors((current) => ({ ...current, [flag.id]: describeActionError(err) }));
+      // A supplemented setting may have been saved even though the job wasn't
+      // queued: the flags then show the new value to try again with.
+      listFlags(novelId, episodeId)
+        .then((loaded) => setFlags(sortFlags(loaded)))
+        .catch(() => {});
       return false;
     } finally {
       actingRef.current = false;
