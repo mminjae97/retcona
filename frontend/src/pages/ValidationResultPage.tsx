@@ -4,12 +4,14 @@
 // first (2.5). Clicking a flag's sentence scrolls the manuscript to it. Each
 // open flag can be accepted (the manuscript is right: its value replaces the
 // setting card's) or dismissed as a false positive; a dismissal can be undone.
-// "Supplement settings and revalidate that flag" (7.5) comes with stage 3; for
-// now a character flag links to the settings screen.
+// Or the setting it was judged against can be supplemented right there and the
+// flag alone judged again (7.5) — the worker does it; the page polls until it's
+// done.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, describeError } from "../api/client";
-import { actOnFlag, getEpisode, getLatestValidation, listFlags } from "../api/episodes";
+import { actOnFlag, getEpisode, getLatestValidation, isRevalidating, listFlags, revalidateFlag } from "../api/episodes";
 import type { EpisodePublic, Flag, FlagAction, ValidationRun } from "../api/episodes";
 import { FIXED_ATTR_FIELDS } from "../api/settings";
 import { describeRunError, isRunActive } from "../utils/validationRun";
@@ -23,6 +25,23 @@ const ERROR_TYPES: Record<string, string> = {
 };
 
 const ATTRIBUTES: Record<string, string> = { ...FIXED_ATTR_FIELDS, features: "특징" };
+
+// How often the page checks on revalidations in progress.
+const REVALIDATION_POLL_MS = 2000;
+
+type BusyAction = FlagAction | "revalidate";
+
+// Why a revalidation failed (FlagRevalidation.error).
+const REVALIDATION_ERRORS: Record<string, string> = {
+  abandoned: "재검증이 너무 오래 걸려 중단되었습니다. 다시 시도해 주세요.",
+  queue_unavailable: "지금은 재검증을 요청할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+  superseded: "새 재검증 요청으로 대체되었습니다.",
+  flag_missing: "검증 결과가 바뀌었습니다. 새로고침해 주세요.",
+  flag_handled: "재검증 중에 항목이 처리되었습니다.",
+  card_missing: "설정 카드가 삭제되어 재검증할 수 없습니다.",
+  setting_changed: "재검증 중에 설정이 다시 바뀌었습니다. 다시 재검증해 주세요.",
+  inference_failed: "판정 모델을 실행하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+};
 
 // Open flags first; within each group the server's order (most confident first).
 function sortFlags(flags: Flag[]): Flag[] {
@@ -40,7 +59,7 @@ function describeActionError(err: unknown): string {
     if (err.message === "flag_run_active") return "이 화의 검증이 진행 중입니다. 검증이 끝난 뒤 반영해 주세요.";
     if (err.message === "flag_outdated") return "검증 이후 원고가 수정되었습니다. 다시 검증한 뒤 반영해 주세요.";
     if (err.message === "flag_setting_changed")
-      return "검증 이후 이 설정이 바뀌었습니다. 다시 검증한 뒤 반영해 주세요.";
+      return "검증 이후 이 설정이 바뀌었습니다. 값을 고치지 않고 재검증하면 지금 설정과 다시 비교합니다.";
     return "이미 처리된 항목입니다. 새로고침해 주세요.";
   }
   return describeError(err);
@@ -167,7 +186,7 @@ export default function ValidationResultPage() {
   // The flag whose sentence was last jumped to, drawn more strongly.
   const [activeFlagId, setActiveFlagId] = useState<string | null>(null);
   // The flag being acted on, and how (to label the right button).
-  const [busy, setBusy] = useState<{ flagId: string; action: FlagAction } | null>(null);
+  const [busy, setBusy] = useState<{ flagId: string; action: BusyAction } | null>(null);
   const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
   // Not errors: e.g. an accept that went through but whose follow-up refresh didn't.
   const [actionNotices, setActionNotices] = useState<Record<string, string>>({});
@@ -211,6 +230,28 @@ export default function ValidationResultPage() {
   }, [novelId, episodeId]);
 
   useEffect(() => load(), [load]);
+
+  // While any flag is being revalidated, check on it until it's done. Only
+  // the flags are refreshed: the manuscript and jump positions stay.
+  const revalidating = flags.some(isRevalidating);
+  useEffect(() => {
+    if (!revalidating || !novelId || !episodeId) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      listFlags(novelId, episodeId)
+        .then((loaded) => {
+          if (!cancelled) setFlags(sortFlags(loaded));
+        })
+        // Tried again on the next tick: the flags still show "revalidating".
+        .catch(() => {
+          if (!cancelled) setFlags((current) => [...current]);
+        });
+    }, REVALIDATION_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [revalidating, flags, novelId, episodeId]);
 
   // NFC, as the backend compares text: a manuscript pasted from some systems
   // stores Hangul decomposed (NFD), and the model's sentences are composed.
@@ -269,6 +310,39 @@ export default function ValidationResultPage() {
       }
     } catch (err) {
       setActionErrors((current) => ({ ...current, [flag.id]: describeActionError(err) }));
+    } finally {
+      actingRef.current = false;
+      setBusy(null);
+    }
+  }
+
+  // Judges the flag again; with a new `setting`, the card takes it first. The
+  // list is reloaded after: supplementing a setting sends the episode's other
+  // flags on that attribute to be judged again too. Returns whether it went
+  // through, so the card can close its form.
+  async function revalidate(flag: Flag, setting?: string): Promise<boolean> {
+    if (!novelId || !episodeId || actingRef.current) return false;
+    actingRef.current = true;
+    setBusy({ flagId: flag.id, action: "revalidate" });
+    setActionErrors(({ [flag.id]: _, ...rest }) => rest);
+    setActionNotices(({ [flag.id]: _, ...rest }) => rest);
+    try {
+      const updated = await revalidateFlag(novelId, episodeId, flag.id, setting);
+      setFlags((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      try {
+        setFlags(sortFlags(await listFlags(novelId, episodeId)));
+      } catch {
+        // The request went through; the flag shows it, and polling catches the rest up.
+      }
+      return true;
+    } catch (err) {
+      setActionErrors((current) => ({ ...current, [flag.id]: describeActionError(err) }));
+      // A supplemented setting may have been saved even though the job wasn't
+      // queued: the flags then show the new value to try again with.
+      listFlags(novelId, episodeId)
+        .then((loaded) => setFlags(sortFlags(loaded)))
+        .catch(() => {});
+      return false;
     } finally {
       actingRef.current = false;
       setBusy(null);
@@ -378,13 +452,14 @@ export default function ValidationResultPage() {
                   settingsPath={`/novels/${novelId}/settings`}
                   onJump={() => jumpTo(flag)}
                   onAct={(action) => act(flag, action)}
+                  onRevalidate={(setting) => revalidate(flag, setting)}
                 />
               ))}
             </ol>
           )}
           <p className="result-hint">
-            반영: 원고가 맞다면 설정을 원고 내용으로 바꿉니다. 오탐 해제: 모순이 아니라면 항목을 닫습니다. 설정에 없던 규칙
-            때문이라면 설정을 보완한 뒤 다시 검증해 주세요.
+            반영: 원고가 맞다면 설정을 원고 내용으로 바꿉니다. 오탐 해제: 모순이 아니라면 항목을 닫습니다. 설정 보완 후
+            재검증: 설정을 고친 뒤 이 항목만 다시 판단합니다.
           </p>
         </section>
       </div>
@@ -415,6 +490,7 @@ function FlagCard({
   settingsPath,
   onJump,
   onAct,
+  onRevalidate,
 }: {
   flag: Flag;
   // How many places in the manuscript hold its sentence.
@@ -423,15 +499,44 @@ function FlagCard({
   runActive: boolean;
   active: boolean;
   // The action in progress on this flag, if any.
-  busy: FlagAction | null;
+  busy: BusyAction | null;
   disabled: boolean;
   error: string | undefined;
   notice: string | undefined;
   settingsPath: string;
   onJump: () => void;
   onAct: (action: FlagAction) => void;
+  onRevalidate: (setting?: string) => Promise<boolean>;
 }) {
   const attribute = ATTRIBUTES[flag.attribute ?? ""] ?? flag.attribute;
+  // The "supplement the setting" form: open, and what's typed in it.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+  const revalidating = isRevalidating(flag);
+  const revalidation = flag.revalidation;
+  // Only a flag on a card that's still there, and not while a run is going
+  // (it replaces this run's flags when it finishes).
+  const canRevalidate = flag.status === "open" && flag.subject_id !== null && !!flag.attribute && !runActive;
+
+  function openForm() {
+    setDraft(flag.reference_text ?? "");
+    setFormError(null);
+    setEditing(true);
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const value = draft.trim();
+    if (!value) {
+      setFormError("설정 값을 입력해 주세요.");
+      return;
+    }
+    // Unchanged: judged against the card as it is (it may have changed on
+    // the settings screen since).
+    const changed = value !== (flag.reference_text ?? "").trim();
+    if (await onRevalidate(changed ? value : undefined)) setEditing(false);
+  }
   // Why accept can't be pressed now, if it can't: the run would bring the
   // flag back, or the sentence (and its value) may be gone.
   const acceptBlocked = runActive
@@ -444,9 +549,11 @@ function FlagCard({
       <div className="flag-title">
         <strong>{ERROR_TYPES[flag.error_type] ?? flag.error_type}</strong>
         {flag.confidence === null ? (
-          <span className="flag-confidence" title="설정이 바뀌어 아직 새 설정과 비교하지 않았습니다">
-            다시 검증 필요
-          </span>
+          flag.status === "open" && (
+            <span className="flag-confidence" title="설정이 바뀌어 아직 새 설정과 비교하지 않았습니다">
+              다시 검증 필요
+            </span>
+          )
         ) : (
           <span className="flag-confidence" title="판정 모델이 모순이라고 본 확률">
             모순 가능성 {Math.round(flag.confidence * 100)}%
@@ -495,8 +602,74 @@ function FlagCard({
           <button type="button" onClick={() => onAct("dismiss")} disabled={disabled}>
             {busy === "dismiss" ? "처리 중..." : "오탐 해제"}
           </button>
-          {flag.subject_kind === "character" && <Link to={settingsPath}>설정 보완</Link>}
+          {!editing && (
+            <button
+              type="button"
+              onClick={openForm}
+              disabled={disabled || revalidating || !canRevalidate}
+              title={
+                runActive
+                  ? "이 화의 검증이 진행 중입니다. 검증이 끝난 뒤 재검증할 수 있습니다."
+                  : flag.subject_id === null
+                    ? "설정 카드가 삭제되어 재검증할 수 없습니다."
+                    : undefined
+              }
+            >
+              설정 보완 후 재검증
+            </button>
+          )}
         </div>
+      )}
+      {flag.status === "open" && editing && (
+        <form className="flag-revalidate" onSubmit={submit}>
+          <label>
+            {flag.subject_name}의 {attribute} 설정
+            <input
+              type="text"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              maxLength={500}
+              disabled={busy === "revalidate"}
+              autoFocus
+            />
+          </label>
+          <p className="flag-state">
+            설정 카드의 값이 이 값으로 바뀌고, 이 항목과 같은 속성의 다른 항목을 다시 판단합니다. 값을 그대로 두면 지금
+            설정과 다시 비교합니다.
+            {flag.subject_kind === "character" && (
+              <>
+                {" "}
+                <Link to={settingsPath}>다른 설정은 설정 화면에서</Link>
+              </>
+            )}
+          </p>
+          {formError && (
+            <p className="result-error" role="alert">
+              {formError}
+            </p>
+          )}
+          <div className="flag-actions">
+            <button type="submit" disabled={disabled || !canRevalidate}>
+              {busy === "revalidate" ? "요청 중..." : "재검증"}
+            </button>
+            <button type="button" onClick={() => setEditing(false)} disabled={busy === "revalidate"}>
+              취소
+            </button>
+          </div>
+        </form>
+      )}
+      {revalidating && (
+        <p className="flag-state" role="status">
+          재검증 중...
+        </p>
+      )}
+      {revalidation?.status === "failed" && flag.status === "open" && (
+        <p className="result-error" role="alert">
+          재검증 실패: {REVALIDATION_ERRORS[revalidation.error ?? ""] ?? "알 수 없는 오류가 발생했습니다."}
+        </p>
+      )}
+      {revalidation?.status === "succeeded" && revalidation.outcome === "contradicts" && flag.status === "open" && (
+        <p className="flag-state">재검증 결과: 지금 설정과도 어긋납니다.</p>
       )}
       {flag.status === "dismissed" && (
         <div className="flag-actions">
@@ -508,7 +681,13 @@ function FlagCard({
       )}
       {flag.status === "accepted" && <p className="flag-state">설정에 반영함</p>}
       {flag.status === "resolved" && <p className="flag-state">같은 속성의 다른 항목을 반영해 설정과 맞게 됨</p>}
-      {flag.status === "resolved_by_revalidation" && <p className="flag-state">재검증으로 해소됨</p>}
+      {flag.status === "resolved_by_revalidation" && (
+        <p className="flag-state">
+          재검증으로 해소됨
+          {revalidation?.outcome === "resolved" &&
+            (revalidation.setting === null ? " · 설정 값이 비어 비교할 대상이 없음" : ` · 설정: ${revalidation.setting}`)}
+        </p>
+      )}
       {error && (
         <p className="result-error" role="alert">
           {error}

@@ -4,7 +4,9 @@ Saving (PATCH) never triggers the AI pipeline — that's the separate "run
 validation" step (POST .../validations), which records a run and hands it to
 the CPU worker through the job queue (10.2); the editor then polls the run.
 What the latest run found contradicting the settings is listed by GET .../flags,
-and the author acts on each flag with PATCH .../flags/{id} (2.4).
+and the author acts on each flag with PATCH .../flags/{id} (2.4), or has one
+judged again after supplementing its setting, POST .../flags/{id}/revalidate
+(7.5) — a job for the CPU worker too.
 Editing a `submitted` episode's content flips it back to `draft` (2.2),
 leaving existing validation results in place.
 """
@@ -15,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, load_only
 
@@ -26,6 +28,7 @@ from models.character import Character
 from models.claim import Claim, ContradictionFlag
 from models.db import get_db
 from models.episode import Episode
+from models.flag_revalidation import FlagRevalidation
 from models.location import Location
 from models.user import User
 from models.validation_run import ValidationRun
@@ -303,6 +306,21 @@ def get_latest_validation(
 # ---------------------------------------------------------------- contradiction flags
 
 
+class FlagRevalidationPublic(BaseModel):
+    """The flag's latest revalidation (models/flag_revalidation.py)."""
+
+    model_config = {"from_attributes": True}
+
+    status: str  # queued | running | succeeded | failed
+    # failed: abandoned | queue_unavailable | superseded | flag_missing |
+    # flag_handled | card_missing | setting_changed | inference_failed | internal
+    error: str | None
+    outcome: str | None  # succeeded: resolved | contradicts
+    setting: str | None  # the card's value it was judged against
+    created_at: datetime
+    finished_at: datetime | None
+
+
 class FlagPublic(BaseModel):
     id: uuid.UUID
     error_type: str  # appearance | location (behavior, spacetime: later stages)
@@ -317,6 +335,7 @@ class FlagPublic(BaseModel):
     claim_text: str
     # What the manuscript says for the attribute — what "accept" writes to the card
     value: str | None
+    revalidation: FlagRevalidationPublic | None = None
 
 
 @router.get("/{novel_id}/episodes/{episode_id}/flags", response_model=list[FlagPublic])
@@ -338,11 +357,43 @@ def list_flags(
             Claim.episode_id == episode_id,
         )
         .order_by(ContradictionFlag.confidence.desc().nulls_last(), ContradictionFlag.id)
+    ).all()
+    latest = _latest_revalidations(db, novel_id, [flag.id for flag, _ in rows])
+    db.commit()
+    return [_flag_public(flag, claim, latest.get(flag.id)) for flag, claim in rows]
+
+
+def _latest_revalidations(
+    db: Session, novel_id: uuid.UUID, flag_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, FlagRevalidation]:
+    """Each flag's latest revalidation; one still queued or running long past
+    when it should have finished is failed as abandoned first (as runs are).
+    The caller commits."""
+    if not flag_ids:
+        return {}
+    db.execute(
+        update(FlagRevalidation)
+        .where(
+            FlagRevalidation.novel_id == novel_id,
+            FlagRevalidation.flag_id.in_(flag_ids),
+            FlagRevalidation.status.in_(_ACTIVE_STATUSES),
+            FlagRevalidation.created_at < func.now() - RUN_ABANDON_AFTER,
+        )
+        .values(status="failed", error="abandoned", finished_at=func.now())
     )
-    return [_flag_public(flag, claim) for flag, claim in rows]
+    latest: dict[uuid.UUID, FlagRevalidation] = {}
+    for revalidation in db.scalars(
+        select(FlagRevalidation)
+        .where(FlagRevalidation.novel_id == novel_id, FlagRevalidation.flag_id.in_(flag_ids))
+        .order_by(FlagRevalidation.created_at, FlagRevalidation.id)
+    ):
+        latest[revalidation.flag_id] = revalidation
+    return latest
 
 
-def _flag_public(flag: ContradictionFlag, claim: Claim) -> FlagPublic:
+def _flag_public(
+    flag: ContradictionFlag, claim: Claim, revalidation: FlagRevalidation | None = None
+) -> FlagPublic:
     return FlagPublic(
         id=flag.id,
         error_type=flag.error_type,
@@ -356,6 +407,7 @@ def _flag_public(flag: ContradictionFlag, claim: Claim) -> FlagPublic:
         subject_name=claim.subject_name,
         claim_text=claim.text,
         value=_flag_value(flag, claim),
+        revalidation=FlagRevalidationPublic.model_validate(revalidation) if revalidation is not None else None,
     )
 
 
@@ -384,6 +436,7 @@ FLAG_RUN_ACTIVE = "flag_run_active"
 FLAG_OUTDATED = "flag_outdated"
 # accept after the card's value changed since the run (the settings screen, or
 # an accept in another episode): the author hasn't seen what would be replaced
+# — also a revalidation that supplements the setting over a value not shown
 FLAG_SETTING_CHANGED = "flag_setting_changed"
 
 
@@ -403,19 +456,7 @@ def act_on_flag(
     # The novel's row lock: accepting writes a setting card, as the settings
     # screen and validation runs do under the same lock.
     episode = _get_episode(db, novel_id, episode_id, user, for_update=True)
-    row = db.execute(
-        select(ContradictionFlag, Claim)
-        .join(Claim, Claim.id == ContradictionFlag.claim_id)
-        .where(
-            ContradictionFlag.id == flag_id,
-            ContradictionFlag.novel_id == novel_id,
-            Claim.novel_id == novel_id,
-            Claim.episode_id == episode_id,
-        )
-    ).one_or_none()
-    if row is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Flag not found")
-    flag, claim = row
+    flag, claim = _get_flag(db, novel_id, episode_id, flag_id)
 
     if body.action == "reopen":
         if flag.status != "dismissed":
@@ -431,19 +472,56 @@ def act_on_flag(
         if key is not None:
             record_dismissal(db, novel_id, episode_id, key)
     else:
-        latest = _latest_run(db, novel_id, episode_id)
-        if latest is not None:
-            _abandon_if_stale(db, latest)
-            if latest.status in _ACTIVE_STATUSES:
-                raise HTTPException(status.HTTP_409_CONFLICT, FLAG_RUN_ACTIVE)
+        _raise_if_run_active(db, novel_id, episode_id)
         # "submitted": the saved manuscript is what the last successful run
         # validated (a save since made it a draft, 2.2).
         if episode.status != "submitted":
             raise HTTPException(status.HTTP_409_CONFLICT, FLAG_OUTDATED)
         _accept(db, novel_id, flag, claim)
         flag.status = "accepted"
+    revalidation = _latest_revalidations(db, novel_id, [flag.id]).get(flag.id)
     db.commit()
-    return _flag_public(flag, claim)
+    return _flag_public(flag, claim, revalidation)
+
+
+def _get_flag(
+    db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, flag_id: uuid.UUID
+) -> tuple[ContradictionFlag, Claim]:
+    row = db.execute(
+        select(ContradictionFlag, Claim)
+        .join(Claim, Claim.id == ContradictionFlag.claim_id)
+        .where(
+            ContradictionFlag.id == flag_id,
+            ContradictionFlag.novel_id == novel_id,
+            Claim.novel_id == novel_id,
+            Claim.episode_id == episode_id,
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Flag not found")
+    return row.tuple()
+
+
+def _raise_if_run_active(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID) -> None:
+    # A run in progress judged against the card as it was, and replaces this
+    # run's flags when it finishes.
+    latest = _latest_run(db, novel_id, episode_id)
+    if latest is not None:
+        _abandon_if_stale(db, latest)
+        if latest.status in _ACTIVE_STATUSES:
+            raise HTTPException(status.HTTP_409_CONFLICT, FLAG_RUN_ACTIVE)
+
+
+def _card_of(db: Session, novel_id: uuid.UUID, claim: Claim):
+    """The setting card the claim is about, and the field its judged attributes are in."""
+    fields = _CARD_FIELDS.get(claim.subject_kind or "")
+    card = None
+    if fields is not None and claim.subject_id is not None:
+        model, attrs_field = fields
+        card = db.scalar(select(model).where(model.id == claim.subject_id, model.novel_id == novel_id))
+    if card is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, FLAG_CARD_MISSING)
+    return card, attrs_field
 
 
 def _dismissal_key_of(flag: ContradictionFlag, claim: Claim):
@@ -460,15 +538,9 @@ def _forget_dismissal(
 
 def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Claim) -> None:
     value = _flag_value(flag, claim)
-    fields = _CARD_FIELDS.get(claim.subject_kind or "")
-    if not value or fields is None:
+    if not value or claim.subject_kind not in _CARD_FIELDS:
         raise HTTPException(status.HTTP_409_CONFLICT, FLAG_NO_VALUE)
-    model, attrs_field = fields
-    card = None
-    if claim.subject_id is not None:
-        card = db.scalar(select(model).where(model.id == claim.subject_id, model.novel_id == novel_id))
-    if card is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, FLAG_CARD_MISSING)
+    card, attrs_field = _card_of(db, novel_id, claim)
     current = (getattr(card, attrs_field) or {}).get(flag.attribute)
     if normalize_name(str(current or "")) != normalize_name(flag.reference_text or ""):
         raise HTTPException(status.HTTP_409_CONFLICT, FLAG_SETTING_CHANGED)
@@ -512,3 +584,131 @@ def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Cl
             sibling.reference_text = value
             sibling.confidence = None
             sibling.status = "open"
+
+
+# ---------------------------------------------------------------- revalidation (7.5)
+
+
+class RevalidateRequest(BaseModel):
+    # The setting's new value, when the author supplements it here (the card's
+    # value for the flag's attribute); None to judge the flag against the card
+    # as it is now (changed on the settings screen).
+    setting: str | None = Field(None, max_length=500)
+
+    @field_validator("setting")
+    @classmethod
+    def _not_blank(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("Must not be blank")
+        return value
+
+
+@router.post(
+    "/{novel_id}/episodes/{episode_id}/flags/{flag_id}/revalidate",
+    response_model=FlagPublic,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def revalidate_flag(
+    novel_id: uuid.UUID,
+    episode_id: uuid.UUID,
+    flag_id: uuid.UUID,
+    body: RevalidateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FlagPublic:
+    """Judges an open flag again against its card (7.5): only the judgment
+    that raised it, by the CPU worker (pipeline/revalidate_flag.py). With a
+    setting, the card's value for the flag's attribute becomes it first — the
+    author's value — and the episode's other open flags on that attribute,
+    judged against the old value, are judged again too. Without one, while
+    the flag's last revalidation is still queued or running, returns that one
+    instead of starting another."""
+    # The novel's row lock: this may write a setting card, as accepting does.
+    _get_episode(db, novel_id, episode_id, user, for_update=True)
+    flag, claim = _get_flag(db, novel_id, episode_id, flag_id)
+    if flag.status != "open":
+        raise HTTPException(status.HTTP_409_CONFLICT, FLAG_HANDLED)
+    if not flag.attribute:
+        raise HTTPException(status.HTTP_409_CONFLICT, FLAG_NO_VALUE)
+    _raise_if_run_active(db, novel_id, episode_id)
+    card, attrs_field = _card_of(db, novel_id, claim)
+
+    to_judge = [flag]
+    if body.setting is not None:
+        attrs = getattr(card, attrs_field) or {}
+        current = attrs.get(flag.attribute)
+        if normalize_name(str(current or "")) != normalize_name(flag.reference_text or ""):
+            raise HTTPException(status.HTTP_409_CONFLICT, FLAG_SETTING_CHANGED)
+        if normalize_name(body.setting) != normalize_name(str(current or "")):
+            # Reassigned, not mutated: SQLAlchemy doesn't see changes inside a JSONB value.
+            setattr(card, attrs_field, {**attrs, flag.attribute: body.setting})
+            # The author's value now, not an episode's to replace on a later run.
+            card.attr_sources = {
+                key: record for key, record in (card.attr_sources or {}).items() if key != flag.attribute
+            }
+            to_judge += list(
+                db.scalars(
+                    select(ContradictionFlag)
+                    .join(Claim, Claim.id == ContradictionFlag.claim_id)
+                    .where(
+                        ContradictionFlag.novel_id == novel_id,
+                        ContradictionFlag.id != flag.id,
+                        ContradictionFlag.status == "open",
+                        ContradictionFlag.attribute == flag.attribute,
+                        Claim.novel_id == novel_id,
+                        Claim.episode_id == episode_id,
+                        Claim.subject_kind == claim.subject_kind,
+                        Claim.subject_id == claim.subject_id,
+                    )
+                )
+            )
+            # Held against the new value from now on, not judged against it
+            # yet (as accepting leaves the other flags): kept even if the
+            # revalidation then fails, so another one — with the value as it
+            # now is — can still be asked for.
+            for each in to_judge:
+                each.reference_text = body.setting
+                each.confidence = None
+    elif (active := _latest_revalidations(db, novel_id, [flag.id]).get(flag.id)) is not None and (
+        active.status in _ACTIVE_STATUSES
+    ):
+        db.commit()
+        return _flag_public(flag, claim, active)
+
+    # One in progress on any of them judges a value that is no longer the one
+    # to judge (or will be judged again anyway): this one replaces it.
+    db.execute(
+        update(FlagRevalidation)
+        .where(
+            FlagRevalidation.novel_id == novel_id,
+            FlagRevalidation.flag_id.in_([each.id for each in to_judge]),
+            FlagRevalidation.status.in_(_ACTIVE_STATUSES),
+        )
+        .values(status="failed", error="superseded", finished_at=func.now())
+    )
+    revalidations = [FlagRevalidation(novel_id=novel_id, flag_id=each.id, status="queued") for each in to_judge]
+    db.add_all(revalidations)
+    # Committed (with the setting) before they're enqueued, so the worker
+    # can't pick a job up before the row it names exists.
+    db.commit()
+    try:
+        queue = get_queue_client()
+        for revalidation in revalidations:
+            queue.enqueue({"job_id": str(revalidation.id), "type": "revalidate_flag", "novel_id": str(novel_id)})
+    except Exception:
+        logger.exception("Could not enqueue revalidation of flag %s", flag.id)
+        db.execute(
+            update(FlagRevalidation)
+            .where(
+                FlagRevalidation.id.in_([revalidation.id for revalidation in revalidations]),
+                FlagRevalidation.status == "queued",
+            )
+            .values(status="failed", error="queue_unavailable", finished_at=func.now())
+        )
+        db.commit()
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Revalidation is unavailable right now")
+    db.refresh(revalidations[0])
+    return _flag_public(flag, claim, revalidations[0])

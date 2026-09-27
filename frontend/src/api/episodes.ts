@@ -94,6 +94,21 @@ export async function getLatestValidation(novelId: string, episodeId: string): P
 // what this one says too (the author didn't accept this one).
 export type FlagStatus = "open" | "accepted" | "dismissed" | "resolved" | "resolved_by_revalidation";
 
+// A flag judged again after its setting was supplemented (design doc 7.5),
+// by the worker: queued -> running -> succeeded | failed.
+export interface FlagRevalidation {
+  status: "queued" | "running" | "succeeded" | "failed";
+  // failed: abandoned | queue_unavailable | superseded | flag_missing |
+  // flag_handled | card_missing | setting_changed | inference_failed | internal
+  error: string | null;
+  // succeeded: resolved (the flag is resolved_by_revalidation) | contradicts (still open)
+  outcome: "resolved" | "contradicts" | null;
+  // The setting's value it was judged against (null: the card had none).
+  setting: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
 export interface Flag {
   id: string;
   error_type: "appearance" | "location" | string;
@@ -114,6 +129,8 @@ export interface Flag {
   claim_text: string;
   // What the manuscript says for the attribute: what "accept" writes to the card.
   value: string | null;
+  // The latest revalidation, if the flag was ever revalidated.
+  revalidation: FlagRevalidation | null;
 }
 
 // accept: the manuscript is right, its value replaces the card's.
@@ -122,6 +139,21 @@ export type FlagAction = "accept" | "dismiss" | "reopen";
 
 export function listFlags(novelId: string, episodeId: string): Promise<Flag[]> {
   return apiFetch<Flag[]>(`/novels/${novelId}/episodes/${episodeId}/flags`);
+}
+
+// Judges an open flag again (7.5). With `setting`, the card's value for the
+// flag's attribute becomes it first, and the episode's other open flags on
+// that attribute are judged again too; without, the flag is judged against
+// the card as it is now.
+export function revalidateFlag(novelId: string, episodeId: string, flagId: string, setting?: string): Promise<Flag> {
+  return apiFetch<Flag>(`/novels/${novelId}/episodes/${episodeId}/flags/${flagId}/revalidate`, {
+    method: "POST",
+    body: JSON.stringify(setting === undefined ? {} : { setting }),
+  });
+}
+
+export function isRevalidating(flag: Flag): boolean {
+  return flag.revalidation?.status === "queued" || flag.revalidation?.status === "running";
 }
 
 export function actOnFlag(novelId: string, episodeId: string, flagId: string, action: FlagAction): Promise<Flag> {

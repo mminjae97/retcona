@@ -49,7 +49,7 @@ class ContextBundle:
         return self.claim_cards[claim_index]
 
 
-def _text_values(attrs: object) -> dict[str, str]:
+def text_values(attrs: object) -> dict[str, str]:
     # Values as text, blanks dropped: what's stored may be anything JSON.
     if not isinstance(attrs, dict):
         return {}
@@ -76,7 +76,7 @@ def get_context_bundle(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, 
             kind="character",
             id=character.id,
             name=character.name,
-            attrs=_text_values(character.fixed_attrs),
+            attrs=text_values(character.fixed_attrs),
             sources=source_episodes(character.attr_sources),
         )
     for location in db.scalars(select(Location).where(Location.novel_id == novel_id, Location.id.in_(wanted))):
@@ -84,7 +84,7 @@ def get_context_bundle(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, 
             kind="location",
             id=location.id,
             name=location.name,
-            attrs=_text_values(location.geo_attrs),
+            attrs=text_values(location.geo_attrs),
             sources=source_episodes(location.attr_sources),
         )
     return ContextBundle(

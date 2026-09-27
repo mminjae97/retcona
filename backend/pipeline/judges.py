@@ -128,19 +128,55 @@ def _pairs(claims: list[ExtractedClaim], bundle: ContextBundle, kind: str, keys:
         if card is None:
             continue  # a new entity: nothing to contradict yet
         evidence = claim.evidence or claim.text
-        subject = normalize_name(claim.subject)
-        named = {name for name in subjects if name in normalize_name(evidence)}
-        # One name inside the other ("레온" / "레온하트") isn't a second subject.
-        others = {name for name in named if subject not in name and name not in subject}
-        hypothesis = evidence if subject in named and not others else claim.text
+        hypothesis = _hypothesis(normalize_name(claim.subject), evidence, claim.text, subjects)
         for attribute, value in claim.attributes.items():
-            setting = card.attrs.get(attribute)
-            if attribute not in keys or not setting or card.sources.get(attribute) == this_episode:
+            if attribute not in keys or not _to_judge(card, attribute, value, this_episode):
                 continue
-            if repeats(value, setting):
-                continue
-            pairs.append(_Pair(index, card, attribute, _premise(card, attribute, setting), hypothesis, evidence))
+            premise = _premise(card, attribute, card.attrs[attribute])
+            pairs.append(_Pair(index, card, attribute, premise, hypothesis, evidence))
     return pairs
+
+
+def _hypothesis(subject: str, evidence: str, text: str, subjects: set[str]) -> str:
+    # The sentence, or the claim's restatement where the sentence doesn't name
+    # the subject or names another of the episode's subjects (see above).
+    # subject and subjects normalized.
+    named = {name for name in subjects if name in normalize_name(evidence)}
+    # One name inside the other ("레온" / "레온하트") isn't a second subject.
+    others = {name for name in named if subject not in name and name not in subject}
+    return evidence if subject in named and not others else text
+
+
+def _to_judge(card: Card, attribute: str, value: str | None, this_episode: str) -> bool:
+    # Only against a value from somewhere other than this episode, and one the
+    # claim's value doesn't simply repeat.
+    setting = card.attrs.get(attribute)
+    if not setting or card.sources.get(attribute) == this_episode:
+        return False
+    return not (value and repeats(value, setting))
+
+
+def rejudge(
+    card: Card,
+    attribute: str,
+    value: str | None,
+    subject: str,
+    evidence: str | None,
+    text: str,
+    subjects: set[str],
+    episode_id: uuid.UUID,
+) -> float | None:
+    """One flag judged again against its card as it is now (7.5,
+    pipeline/revalidate_flag.py), by the same rules as a run: the NLI
+    contradiction probability, or None where a run wouldn't ask the model —
+    the card has no value for the attribute, the value came from this same
+    episode, or the manuscript's value repeats it — which contradicts nothing.
+    subjects: the episode's subjects of this kind, normalized."""
+    if not _to_judge(card, attribute, value, str(episode_id)):
+        return None
+    hypothesis = _hypothesis(normalize_name(subject), evidence or text, text, subjects)
+    [score] = check_contradictions([(_premise(card, attribute, card.attrs[attribute]), hypothesis)])
+    return round(score.contradiction, 4)
 
 
 def _judge(pairs: list[_Pair], error_type: str) -> list[Flag]:

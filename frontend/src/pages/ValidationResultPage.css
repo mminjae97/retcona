@@ -188,3 +188,20 @@
 .flag-actions a {
   font-size: 13px;
 }
+
+/* Supplementing the flag's setting, in place. */
+.flag-revalidate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border);
+}
+
+.flag-revalidate label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+}
