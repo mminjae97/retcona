@@ -7,6 +7,7 @@ from models import (  # noqa: F401
     email_verification,
     episode,
     flag_dismissal,
+    flag_revalidation,
     location,
     novel,
     relation,

@@ -15,6 +15,9 @@ Run: python -m workers.cpu_worker (keeps running until SIGINT/SIGTERM)
 Jobs:
 - validate_episode {novel_id, episode_id, job_id = the validation run's id}:
   the "run validation" button (2.2), enqueued by api/episodes.py
+- revalidate_flag {novel_id, job_id = the flag revalidation's id}: one flag
+  judged again after its setting was supplemented (7.5), enqueued by
+  api/episodes.py
 """
 
 import logging
@@ -25,6 +28,7 @@ import uuid
 from ai.nli_rerank import load_models
 from infra.queue_client import get_queue_client
 from models.db import check_database
+from pipeline.revalidate_flag import revalidate_flag
 from pipeline.validate_episode import validate_episode
 
 # By name, not __name__: run as `python -m workers.cpu_worker`, __name__ is "__main__".
@@ -37,6 +41,8 @@ QUEUE_RETRY_SECONDS = 5.0
 def handle(job: dict) -> None:
     if job.get("type") == "validate_episode":
         validate_episode(uuid.UUID(job["novel_id"]), uuid.UUID(job["job_id"]))
+    elif job.get("type") == "revalidate_flag":
+        revalidate_flag(uuid.UUID(job["novel_id"]), uuid.UUID(job["job_id"]))
     else:
         logger.warning("Dropping job %s of unknown type %r", job.get("job_id"), job.get("type"))
 
@@ -72,8 +78,9 @@ def run() -> None:
         try:
             handle(job)
         except Exception:
-            # validate_episode records its own failures on the run; this is
-            # what it couldn't (a malformed job, the database gone).
+            # The jobs record their own failures (on the run / the
+            # revalidation); this is what they couldn't (a malformed job, the
+            # database gone).
             logger.exception("Job %s failed", job.get("job_id"))
         queue.ack(job["job_id"])
     logger.info("CPU worker stopped")
