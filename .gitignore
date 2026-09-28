@@ -40,3 +40,9 @@ Thumbs.db
 # --- NLI fine-tuning (ml/nli): downloaded datasets and training outputs ---
 ml/nli/data/
 ml/nli/runs/
+
+# --- NER / QA fine-tuning (ml/ner, ml/qa): the same ---
+ml/ner/data/
+ml/ner/runs/
+ml/qa/data/
+ml/qa/runs/
