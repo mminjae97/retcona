@@ -134,6 +134,16 @@ def test_the_other_cues():
     assert _attributes("그는 살았다.") == set()
     assert _attributes("그녀는 부산 출신이었다.") == {"origin"}
     assert _attributes("그의 키가 컸다.") == {"height"}
+    assert _attributes("그의 신장은 180센티였다.") == {"height"}
+
+
+def test_a_distance_or_a_shop_is_not_a_height():
+    assert _attributes("그는 30cm 떨어진 곳에 섰다.") == set()
+    assert _attributes("신장개업한 가게였다.") == set()
+    height = next(a for a in rules.ATTRIBUTES if a.key == "height")
+    assert rules.value_of(height, "180센티", "신장은 180센티였다") == "180센티"
+    assert rules.value_of(height, "컸다", "키가 컸다") == "컸다"
+    assert rules.value_of(height, "떨어진", "키가 떨어진") == ""
     assert _attributes("오른손에 화상 자국이 있었다.") == {"scars"}
 
 

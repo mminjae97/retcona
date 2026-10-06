@@ -206,7 +206,9 @@ ATTRIBUTES = (
     Attribute(
         "height",
         "키는",
-        re.compile(r"(?<![가-힣])키(?=[가는도를])|신장|\d{2,3}\s?(?:센티|cm|㎝)"),
+        # A bare "30cm" is any distance; it's a height only as the answer to 키 / 신장.
+        re.compile(r"(?<![가-힣])키(?=[가는도를])|신장(?=[이가은는을를의도])"),
+        value=re.compile(r"\d|센티|미터|크|컸|큰|작|장신|단신|훤칠|건장|왜소|높|낮"),
     ),
     Attribute("scars", "흉터는", re.compile(r"흉터|상흔|(?<![발손물퀴])자국")),
     Attribute(
