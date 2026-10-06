@@ -102,7 +102,8 @@ class Registry:
         for match in self._pattern.finditer(narration):
             subject = self.resolve(match.group())
             if subject is not None:
-                topic = narration[match.end() : match.end() + 1] in _TOPIC_PARTICLES
+                after = narration[match.end() : match.end() + 1]
+                topic = bool(after) and after in _TOPIC_PARTICLES
                 found.append(Mention(match.start(), match.end(), subject, topic))
         return found
 
@@ -153,7 +154,13 @@ _COLOR = (
     "에메랄드|사파이어|호박색|청색|청록|흑발|흑색|주황|노란|노랗|분홍|핑크"
 )
 COLOR_RE = re.compile(_COLOR)
-_AGE_UNIT = r"(?:열|스물|스무|서른|마흔|쉰|예순|일흔|여든|아흔)[가-힣]{0,3}\s?살|\d+\s?살|\d+\s?세(?![기계상월금력우])"
+# Native Korean numerals, tens and ones ("열일곱", "스물세", "여섯"), not just any
+# word that starts with one ("열심히 살았다").
+_NATIVE_NUMERAL = (
+    r"(?:열|스물|스무|서른|마흔|쉰|예순|일흔|여든|아흔)(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉)?"
+    r"|(?<![가-힣])(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉)"
+)
+_AGE_UNIT = rf"(?:{_NATIVE_NUMERAL})\s?살(?!림)|\d+\s?살|\d+\s?세(?![기계상월금력우])"
 
 
 @dataclass(frozen=True)
@@ -165,14 +172,18 @@ class Attribute:
     needs_color: bool = False
     # what an answer has to look like
     value: re.Pattern | None = None
+    # Rules a clause out where the noun is the weak kind (not the named group
+    # "strong"): 눈 is an eye, or snow.
+    unless: re.Pattern | None = None
 
 
 ATTRIBUTES = (
     Attribute(
         "eye_color",
         "눈 색깔은",
-        re.compile(r"눈동자|홍채|(?<![가-힣])눈(?=[이은을의도에])"),
+        re.compile(r"(?P<strong>눈동자|홍채)|(?<![가-힣])눈(?=[이은을의도에])"),
         needs_color=True,
+        unless=re.compile(r"내리|내려|내렸|쌓|녹아|녹는|녹았|날리|날렸|덮인|덮여|덮었|펑펑|눈보라|눈송이|눈발"),
     ),
     Attribute(
         "hair_color",
@@ -184,14 +195,14 @@ ATTRIBUTES = (
         "age",
         "나이는",
         re.compile(_AGE_UNIT),
-        value=re.compile(r"\d|열|스[물무]|서른|마흔|쉰|예순|일흔|여든|아흔"),
+        value=re.compile(rf"\d|{_AGE_UNIT}"),
     ),
     Attribute(
         "height",
         "키는",
         re.compile(r"(?<![가-힣])키(?=[가는도를])|신장|\d{2,3}\s?(?:센티|cm|㎝)"),
     ),
-    Attribute("scars", "흉터는", re.compile(r"흉터|상흔|자국")),
+    Attribute("scars", "흉터는", re.compile(r"흉터|상흔|(?<![발손물퀴])자국")),
     Attribute(
         "origin",
         "출신은",
@@ -223,8 +234,11 @@ def cue_hits(narration: str) -> list[CueHit]:
         text = narration[clause[0] : clause[1]]
         for attribute in ATTRIBUTES:
             match = attribute.noun.search(text)
-            if match and (not attribute.needs_color or COLOR_RE.search(text)):
-                hits.append(CueHit(attribute, clause[0] + match.start(), clause))
+            if not match or (attribute.needs_color and not COLOR_RE.search(text)):
+                continue
+            if attribute.unless and not match.groupdict().get("strong") and attribute.unless.search(text):
+                continue
+            hits.append(CueHit(attribute, clause[0] + match.start(), clause))
     return hits
 
 

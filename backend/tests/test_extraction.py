@@ -80,6 +80,12 @@ def test_a_name_that_fits_several_characters_is_unlinked_and_an_alias_picks_one(
     assert by_alias.subject.ref == "c3"
 
 
+def test_a_name_at_the_very_end_of_a_line_is_not_a_topic():
+    registry = rules.Registry(CHARACTERS, LOCATIONS)
+    assert [m.topic for m in registry.mentions("검은 숲")] == [False]
+    assert [m.topic for m in registry.mentions("검은 숲은")] == [True]
+
+
 def test_a_name_inside_another_word_is_not_a_mention():
     assert rules.Registry(CHARACTERS, LOCATIONS).mentions("아레온 마을") == []
 
@@ -115,7 +121,29 @@ def test_the_other_cues():
     assert _attributes("오른손에 화상 자국이 있었다.") == {"scars"}
 
 
-def test_cues_in_separate_clauses_are_kept_apart():
+def test_snow_is_not_an_eye():
+    assert _attributes("레온은 하얀 눈이 내리는 거리를 걸었다.") == set()
+    assert _attributes("하얀 눈이 쌓인 길이었다.") == set()
+    assert _attributes("그의 눈이 푸르게 빛났다.") == {"eye_color"}
+    assert _attributes("눈동자가 하얀 눈처럼 맑았다.") == {"eye_color"}
+
+
+def test_footprints_are_not_scars():
+    assert _attributes("레온의 발자국이 눈 위에 남았다.") == set()
+    assert _attributes("뺨에 칼자국이 있었다.") == {"scars"}
+    assert _attributes("손등에 화상 자국이 있었다.") == {"scars"}
+
+
+def test_an_age_is_a_number_not_a_word_that_starts_with_one():
+    assert _attributes("열심히 살았다.") == set()
+    assert _attributes("그는 열일곱 살이었다.") == {"age"}
+    assert _attributes("여섯 살 때의 일이었다.") == {"age"}
+    assert _attributes("열 살 위의 형이었다.") == {"age"}
+    age = next(a for a in rules.ATTRIBUTES if a.key == "age")
+    assert rules.value_of(age, "열심히 살", "열심히 살았다") == ""
+
+
+def test_the_cues_in_separate_clauses_are_kept_apart():
     [eye, age] = sorted(rules.cue_hits("눈은 푸르렀고, 나이는 17살이었다."), key=lambda hit: hit.start)
     assert eye.attribute.key == "eye_color" and age.attribute.key == "age"
     assert eye.clause != age.clause
@@ -137,7 +165,12 @@ def test_an_answer_is_cleaned_to_the_value():
 def test_a_claim_about_a_registered_character_carries_its_ref_and_the_sentence():
     extraction = _run("레온의 눈동자는 푸른색이었다.", {"레온의 눈 색깔은?": "푸른색"})
     [claim] = extraction.claims
-    assert (claim.claim_type, claim.subject_kind, claim.subject, claim.subject_ref) == ("appearance", "character", "레온", "c1")
+    assert (claim.claim_type, claim.subject_kind, claim.subject, claim.subject_ref) == (
+        "appearance",
+        "character",
+        "레온",
+        "c1",
+    )
     assert claim.attributes == {"eye_color": "푸른색"}
     assert claim.evidence == "레온의 눈동자는 푸른색이었다."
     assert claim.text == "레온의 눈 색깔은 푸른색이다."
