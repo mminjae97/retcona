@@ -6,13 +6,17 @@
   anything goes into the settings (7.4) — strictly adding: a card attribute
   that's still empty is filled in, and the characters' mutable attributes
   (hairstyle, outfit, ...) are recorded in character_state_history for this
-  episode. An attribute the card already has is never changed here, flagged
-  or not: changing an existing setting is the author's call (2.4). The one
+  episode, and a location's changes of state ("폐허가 되었다") in
+  location_state_history. An attribute the card already has is never changed
+  here, flagged or not: changing an existing setting is the author's call
+  (2.4). The one
   exception is a value filled in from this same episode by an earlier run:
   that's the episode's own earlier wording, and the new wording replaces it —
   or, once the sentence it was taken from is gone from the episode, the value
   is cleared, so text the author removed isn't held against other episodes.
-  (Only then: a run whose extraction merely missed it this time keeps it.)
+  (Only then: a run whose extraction merely missed it this time keeps it.) It
+  is cleared too when a location's value came from a sentence that is now read
+  as a change of state, which belongs in location_state_history, not the card.
 """
 
 import uuid
@@ -26,7 +30,12 @@ from models.character import (
     Character,
     CharacterStateHistory,
 )
-from models.location import GEO_ATTR_KEYS, Location
+from models.location import (
+    GEO_ATTR_KEYS,
+    STATE_ATTR_KEYS,
+    Location,
+    LocationStateHistory,
+)
 from pipeline.context_bundle import source_episodes
 from pipeline.entities import comparable_text
 from pipeline.extract_claims import ExtractedClaim
@@ -53,6 +62,14 @@ def _gone_from(record: dict, content: str) -> bool:
     return bool(evidence) and evidence not in comparable_text(content)
 
 
+def _now_a_state(record: dict, state_evidence: set[str]) -> bool:
+    """Whether the sentence a value was taken from is now read as a change of
+    state: an earlier run took it for a feature, and it stays on the card
+    otherwise, the sentence being still in the episode."""
+    evidence = comparable_text(record.get("evidence") or "")
+    return bool(evidence) and evidence in state_evidence
+
+
 def apply_new_information(
     db: Session,
     novel_id: uuid.UUID,
@@ -76,6 +93,9 @@ def apply_new_information(
     # (kind, id) -> {key: (value, evidence)}, first mention in the episode wins
     card_values: dict[tuple[str, uuid.UUID], dict[str, tuple[str, str | None]]] = {}
     states: dict[uuid.UUID, dict[str, str]] = {}
+    location_states: dict[uuid.UUID, dict[str, str]] = {}
+    # The sentences (comparable) the episode's location claims say as a state.
+    state_evidence: dict[uuid.UUID, set[str]] = {}
     for index, (claim, subject_id) in enumerate(zip(claims, subject_ids, strict=True)):
         if subject_id is None:
             continue
@@ -87,6 +107,11 @@ def apply_new_information(
                 card_values.setdefault((claim.subject_kind, subject_id), {}).setdefault(key, (value, claim.evidence))
             elif claim.subject_kind == "character" and key in MUTABLE_ATTR_KEYS:
                 states.setdefault(subject_id, {}).setdefault(key, value)
+            elif claim.subject_kind == "location" and key in STATE_ATTR_KEYS:
+                # The last one the episode says: the state it leaves the place in.
+                location_states.setdefault(subject_id, {})[key] = value
+                if claim.evidence:
+                    state_evidence.setdefault(subject_id, set()).add(comparable_text(claim.evidence))
 
     for model, attrs_field, kind in ((Character, "fixed_attrs", "character"), (Location, "geo_attrs", "location")):
         ids = [subject_id for (card_kind, subject_id) in card_values if card_kind == kind]
@@ -102,8 +127,13 @@ def apply_new_information(
             sources = dict(card.attr_sources or {})
             from_episodes = source_episodes(sources)
             values = card_values.get((kind, card.id), {})
+            reclassified = state_evidence.get(card.id, set()) if kind == "location" else set()
             for key, from_episode in from_episodes.items():
-                if from_episode == source and key not in values and _gone_from(sources[key], content):
+                if (
+                    from_episode == source
+                    and key not in values
+                    and (_gone_from(sources[key], content) or _now_a_state(sources[key], reclassified))
+                ):
                     attrs.pop(key, None)
                     del sources[key]
             for key, (value, evidence) in values.items():
@@ -124,4 +154,15 @@ def apply_new_information(
     db.add_all(
         CharacterStateHistory(novel_id=novel_id, character_id=character_id, episode_index=episode_index, state=state)
         for character_id, state in states.items()
+    )
+    # (Deleting a location, once there is a way to, deletes these rows first, as
+    # api/settings.py's delete_character does the character's.)
+    db.execute(
+        delete(LocationStateHistory).where(
+            LocationStateHistory.novel_id == novel_id, LocationStateHistory.episode_index == episode_index
+        )
+    )
+    db.add_all(
+        LocationStateHistory(novel_id=novel_id, location_id=location_id, episode_index=episode_index, state=state)
+        for location_id, state in location_states.items()
     )

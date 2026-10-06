@@ -437,6 +437,127 @@ def test_a_comma_after_a_number_still_ends_the_clause():
     assert clauses("둘레가 1,000리에 달했다") == ["둘레가 1,000리에 달했다"]
 
 
+def test_a_change_of_a_place_s_state_is_a_state_not_a_feature():
+    [claim] = _run("검은 숲은 폐허가 되었다.", {}).claims
+    assert (claim.subject_kind, claim.subject, claim.attributes) == ("location", "검은 숲", {"state": "폐허가 되었다"})
+    [claim] = _run("검은 숲은 불타 사라졌다.", {}).claims
+    assert claim.attributes == {"state": "불타 사라졌다"}
+
+
+def test_a_place_that_is_described_and_then_changes_has_both():
+    claims = _run("검은 숲은 늘 안개로 덮여 있었다. 몇 해가 지나 검은 숲은 무너져 내렸다.", {}).claims
+    assert [c.attributes for c in claims] == [{"features": "늘 안개로 덮여 있었다"}, {"state": "무너져 내렸다"}]
+
+
+def test_what_is_denied_or_only_a_role_is_a_feature_not_a_change_of_state():
+    for text, feature in (
+        ("검은 숲은 한 번도 함락된 적 없는 요새였다.", "한 번도 함락된 적 없는 요새였다"),
+        ("검은 숲은 결코 무너지지 않았다.", "결코 무너지지 않았다"),
+        ("검은 숲은 교역의 중심이 되었다.", "교역의 중심이 되었다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"features": feature}
+
+
+def test_a_state_word_that_does_not_end_the_predicate_is_a_feature():
+    for text, feature in (
+        ("검은 숲은 오래전 몰락한 왕가의 거처였다.", "오래전 몰락한 왕가의 거처였다"),
+        ("검은 숲은 잿더미 위에 세워진 도시였다.", "잿더미 위에 세워진 도시였다"),
+        ("검은 숲은 안 무너졌다.", "안 무너졌다"),
+        ("검은 숲은 무너질 리 없었다.", "무너질 리 없었다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"features": feature}
+
+
+def test_a_change_of_state_is_one_even_with_a_noun_before_it():
+    for text, state in (
+        ("검은 숲은 연못이 말라붙어 폐허가 되었다.", "연못이 말라붙어 폐허가 되었다"),
+        ("검은 숲은 폐허였다.", "폐허였다"),
+        ("검은 숲은 몇 해 뒤 재건되었다.", "몇 해 뒤 재건되었다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"state": state}
+
+
+def test_the_formal_past_is_not_a_noun_the_place_is():
+    [claim] = _run("검은 숲은 폐허로 변하였다.", {}).claims
+    assert claim.attributes == {"state": "폐허로 변하였다"}
+
+
+def test_a_noun_안_is_not_a_denial():
+    for text, state in (
+        ("검은 숲은 숲 안 전체가 폐허가 되었다.", "숲 안 전체가 폐허가 되었다"),
+        ("검은 숲은 불에 타 버렸다.", "불에 타 버렸다"),
+        ("검은 숲은 황량해졌다.", "황량해졌다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"state": state}
+
+
+def test_what_has_not_happened_is_not_a_change_of_state():
+    for text, feature in (
+        ("검은 숲은 금방 무너질 듯했다.", "금방 무너질 듯했다"),
+        ("검은 숲은 하마터면 무너질 뻔했다.", "하마터면 무너질 뻔했다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"features": feature}
+
+
+def test_a_state_a_verb_after_carries_is_a_state():
+    for text, state in (
+        ("검은 숲은 폐허가 되어 버렸다.", "폐허가 되어 버렸다"),
+        ("검은 숲은 잿더미가 되어 있었다.", "잿더미가 되어 있었다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"state": state}
+
+
+def test_a_likeness_or_a_wish_is_not_a_change_of_state():
+    for text, feature in (
+        ("검은 숲은 마치 폐허 같았다.", "마치 폐허 같았다"),
+        ("검은 숲은 폐허나 다름없었다.", "폐허나 다름없었다"),
+        ("검은 숲은 곧 함락되려 했다.", "곧 함락되려 했다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"features": feature}
+
+
+def test_an_earlier_clause_does_not_veto_a_change_of_state():
+    for text, state in (
+        ("검은 숲은 병사들이 막으려 했으나 결국 함락되었다.", "병사들이 막으려 했으나 결국 함락되었다"),
+        ("검은 숲은 꿈꾸던 땅이 폐허가 되었다.", "꿈꾸던 땅이 폐허가 되었다"),
+        ("검은 숲은 결국 폐허가 되고 말았다.", "결국 폐허가 되고 말았다"),
+        ("검은 숲은 불에 타 없어졌다.", "불에 타 없어졌다"),
+        ("검은 숲은 화재로 전소되었다.", "화재로 전소되었다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"state": state}, text
+
+
+def test_a_state_word_denied_by_the_words_after_it_is_still_a_feature():
+    for text in ("검은 숲은 결코 무너지지 않았다.", "검은 숲은 마치 폐허 같았다.", "검은 숲은 금방 무너질 듯했다."):
+        [claim] = _run(text, {}).claims
+        assert list(claim.attributes) == ["features"], text
+
+
+def test_what_did_not_happen_or_was_only_waited_for_is_not_a_state():
+    for text in ("검은 숲은 끝내 재건되지 못했다.", "검은 숲은 재건될 날만 기다렸다.", "검은 숲은 폐허 근처에 있었다."):
+        [claim] = _run(text, {}).claims
+        assert list(claim.attributes) == ["features"], text
+
+
+def test_more_ways_to_say_a_place_fell():
+    for text, state in (
+        ("검은 숲은 허물어졌다.", "허물어졌다"),
+        ("검은 숲은 쓰러졌다.", "쓰러졌다"),
+        ("검은 숲은 폐허가 된 지 오래였다.", "폐허가 된 지 오래였다"),
+        ("검은 숲은 이미 잿더미가 된 뒤였다.", "이미 잿더미가 된 뒤였다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"state": state}, text
+
+
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():
     assert _run("레온은 검은 숲 입구에서 말을 멈췄다.", {"검은 숲의 특징은?": "입구"}).claims == []
 
