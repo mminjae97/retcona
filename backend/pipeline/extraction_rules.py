@@ -235,7 +235,55 @@ ATTRIBUTES = (
         re.compile(r"출신|고향|태생|[가-힣]에서\s*(?:올라온|내려온|올라왔|내려왔|태어났|태어난)"),
     ),
 )
-LOCATION_QUESTION = "특징은"
+
+
+def features_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> str:
+    """What the sentence says of a place it is about ("검은 숲은 늘 안개로 덮여 있었다"
+    -> "늘 안개로 덮여 있었다"): what follows its topic particle, up to a comma, "" where
+    that isn't a description of the place. "특징은?" is a poor question for the QA model
+    (ml/extraction/RESULTS.md round 3), and a place's features are said of it in the
+    one sentence.
+
+    Not a description: nothing after it, a line of dialogue, something done to an
+    object ("병사들을 맞이했다") or with a person ("레온이 지켰다")."""
+    narration = sentence.narration
+    # The topic of the sentence (은/는), with the particle ending there: not the
+    # subject of "벨로스 성이 보였다" (nothing said of the place) or the start of an
+    # ending ("검은 숲이지만").
+    after = narration[mention.end + 1 : mention.end + 2]
+    if narration[mention.end : mention.end + 1] not in ("은", "는") or not after.isspace():
+        return ""
+    # What's said up to the end of the clause the topic particle is in.
+    end = next(stop for _, stop in _clauses(narration) if stop > mention.end)
+    # The narration has its quoted parts blanked out: a quote there is a line the place figures in.
+    if _QUOTE.search(sentence.text[mention.end : end]):
+        return ""
+    predicate = " ".join(narration[mention.end + 1 : end].split()).strip(_PREDICATE_EDGE)
+    if (
+        not 2 <= len(predicate) <= _FEATURES_MAX_LENGTH
+        or _NOT_A_DESCRIPTION.search(_VILLAGE_NOUNS.sub("", predicate))
+        or _PRONOUN_PHRASE.search(predicate)
+    ):
+        return ""
+    # A character in what's said ("레온이 지켰다") or another topic ("성은 크고 마을은
+    # 작았다"), not a place it's told by ("벨로스 성 북쪽에") or one before it
+    # ("레온이 보기에 검은 숲은 ...").
+    if any(
+        mention.end <= other.start < end and (other.subject.kind == "character" or other.topic)
+        for other in others
+        if other is not mention
+    ):
+        return ""
+    return predicate
+
+
+_FEATURES_MAX_LENGTH = 40
+_PREDICATE_EDGE = " 	\"'“”‘’「」『』.!?…~"
+_QUOTE = re.compile(r"[\"“”‘’「」『』]")
+# An object particle on a word ("병사들을 ..."), at the end of the clause too.
+_NOT_A_DESCRIPTION = re.compile(r"(?<=[가-힣])[을를](?=\s|$)")
+# Nouns that end in 을 themselves ("마을 북쪽에"), unless 을/를 follows ("마을을").
+_VILLAGE_NOUNS = re.compile(r"(?:마을|가을|고을|노을)(?![을를])")
 
 
 @dataclass(frozen=True)
@@ -247,7 +295,8 @@ class CueHit:
 
 def _clauses(narration: str) -> list[tuple[int, int]]:
     spans, start = [], 0
-    for match in re.finditer(r"[,，、]", narration):
+    # Not the comma inside a number ("1,000리").
+    for match in re.finditer(r"(?<!\d),|,(?!\d)|[，、]", narration):
         spans.append((start, match.start()))
         start = match.end()
     spans.append((start, len(narration)))

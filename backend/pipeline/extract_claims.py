@@ -137,6 +137,8 @@ class _Question:
     context: str
     # The clause the cue is in, for reading the value off (context may hold more)
     clause: str
+    # Where the answer is read off the sentence, not asked of the QA model
+    given: str | None = None
 
     @property
     def about(self) -> tuple:
@@ -253,11 +255,11 @@ def _questions(sentences: list[Sentence], mentions: list[list[rules.Mention]]) -
             # A place the sentence is about, not one a character is said to be at.
             if mention.subject.kind != "location" or not mention.topic or key in seen:
                 continue
-            seen.add(key)
-            name = mention.subject.name
-            question = f"{name}의 {rules.LOCATION_QUESTION}?"
-            questions.append(_Question(i, mention.subject, (), name, None, question, " ".join(narration.split()), "")
-            )
+            features = rules.features_of(sentence, mention, mentions[i])
+            if features:
+                seen.add(key)
+                name = mention.subject.name
+                questions.append(_Question(i, mention.subject, (), name, None, "", "", "", given=features))
     return questions
 
 
@@ -278,12 +280,16 @@ def extract_claims(
     registry = rules.Registry(known_characters, known_locations)
     mentions = _mentions(sentences, registry, recognize)
     questions = _questions(sentences, mentions)
-    answers = answer([(q.question, q.context) for q in questions]) if questions else []
+    asked = [q for q in questions if q.given is None]
+    raw_answers = answer([(q.question, q.context) for q in asked]) if asked else []
+    if len(raw_answers) != len(asked):
+        raise ValueError(f"{len(raw_answers)} answers for {len(asked)} questions")
+    answers = iter(raw_answers)
 
     # One claim per sentence and subject, with all it says about the subject.
     grouped: dict[tuple, tuple[_Question, dict[str, str], list[str]]] = {}
-    for question, raw in zip(questions, answers, strict=True):
-        value = _clean_value(raw)
+    for question in questions:
+        value = _clean_value(next(answers) if question.given is None else question.given)
         if question.attribute is None:
             key, valid = "features", len(value) >= 2
             statement = location_statement(question.who, value)
@@ -323,7 +329,7 @@ def extract_claims(
             extraction.dropped += 1
     logger.info(
         "Novel %s: %d sentence(s), %d question(s), %d claim(s)",
-        novel_id, len(sentences), len(questions), len(extraction.claims),
+        novel_id, len(sentences), len(asked), len(extraction.claims),
     )  # fmt: skip
     if extraction.dropped:
         logger.warning(

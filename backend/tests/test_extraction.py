@@ -325,10 +325,116 @@ def test_a_name_only_the_ner_model_knows_becomes_a_subject_without_a_ref():
     assert (claim.subject, claim.subject_ref) == ("하윤", None)
 
 
-def test_a_place_the_sentence_is_about_gets_its_features():
-    [claim] = _run("검은 숲은 늘 안개로 덮여 있었다.", {"검은 숲의 특징은?": "안개로 덮여 있었다"}).claims
+def test_a_place_the_sentence_is_about_gets_what_the_sentence_says_of_it():
+    [claim] = _run("검은 숲은 늘 안개로 덮여 있었다.", {}).claims
     assert (claim.claim_type, claim.subject_kind, claim.subject) == ("location", "location", "검은 숲")
-    assert claim.attributes == {"features": "안개로 덮여 있었다"}
+    assert claim.attributes == {"features": "늘 안개로 덮여 있었다"}
+    assert claim.text == "검은 숲은 늘 안개로 덮여 있었다."
+
+
+def test_only_the_first_clause_of_what_is_said_of_a_place_is_taken():
+    [claim] = _run("검은 숲은 안개가 짙었고, 레온은 그곳을 지났다.", {}).claims
+    assert claim.attributes == {"features": "안개가 짙었고"}
+
+
+def test_what_is_done_to_something_or_with_somebody_is_not_a_place_s_features():
+    for text in (
+        "검은 숲은 병사들을 삼켰다.",
+        "검은 숲은 레온이 지켜 왔다.",
+        '검은 숲은 "위험하다"고 했다.',
+        "검은 숲은 ‘저주받은 땅’이라 불렸다.",
+    ):
+        assert _run(text, {}).claims == []
+
+
+def test_a_character_before_the_place_does_not_take_its_features_away():
+    [claim] = _run("레온이 보기에 검은 숲은 늘 안개로 덮여 있었다.", {}).claims
+    assert (claim.subject, claim.attributes) == ("검은 숲", {"features": "늘 안개로 덮여 있었다"})
+
+
+def test_a_second_mention_of_a_place_is_tried_when_the_first_gives_nothing():
+    [claim] = _run("검은 숲은 병사들을 삼켰다, 검은 숲은 늘 고요했다.", {}).claims
+    assert claim.attributes == {"features": "늘 고요했다"}
+
+
+def test_a_number_of_answers_that_does_not_match_the_questions_is_an_error():
+    import pytest
+
+    with pytest.raises(ValueError):
+        extract_claims(
+            uuid.uuid4(),
+            "레온의 눈동자는 푸른색이었다.",
+            CHARACTERS,
+            LOCATIONS,
+            recognize=lambda texts: [[] for _ in texts],
+            answer=lambda questions: [],
+        )
+
+
+def test_what_a_sentence_says_of_a_place_is_stated_as_it_says_it():
+    [claim] = _run("검은 숲은 안개가 짙었고, 레온은 그곳을 지났다.", {}).claims
+    assert claim.text == "검은 숲은 안개가 짙었고."
+    [claim] = _run("검은 숲은 한없이 넓다.", {}).claims
+    assert claim.text == "검은 숲은 한없이 넓다."
+
+
+def test_a_noun_ending_in_을_is_not_an_object():
+    [claim] = _run("검은 숲은 마을 북쪽에 펼쳐져 있었다.", {}).claims
+    assert claim.attributes == {"features": "마을 북쪽에 펼쳐져 있었다"}
+    assert _run("검은 숲은 마을을 삼켰다.", {}).claims == []
+
+
+def test_an_object_at_the_end_of_a_clause_is_an_object_too():
+    assert _run("검은 숲은 병사들을, 삼켰다.", {}).claims == []
+
+
+def test_only_a_topic_that_the_particle_ends_is_read():
+    for text in ("검은 숲이지만 안개는 걷혔다.", "멀리 검은 숲이 보였다.", "눈앞에 검은 숲이 나타났다."):
+        assert _run(text, {}).claims == []
+
+
+def test_a_quote_in_another_clause_does_not_take_a_place_s_features_away():
+    [claim] = _run('검은 숲은 안개가 짙었다, 레온은 "가자"고 말했다.', {}).claims
+    assert claim.attributes == {"features": "안개가 짙었다"}
+
+
+def test_a_pronoun_in_what_is_said_is_somebody_else_s_doing():
+    assert _run("검은 숲은 그가 지켜 왔다.", {}).claims == []
+
+
+def test_a_comma_in_a_number_does_not_end_the_clause():
+    [claim] = _run("검은 숲은 둘레가 1,000리에 달했다.", {}).claims
+    assert claim.attributes == {"features": "둘레가 1,000리에 달했다"}
+
+
+def test_노을_is_not_an_object():
+    [claim] = _run("검은 숲은 노을 속에 잠겼다.", {}).claims
+    assert claim.attributes == {"features": "노을 속에 잠겼다"}
+
+
+def test_what_is_said_of_a_second_place_is_not_the_first_one_s():
+    text = "검은 숲은 크고 세이라는 작았다."
+    start = text.index("세이라")
+    entities = {text: [NamedEntity(start, start + 4, "LC")]}  # the particle comes with it
+    claims = _run(text, {}, entities).claims
+    assert [(c.subject, c.attributes) for c in claims] == [("세이라", {"features": "작았다"})]
+
+
+def test_a_place_that_what_is_said_tells_by_is_not_another_topic():
+    text = "검은 숲은 벨로스 성 북쪽에 펼쳐져 있었다."
+    start = text.index("벨로스")
+    entities = {text: [NamedEntity(start, start + 5, "LC")]}
+    [claim] = _run(text, {}, entities).claims
+    assert claim.subject == "검은 숲"
+    assert claim.attributes == {"features": "벨로스 성 북쪽에 펼쳐져 있었다"}
+
+
+def test_a_comma_after_a_number_still_ends_the_clause():
+    def clauses(text):
+        return [text[a:b].strip() for a, b in rules._clauses(text)]
+
+    assert clauses("나이는 18, 눈은 푸른색이었다") == ["나이는 18", "눈은 푸른색이었다"]
+    assert clauses("둘레가 1,000리에 달했다") == ["둘레가 1,000리에 달했다"]
 
 
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():
