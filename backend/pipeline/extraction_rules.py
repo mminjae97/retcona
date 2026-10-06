@@ -58,6 +58,7 @@ _AFTER_NAME_PARTICLES = (
 )
 _NAME_AFTER = rf"(?![A-Za-z0-9])(?=$|[^가-힣]|(?:{_AFTER_NAME_PARTICLES}))"
 _TOPIC_PARTICLES = "은는이가"
+_COPULAS = ("이다", "이었", "이라", "이고", "이며", "이란", "이야")
 
 
 class Registry:
@@ -109,7 +110,9 @@ class Registry:
             subject = self.resolve(match.group())
             if subject is not None:
                 after = narration[match.end() : match.end() + 1]
-                topic = bool(after) and after in _TOPIC_PARTICLES
+                # 이 of "이다"/"이었" is the copula ("그곳은 검은 숲이었다"), not a subject.
+                copula = narration[match.end() : match.end() + 2] in _COPULAS
+                topic = bool(after) and after in _TOPIC_PARTICLES and not copula
                 found.append(Mention(match.start(), match.end(), subject, topic))
         return found
 
@@ -240,6 +243,8 @@ def _clauses(narration: str) -> list[tuple[int, int]]:
 # 푸른색이었다". Further off it's another thing's color ("검은 옷을 입은 그는
 # 머리를 숙였다").
 _WORDS_BEFORE = 2
+# Nouns that are an eye or a head as often as part of a phrase (눈을 뜨다, 머리를 숙이다).
+_WEAK_NOUNS = ("눈", "머리")
 _WORDS_AFTER = 3
 
 
@@ -247,8 +252,15 @@ def _color_near(clause: str, noun: re.Match) -> bool:
     if COLOR_RE.search(noun.group()):  # "금발"
         return True
     before = " ".join(clause[: noun.start()].split()[-_WORDS_BEFORE:])
+    if COLOR_RE.search(before):
+        return True
+    # After a bare 눈 or 머리 only as its subject or topic ("눈이 붉게", "눈은
+    # 푸른색"): "눈을 뜨자 검은 연기가", "눈에 띄는 붉은 ..." are other things.
+    following = clause[noun.end() : noun.end() + 1]
+    if noun.group() in _WEAK_NOUNS and following and following in "을를에도":
+        return False
     after = " ".join(clause[noun.end() :].split()[:_WORDS_AFTER])
-    return COLOR_RE.search(before) is not None or COLOR_RE.search(after) is not None
+    return COLOR_RE.search(after) is not None
 
 
 def cue_hits(narration: str) -> list[CueHit]:

@@ -94,6 +94,12 @@ def test_a_name_at_the_very_end_of_a_line_is_not_a_topic():
     assert [m.topic for m in registry.mentions("검은 숲은")] == [True]
 
 
+def test_a_name_followed_by_the_copula_is_not_a_topic():
+    registry = rules.Registry(CHARACTERS, LOCATIONS)
+    assert [m.topic for m in registry.mentions("그곳은 검은 숲이었다.")] == [False]
+    assert [m.topic for m in registry.mentions("검은 숲이 어두웠다.")] == [True]
+
+
 def test_a_name_is_not_found_at_the_start_of_a_longer_word():
     registry = rules.Registry([{"ref": "c1", "name": "하늘", "aliases": []}, *CHARACTERS], [])
     assert registry.mentions("하늘빛 눈동자와 보라색 머리") == []
@@ -155,6 +161,16 @@ def test_the_color_has_to_be_next_to_the_eye_or_hair():
     assert _attributes("세린의 머리카락은 은빛이었다.") == {"hair_color"}
     assert _attributes("그는 금발을 쓸어 넘겼다.") == {"hair_color"}
     assert _attributes("눈동자는 보라색이었다.") == {"eye_color"}
+
+
+def test_an_idiom_with_eye_or_head_is_not_a_cue():
+    assert _attributes("눈에 띄는 붉은 머리카락이 흔들렸다.") == {"hair_color"}
+    assert _attributes("눈을 뜨자 검은 연기가 피어올랐다.") == set()
+    assert _attributes("그는 검은 머리를 숙였다.") == {"hair_color"}
+    assert _attributes("머리를 숙이자 검은 그림자가 드리웠다.") == set()
+    assert _attributes("푸른 눈을 가진 소녀였다.") == {"eye_color"}
+    assert _attributes("그는 눈동자를 붉게 빛냈다.") == {"eye_color"}
+    assert _attributes("눈은 푸른색이었다.") == {"eye_color"}
 
 
 def test_snow_is_not_an_eye():
