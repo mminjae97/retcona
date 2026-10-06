@@ -19,6 +19,6 @@ def test_a_noun_phrase_the_author_wrote_keeps_its_이다():
 
 
 def test_one_word_and_other_predicates_read_as_they_are():
-    for value in ("넓다", "깊다", "짙었고", "안개가 짙은데", "안개가 짙으며"):
+    for value in ("넓다", "깊다", "짙었고", "안개가 짙은데", "안개가 짙으며", "넓습니다", "어두웠으나", "고요하며", "넓어서"):
         assert location_statement("검은 숲", value) == f"검은 숲은 {value}."
     assert as_statement("컸다") == "컸다."

@@ -265,8 +265,9 @@ def features_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> 
         or _PRONOUN_PHRASE.search(predicate)
     ):
         return ""
-    # A character in what's said (not one before the place: "레온이 보기에 검은 숲은 ...").
-    if any(other.subject.kind == "character" and mention.end <= other.start < end for other in others):
+    # Another name in what's said ("레온이 지켰다", "성은 크고 마을은 작았다"), not one
+    # before the place ("레온이 보기에 검은 숲은 ...").
+    if any(mention.end <= other.start < end for other in others if other is not mention):
         return ""
     return predicate
 

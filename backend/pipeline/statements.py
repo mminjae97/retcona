@@ -23,9 +23,9 @@ CHARACTER_ATTR_TOPICS = {
 # any syllable with a final consonant ("넓다", "깊다", "컸다"), which a noun
 # in 다 doesn't have.
 _PREDICATE_STEMS = set("이하한난있없는된진졌렸웠났랐갔왔섰쳤썼았었였했됐")
-# A clause ending a value cut off a sentence can end in ("안개가 짙었고"); not 고 or 며
-# alone, which end nouns too ("창고").
-_CONNECTIVE = re.compile(r"(?:[았었였했겠]고|지만|는데|은데|면서|으며|니까)$")
+# A clause ending a value cut off a sentence can end in ("안개가 짙었고", "넓습니다"); not 고
+# alone, which ends nouns too ("창고").
+_CONNECTIVE = re.compile(r"(?:[았었였했겠]고|지만|는데|은데|면서|으며|으나|니까|니다|며|아서|어서)$")
 
 
 def _is_predicate(value: str) -> bool:

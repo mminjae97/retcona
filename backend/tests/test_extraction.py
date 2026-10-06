@@ -412,6 +412,13 @@ def test_노을_is_not_an_object():
     assert claim.attributes == {"features": "노을 속에 잠겼다"}
 
 
+def test_what_is_said_of_a_second_place_is_not_the_first_one_s():
+    text = "검은 숲은 크고 벨로스 성은 작았다."
+    start = text.index("벨로스")
+    entities = {text: [NamedEntity(start, start + 5, "LC")]}
+    assert _run(text, {}, entities).claims == []
+
+
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():
     assert _run("레온은 검은 숲 입구에서 말을 멈췄다.", {"검은 숲의 특징은?": "입구"}).claims == []
 
