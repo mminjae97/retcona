@@ -255,9 +255,9 @@ def _questions(sentences: list[Sentence], mentions: list[list[rules.Mention]]) -
             # A place the sentence is about, not one a character is said to be at.
             if mention.subject.kind != "location" or not mention.topic or key in seen:
                 continue
-            seen.add(key)
             features = rules.features_of(sentence, mention, mentions[i])
             if features:
+                seen.add(key)
                 name = mention.subject.name
                 questions.append(_Question(i, mention.subject, (), name, None, "", "", "", given=features))
     return questions
@@ -281,7 +281,10 @@ def extract_claims(
     mentions = _mentions(sentences, registry, recognize)
     questions = _questions(sentences, mentions)
     asked = [q for q in questions if q.given is None]
-    answers = iter(answer([(q.question, q.context) for q in asked]) if asked else [])
+    raw_answers = answer([(q.question, q.context) for q in asked]) if asked else []
+    if len(raw_answers) != len(asked):
+        raise ValueError(f"{len(raw_answers)} answers for {len(asked)} questions")
+    answers = iter(raw_answers)
 
     # One claim per sentence and subject, with all it says about the subject.
     grouped: dict[tuple, tuple[_Question, dict[str, str], list[str]]] = {}

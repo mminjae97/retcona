@@ -342,8 +342,33 @@ def test_what_is_done_to_something_or_with_somebody_is_not_a_place_s_features():
         "검은 숲은 병사들을 삼켰다.",
         "검은 숲은 레온이 지켜 왔다.",
         '검은 숲은 "위험하다"고 했다.',
+        "검은 숲은 ‘저주받은 땅’이라 불렸다.",
     ):
         assert _run(text, {}).claims == []
+
+
+def test_a_character_before_the_place_does_not_take_its_features_away():
+    [claim] = _run("레온이 보기에 검은 숲은 늘 안개로 덮여 있었다.", {}).claims
+    assert (claim.subject, claim.attributes) == ("검은 숲", {"features": "늘 안개로 덮여 있었다"})
+
+
+def test_a_second_mention_of_a_place_is_tried_when_the_first_gives_nothing():
+    [claim] = _run("검은 숲은 병사들을 삼켰다, 검은 숲은 늘 고요했다.", {}).claims
+    assert claim.attributes == {"features": "늘 고요했다"}
+
+
+def test_a_number_of_answers_that_does_not_match_the_questions_is_an_error():
+    import pytest
+
+    with pytest.raises(ValueError):
+        extract_claims(
+            uuid.uuid4(),
+            "레온의 눈동자는 푸른색이었다.",
+            CHARACTERS,
+            LOCATIONS,
+            recognize=lambda texts: [[] for _ in texts],
+            answer=lambda questions: [],
+        )
 
 
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():

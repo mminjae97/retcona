@@ -247,21 +247,22 @@ def features_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> 
     Not a description: nothing after it, a line of dialogue, something done to an
     object ("병사들을 맞이했다") or with a person ("레온이 지켰다")."""
     # The narration has its quoted parts blanked out: a quote after the place is a line it figures in.
-    if _QUOTE.search(sentence.text[mention.end:]):
+    if _QUOTE.search(sentence.text[mention.end :]):
         return ""
-    predicate = sentence.narration[mention.end + 1 :].split(",")[0].split("，")[0]
-    predicate = " ".join(predicate.split()).strip(_PREDICATE_EDGE)
+    # What's said up to the end of the clause the topic particle is in.
+    end = next(stop for _, stop in _clauses(sentence.narration) if stop > mention.end)
+    predicate = " ".join(sentence.narration[mention.end + 1 : end].split()).strip(_PREDICATE_EDGE)
     if not 2 <= len(predicate) <= _FEATURES_MAX_LENGTH or _NOT_A_DESCRIPTION.search(predicate):
         return ""
-    end = mention.end + 1 + len(predicate)
-    if any(other.subject.kind == "character" and other.start < end for other in others):
+    # A character in what's said (not one before the place: "레온이 보기에 검은 숲은 ...").
+    if any(other.subject.kind == "character" and mention.end <= other.start < end for other in others):
         return ""
     return predicate
 
 
 _FEATURES_MAX_LENGTH = 40
 _PREDICATE_EDGE = " 	\"'“”‘’「」『』.!?…~"
-_QUOTE = re.compile(r"[\"“”「」『』]")
+_QUOTE = re.compile(r"[\"“”‘’「」『』]")
 # An object particle on a word ("병사들을 ...").
 _NOT_A_DESCRIPTION = re.compile(r"(?<=[가-힣])[을를](?=\s)")
 

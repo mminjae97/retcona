@@ -89,7 +89,7 @@ The QA model answered "특징은?" for 1 of 5 places (round 2 misses: p16 ×1, p
 | round 2 | 43 | 1 | 13 | 0.977 | 0.768 | 0.860 |
 | **round 3: features from the sentence** | **47** | **0** | **9** | **1.000** | **0.839** | **0.913** |
 
-Features 1/5 -> **5/5**, and no extra on the place passages that must give none (a place only passed through: the `location-passing` tag). The set is small and the rule was written looking at its three place passages, so 5/5 says the rule does what it was made to do, not how it does on other prose; what it takes for a description (anything after the topic that has no quote, object or character) will take some sentences that aren't ("벨로스 성은 폐허가 되었다" is an event). The author reads a place's claims on the result screen like any other.
+Features 1/5 -> **5/5**, and no extra on the place passages that must give none (a place only passed through: the `location-passing` tag). The set is small and the rule was written looking at its three place passages, so 5/5 says the rule does what it was made to do, not how it does on other prose; what it takes for a description (anything after the topic that has no quote, object or character) will take some sentences that aren't ("벨로스 성은 폐허가 되었다" is an event). The author reads a place's claims on the result screen like any other. Known limits of the rule: it takes the text up to the first comma, so a value can end on a connective ("안개가 짙었고"); and a clause with a word in -을/-를 is refused whether it's an object ("병사들을") or the adnominal ending ("없을 만큼"), since telling them apart takes a morphological analyzer, so it errs on the side of no claim.
 
 ### The extra of round 2 is gone, and the rule behind it stays
 
