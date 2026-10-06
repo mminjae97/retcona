@@ -516,3 +516,13 @@ def test_the_pronoun_that_fits_the_character_is_replaced_even_after_one_that_doe
         == "그녀는 웃었고 레온의 눈이 붉게 빛났다"
     )
     assert rules.name_for_pronoun("그는 그녀의 눈을 보았다", "세린", "she") == "그는 세린의 눈을 보았다"
+
+
+def test_a_pronoun_followed_by_punctuation_is_replaced():
+    assert rules.name_for_pronoun("그녀는, 열일곱 살이었다", "세린") == "세린은, 열일곱 살이었다"
+    assert rules.name_for_pronoun("붉은 눈의 그, 그의 눈이 번뜩였다", "레온") == "붉은 눈의 그, 레온의 눈이 번뜩였다"
+
+
+def test_a_clause_about_the_other_gender_is_not_read_after_the_sentence_that_names_the_character():
+    [(question, context)] = _asked("레온은 문을 열었다. 그녀의 눈이 푸르게 빛났다.", _pair()[:1])
+    assert (question, context) == ("레온의 눈 색깔은?", "그녀의 눈이 푸르게 빛났다.")

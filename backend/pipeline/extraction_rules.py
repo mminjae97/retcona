@@ -330,11 +330,13 @@ _PERSON_NOUNS = "녀석|놈|사내|남자|여자|소년|소녀|아이|사람|청
 
 # --- Asking about a pronoun -----------------------------------------------------
 
+# What can follow a pronoun: a space, the end, or punctuation ("그녀는, ...").
+_PRONOUN_END = r"(?=[\s,.!?…\"'”’」』)]|$)"
 _PRONOUN_PHRASE = re.compile(
-    r"(?<![가-힣])(?:그녀(?!석)(?P<she>)|그(?=(?:의|는|은|가|이|를|을|도|만)(?:\s|$))(?P<he>)|그\s?(?:"
+    r"(?<![가-힣])(?:그녀(?!석)(?P<she>)|그(?=(?:의|는|은|가|이|를|을|도|만)" + _PRONOUN_END + r")(?P<he>)|그\s?(?:"
     + _PERSON_NOUNS
     + r")(?P<noun>))"
-    r"(?P<particle>의|는|은|가|이|를|을|도|만)?(?=\s|$)"
+    r"(?P<particle>의|는|은|가|이|를|을|도|만)?" + _PRONOUN_END
 )
 _ALTERNATING_PARTICLES = {
     "은": ("은", "는"),
@@ -357,6 +359,24 @@ def with_particle(name: str, particle: str) -> str:
     return name + forms[1 if vowel_final else 0]
 
 
+def _fitting_pronoun(clause: str, pronoun: str) -> tuple[re.Match | None, bool]:
+    """(the first pronoun in the clause that fits a character narrated with
+    `pronoun`, whether the clause has any pronoun)."""
+    matches = list(_PRONOUN_PHRASE.finditer(clause))
+    for match in matches:
+        kind = _pronoun_kind(match.group())
+        if kind == "any" or pronoun in (kind, "any"):
+            return match, True
+    return None, bool(matches)
+
+
+def points_elsewhere(clause: str, pronoun: str) -> bool:
+    """Whether every pronoun in the clause is the other gender than the character's
+    (pronoun: he | she | any): it's about somebody else."""
+    found, has_pronoun = _fitting_pronoun(clause, pronoun)
+    return has_pronoun and found is None
+
+
 def name_for_pronoun(clause: str, name: str, pronoun: str = "any") -> str:
     """The clause with the name where its first pronoun is ("그녀의 은빛 머리카락이"
     -> "세린의 은빛 머리카락이"; 그, 그녀, 그 녀석 and the like): the QA model
@@ -364,14 +384,7 @@ def name_for_pronoun(clause: str, name: str, pronoun: str = "any") -> str:
     it only refers to. Not where the pronoun is the other gender than the
     character's (pronoun: he | she | any), as it points to somebody else; the first
     pronoun that fits is the one replaced."""
-    found = next(
-        (
-            match
-            for match in _PRONOUN_PHRASE.finditer(clause)
-            if (kind := _pronoun_kind(match.group())) == "any" or pronoun in (kind, "any")
-        ),
-        None,
-    )
+    found, _ = _fitting_pronoun(clause, pronoun)
     if found is None:
         return clause
     return clause[: found.start()] + with_particle(name, found.group("particle") or "") + clause[found.end() :]
@@ -386,8 +399,8 @@ _PLURAL_PRONOUN = re.compile(r"\s*(?:그들|그녀들)")
 _PARTICLES_AFTER_PRONOUN = "의|는|은|가|이|를|을|도|만"
 _EARLY_PRONOUN = re.compile(
     r"(?<![가-힣])(?:"
-    rf"그녀(?![가-힣]*들)(?:{_PARTICLES_AFTER_PRONOUN})?(?=\s)"
-    rf"|그(?:{_PARTICLES_AFTER_PRONOUN})(?=\s)"
+    rf"그녀(?![가-힣]*들)(?:{_PARTICLES_AFTER_PRONOUN})?{_PRONOUN_END}"
+    rf"|그(?:{_PARTICLES_AFTER_PRONOUN}){_PRONOUN_END}"
     rf"|그\s?(?:{_PERSON_NOUNS})(?!들)"
     r")"
 )

@@ -209,6 +209,10 @@ def _question_parts(
     if before is not None:
         # Named earlier in the sentence ("레온이 웃자 붉은 눈이 번뜩였다"): read from there.
         return owner.name, " ".join(narration[: clause[1]].split())
+    if rules.points_elsewhere(clause_text, owner.pronoun):
+        # "그녀의 눈" of a male character: the sentences before would only
+        # make the model read it as his.
+        return owner.name, clause_text
     context = rules.name_for_pronoun(clause_text, owner.name, owner.pronoun)
     for back in range(1, rules.CONTEXT_SENTENCES + 1):
         earlier = index - back
