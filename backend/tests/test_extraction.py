@@ -325,10 +325,25 @@ def test_a_name_only_the_ner_model_knows_becomes_a_subject_without_a_ref():
     assert (claim.subject, claim.subject_ref) == ("하윤", None)
 
 
-def test_a_place_the_sentence_is_about_gets_its_features():
-    [claim] = _run("검은 숲은 늘 안개로 덮여 있었다.", {"검은 숲의 특징은?": "안개로 덮여 있었다"}).claims
+def test_a_place_the_sentence_is_about_gets_what_the_sentence_says_of_it():
+    [claim] = _run("검은 숲은 늘 안개로 덮여 있었다.", {}).claims
     assert (claim.claim_type, claim.subject_kind, claim.subject) == ("location", "location", "검은 숲")
-    assert claim.attributes == {"features": "안개로 덮여 있었다"}
+    assert claim.attributes == {"features": "늘 안개로 덮여 있었다"}
+    assert claim.text == "검은 숲은 늘 안개로 덮여 있었다."
+
+
+def test_only_the_first_clause_of_what_is_said_of_a_place_is_taken():
+    [claim] = _run("검은 숲은 안개가 짙었고, 레온은 그곳을 지났다.", {}).claims
+    assert claim.attributes == {"features": "안개가 짙었고"}
+
+
+def test_what_is_done_to_something_or_with_somebody_is_not_a_place_s_features():
+    for text in (
+        "검은 숲은 병사들을 삼켰다.",
+        "검은 숲은 레온이 지켜 왔다.",
+        '검은 숲은 "위험하다"고 했다.',
+    ):
+        assert _run(text, {}).claims == []
 
 
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():

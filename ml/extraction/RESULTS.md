@@ -79,3 +79,30 @@ The 6 mutable ones are still all missed.
 2. A body part ("오른손의", "왼팔의") is no possessor; a longer window for a cue's color word. (2)
 3. Decide the single-candidate rule above. (removes the 1 extra)
 4. Extract the mutable attributes. (6)
+
+## Round 3 — 2026-10-06: a place's features from the sentence
+
+The QA model answered "특징은?" for 1 of 5 places (round 2 misses: p16 ×1, p38 ×2, p45): the question has no answer shape for a sentence like "벨로스 성은 산 위에 우뚝 서 있었다". A place's features are said of it in the sentence it is the topic of, so they are now read off it: what follows the topic particle, up to a comma ("검은 숲은 늘 안개로 덮여 있었다" -> "늘 안개로 덮여 있었다"). Not taken where it isn't a description of the place: a quote after the place, an object ("병사들을 삼켰다"), or a character before the end of it ("레온이 지켰다").
+
+| | right | extra | missed | precision | recall | F1 |
+|---|---|---|---|---|---|---|
+| round 2 | 43 | 1 | 13 | 0.977 | 0.768 | 0.860 |
+| **round 3: features from the sentence** | **47** | **0** | **9** | **1.000** | **0.839** | **0.913** |
+
+Features 1/5 -> **5/5**, and no extra on the place passages that must give none (a place only passed through: the `location-passing` tag). The set is small and the rule was written looking at its three place passages, so 5/5 says the rule does what it was made to do, not how it does on other prose; what it takes for a description (anything after the topic that has no quote, object or character) will take some sentences that aren't ("벨로스 성은 폐허가 되었다" is an event). The author reads a place's claims on the result screen like any other.
+
+### The extra of round 2 is gone, and the rule behind it stays
+
+p36 ("레온은 문을 열었다. 그녀의 눈이 푸르게 빛났다.") is no longer an extra. That's the change of the review rounds of #48, not of this round: a clause whose pronoun is the other gender than the card's is read without the sentence before, so the QA model has no name to answer about. It's not a rule: a QA model that answered anyway would bring it back. **Decided: the single-candidate rule stays as it is** (a lone candidate isn't held against the pronoun, so that a wrong gender setting can't make claims vanish), and p36 stays the known limit.
+
+### What's left of the 9 misses
+
+- **By design (6)**: two names in a sentence with no possessor (p23 ×2), a plural "그들" (p29 ×2), "그녀의" in a sentence that names someone else (p42), a pronoun three sentences from its name (p35).
+- **A cue's color word out of reach (1)**: p03. **A height said as a verb (1)**: p14 ("키가 컸다"). **A body part taken for another person (1)**: p39 ("오른손의 흉터").
+
+The 6 mutable ones are still all missed.
+
+### What to try next
+
+1. A body part ("오른손의", "왼팔의") is no possessor; a longer window for a cue's color word. (2)
+2. Extract the mutable attributes. (6)

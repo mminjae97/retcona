@@ -235,7 +235,35 @@ ATTRIBUTES = (
         re.compile(r"출신|고향|태생|[가-힣]에서\s*(?:올라온|내려온|올라왔|내려왔|태어났|태어난)"),
     ),
 )
-LOCATION_QUESTION = "특징은"
+
+
+def features_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> str:
+    """What the sentence says of a place it is about ("검은 숲은 늘 안개로 덮여 있었다"
+    -> "늘 안개로 덮여 있었다"): what follows its topic particle, up to a comma, "" where
+    that isn't a description of the place. "특징은?" is a poor question for the QA model
+    (ml/extraction/RESULTS.md round 3), and a place's features are said of it in the
+    one sentence.
+
+    Not a description: nothing after it, a line of dialogue, something done to an
+    object ("병사들을 맞이했다") or with a person ("레온이 지켰다")."""
+    # The narration has its quoted parts blanked out: a quote after the place is a line it figures in.
+    if _QUOTE.search(sentence.text[mention.end:]):
+        return ""
+    predicate = sentence.narration[mention.end + 1 :].split(",")[0].split("，")[0]
+    predicate = " ".join(predicate.split()).strip(_PREDICATE_EDGE)
+    if not 2 <= len(predicate) <= _FEATURES_MAX_LENGTH or _NOT_A_DESCRIPTION.search(predicate):
+        return ""
+    end = mention.end + 1 + len(predicate)
+    if any(other.subject.kind == "character" and other.start < end for other in others):
+        return ""
+    return predicate
+
+
+_FEATURES_MAX_LENGTH = 40
+_PREDICATE_EDGE = " 	\"'“”‘’「」『』.!?…~"
+_QUOTE = re.compile(r"[\"“”「」『』]")
+# An object particle on a word ("병사들을 ...").
+_NOT_A_DESCRIPTION = re.compile(r"(?<=[가-힣])[을를](?=\s)")
 
 
 @dataclass(frozen=True)
