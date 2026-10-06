@@ -205,6 +205,13 @@ def test_a_pronoun_goes_to_the_one_character_the_sentence_before_names():
     assert (claim.subject, claim.subject_ref, claim.evidence) == ("레온", "c1", "그의 눈이 붉게 빛났다.")
 
 
+def test_a_pronoun_early_in_the_sentence_counts_even_when_something_comes_before_it():
+    text = "세린은 고개를 끄덕였다. 스물세 살의 그녀는 부산에서 올라온 상인의 딸이었다."
+    answers = {"세린의 나이는?": "스물세 살", "세린의 출신은?": "부산"}
+    [claim] = _run(text, answers).claims
+    assert (claim.subject, claim.attributes) == ("세린", {"age": "스물세 살", "origin": "부산"})
+
+
 def test_a_pronoun_with_two_candidates_is_left_alone():
     text = "레온은 세린을 보았다. 그의 눈이 붉게 빛났다."
     assert _run(text, {"레온의 눈 색깔은?": "붉게", "세린의 눈 색깔은?": "붉게"}).claims == []
