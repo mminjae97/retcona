@@ -32,7 +32,7 @@ from models.claim import Claim, ContradictionFlag
 from models.db import get_db
 from models.episode import Episode
 from models.flag_revalidation import FlagRevalidation
-from models.location import Location
+from models.location import STATE_ATTR_KEYS, Location
 from models.user import User
 from models.validation_run import ValidationRun
 from pipeline.claim_links import link_key, record_choice
@@ -432,6 +432,7 @@ class FlagAction(BaseModel):
 # 409 details, as codes the result screen turns into messages.
 FLAG_HANDLED = "flag_handled"  # not open (accept/dismiss) or not dismissed (reopen)
 FLAG_NO_VALUE = "flag_no_value"  # the claim has no value for the attribute
+FLAG_NO_SETTING = "flag_no_setting"  # a state flag: held against a story state, not a card value
 FLAG_CARD_MISSING = "flag_card_missing"  # the setting card was deleted
 # accept while the episode is being validated: that run judged against the
 # card as it was, and would bring the flag back when it finishes
@@ -637,6 +638,8 @@ def revalidate_flag(
         raise HTTPException(status.HTTP_409_CONFLICT, FLAG_HANDLED)
     if not flag.attribute:
         raise HTTPException(status.HTTP_409_CONFLICT, FLAG_NO_VALUE)
+    if flag.attribute in STATE_ATTR_KEYS:
+        raise HTTPException(status.HTTP_409_CONFLICT, FLAG_NO_SETTING)
     _raise_if_run_active(db, novel_id, episode_id)
     card, attrs_field = _card_of(db, novel_id, claim)
 

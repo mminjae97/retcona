@@ -8,7 +8,8 @@ Today the bundle is the setting cards of the characters/locations the
 episode's claims are about, as entity matching found them
 (pipeline/entities.py resolve_subjects). The appearance and location judgments compare a
 claim with its card's attributes key by key, so the card is all they need.
-Narrowing past settings and state history down by similarity (pgvector +
+A location's card also carries its latest state before the episode, which the
+location judgment holds the episode's features against. Narrowing past settings and state history down by similarity (pgvector +
 reranker, chapter 5) comes with the modules that read free text: behavior
 (OOC) and spacetime.
 
@@ -16,13 +17,14 @@ novel_id is a required argument, passed through unchanged to every underlying qu
 """
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from models.character import Character
-from models.location import Location
+from models.episode import Episode
+from models.location import STATE_ATTR_KEYS, Location, LocationStateHistory
 from pipeline.entities import Match
 
 
@@ -35,6 +37,9 @@ class Card:
     attrs: dict[str, str]
     # {key: the episode id it was filled in from}, from attr_sources
     sources: dict[str, str]
+    # A location's latest change of state ("폐허가 되었다") in the episodes before
+    # this one, from location_state_history; None for a character or no change yet.
+    state: str | None = None
 
 
 @dataclass
@@ -67,6 +72,33 @@ def source_episodes(attr_sources: object) -> dict[str, str]:
     }
 
 
+def _latest_states(
+    db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, location_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """{location id: the state the latest earlier episode left it in}. Only
+    episodes before this one: its own change of state is what it says, and a
+    later episode's is not yet what this one is held to."""
+    if not location_ids:
+        return {}
+    episode_index = db.scalar(select(Episode.episode_index).where(Episode.id == episode_id, Episode.novel_id == novel_id))
+    if episode_index is None:
+        return {}
+    states: dict[uuid.UUID, str] = {}
+    for row in db.execute(
+        select(LocationStateHistory.location_id, LocationStateHistory.state)
+        .where(
+            LocationStateHistory.novel_id == novel_id,
+            LocationStateHistory.location_id.in_(location_ids),
+            LocationStateHistory.episode_index < episode_index,
+        )
+        .order_by(LocationStateHistory.episode_index.desc())
+    ):
+        state = next((value for key, value in text_values(row.state).items() if key in STATE_ATTR_KEYS), None)
+        if state:
+            states.setdefault(row.location_id, state)
+    return states
+
+
 def get_context_bundle(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, matches: list[Match]) -> ContextBundle:
     """matches[i]: claims[i]'s card, from resolve_subjects."""
     wanted = {match.card_id for match in matches if match.card_id is not None}
@@ -87,6 +119,9 @@ def get_context_bundle(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, 
             attrs=text_values(location.geo_attrs),
             sources=source_episodes(location.attr_sources),
         )
+    states = _latest_states(db, novel_id, episode_id, [card.id for card in cards.values() if card.kind == "location"])
+    for card_id, state in states.items():
+        cards[card_id] = replace(cards[card_id], state=state)
     return ContextBundle(
         episode_id=episode_id,
         claim_cards=[cards.get(match.card_id) if match.card_id is not None else None for match in matches],
