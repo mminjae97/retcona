@@ -413,10 +413,28 @@ def test_노을_is_not_an_object():
 
 
 def test_what_is_said_of_a_second_place_is_not_the_first_one_s():
-    text = "검은 숲은 크고 벨로스 성은 작았다."
+    text = "검은 숲은 크고 세이라는 작았다."
+    start = text.index("세이라")
+    entities = {text: [NamedEntity(start, start + 4, "LC")]}  # the particle comes with it
+    claims = _run(text, {}, entities).claims
+    assert [(c.subject, c.attributes) for c in claims] == [("세이라", {"features": "작았다"})]
+
+
+def test_a_place_that_what_is_said_tells_by_is_not_another_topic():
+    text = "검은 숲은 벨로스 성 북쪽에 펼쳐져 있었다."
     start = text.index("벨로스")
     entities = {text: [NamedEntity(start, start + 5, "LC")]}
-    assert _run(text, {}, entities).claims == []
+    [claim] = _run(text, {}, entities).claims
+    assert claim.subject == "검은 숲"
+    assert claim.attributes == {"features": "벨로스 성 북쪽에 펼쳐져 있었다"}
+
+
+def test_a_comma_after_a_number_still_ends_the_clause():
+    def clauses(text):
+        return [text[a:b].strip() for a, b in rules._clauses(text)]
+
+    assert clauses("나이는 18, 눈은 푸른색이었다") == ["나이는 18", "눈은 푸른색이었다"]
+    assert clauses("둘레가 1,000리에 달했다") == ["둘레가 1,000리에 달했다"]
 
 
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():

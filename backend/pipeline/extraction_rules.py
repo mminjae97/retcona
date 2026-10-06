@@ -265,9 +265,14 @@ def features_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> 
         or _PRONOUN_PHRASE.search(predicate)
     ):
         return ""
-    # Another name in what's said ("레온이 지켰다", "성은 크고 마을은 작았다"), not one
-    # before the place ("레온이 보기에 검은 숲은 ...").
-    if any(mention.end <= other.start < end for other in others if other is not mention):
+    # A character in what's said ("레온이 지켰다") or another topic ("성은 크고 마을은
+    # 작았다"), not a place it's told by ("벨로스 성 북쪽에") or one before it
+    # ("레온이 보기에 검은 숲은 ...").
+    if any(
+        mention.end <= other.start < end and (other.subject.kind == "character" or other.topic)
+        for other in others
+        if other is not mention
+    ):
         return ""
     return predicate
 
@@ -291,7 +296,7 @@ class CueHit:
 def _clauses(narration: str) -> list[tuple[int, int]]:
     spans, start = [], 0
     # Not the comma inside a number ("1,000리").
-    for match in re.finditer(r"(?<!\d),(?!\d)|[，、]", narration):
+    for match in re.finditer(r"(?<!\d),|,(?!\d)|[，、]", narration):
         spans.append((start, match.start()))
         start = match.end()
     spans.append((start, len(narration)))
