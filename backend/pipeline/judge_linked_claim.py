@@ -53,6 +53,7 @@ class _Failed(Exception):
 
 class _Judged(NamedTuple):
     card_id: uuid.UUID
+    card_name: str
     text: str
     evidence: str | None
     attributes: dict[str, str]
@@ -72,12 +73,12 @@ def _take(novel_id: uuid.UUID, claim_id: uuid.UUID) -> bool:
 
 
 def _put_back(novel_id: uuid.UUID, claim_id: uuid.UUID) -> None:
-    """Pending again, with no card: for the author to pick again."""
+    """Pending again, with no card, and the name it came with: for the author to pick again."""
     with SessionLocal() as db:
         db.execute(
             update(Claim)
             .where(Claim.id == claim_id, Claim.novel_id == novel_id, Claim.link_status.in_(("queued", "judging")))
-            .values(link_status="pending", subject_id=None, subject_name=None, link_requested_at=None)
+            .values(link_status="pending", subject_id=None, link_requested_at=None)
         )
         db.commit()
 
@@ -121,13 +122,13 @@ def _judge(novel_id: uuid.UUID, claim_id: uuid.UUID) -> _Judged:
                 )
             )
         }
-        card_id, evidence = card.id, claim.evidence_text
+        card_id, card_name, evidence = card.id, card.name, claim.evidence_text
     try:
         flags = judge_appearance([extracted], bundle, others)
     except InferenceError as exc:
         logger.exception("Novel %s: the NLI model failed", novel_id)
         raise _Failed("inference_failed") from exc
-    return _Judged(card_id, text, evidence, extracted.attributes, flags)
+    return _Judged(card_id, card_name, text, evidence, extracted.attributes, flags)
 
 
 def _store(novel_id: uuid.UUID, claim_id: uuid.UUID, judged: _Judged) -> None:
@@ -170,6 +171,7 @@ def _store(novel_id: uuid.UUID, claim_id: uuid.UUID, judged: _Judged) -> None:
                 )
             )
         claim.text = judged.text
+        claim.subject_name = judged.card_name
         claim.candidates = []
         claim.link_status = None
         claim.link_requested_at = None

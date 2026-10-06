@@ -771,7 +771,7 @@ def _put_back_stale_picks(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUI
             Claim.link_status.in_(_LINK_ACTIVE),
             Claim.link_requested_at < datetime.now(UTC) - LINK_ABANDON_AFTER,
         )
-        .values(link_status="pending", subject_id=None, subject_name=None, link_requested_at=None)
+        .values(link_status="pending", subject_id=None, link_requested_at=None)
     )
 
 
@@ -885,8 +885,10 @@ def pick_pending_link(
     if card is None:
         raise HTTPException(status.HTTP_409_CONFLICT, LINK_CARD_MISSING)
     record_choice(db, novel_id, episode_id, key, card.id)
+    # The name it came with stays (it's part of the key the pick is kept under,
+    # and what the claim goes back to if it isn't judged); the worker renames it
+    # for the card once it's judged.
     claim.subject_id = card.id
-    claim.subject_name = card.name
     claim.link_status = "queued"
     claim.link_requested_at = func.now()
     # Committed before it's enqueued, so the worker can't pick the job up
@@ -899,7 +901,7 @@ def pick_pending_link(
         db.execute(
             update(Claim)
             .where(Claim.id == claim_id, Claim.link_status == "queued")
-            .values(link_status="pending", subject_id=None, subject_name=None, link_requested_at=None)
+            .values(link_status="pending", subject_id=None, link_requested_at=None)
         )
         db.commit()
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Judging is unavailable right now")
