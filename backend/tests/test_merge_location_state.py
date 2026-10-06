@@ -62,3 +62,39 @@ def test_a_state_does_not_go_into_the_card():
     apply_new_information(db, uuid.uuid4(), uuid.uuid4(), 3, "본문", [claim], [location.id], [])
     assert location.geo_attrs == {"features": "높은 산 위"}
     assert "state" not in location.attr_sources
+
+
+def test_a_feature_an_earlier_run_took_from_a_sentence_now_read_as_a_state_is_cleared():
+    episode_id = uuid.uuid4()
+    sentence = "벨로스 성은 폐허가 되었다."
+    location = Location(
+        id=uuid.uuid4(),
+        name="벨로스 성",
+        geo_attrs={"features": "폐허가 되었다"},
+        attr_sources={"features": {"episode_id": str(episode_id), "evidence": sentence}},
+    )
+    db = MagicMock()
+    db.scalars.side_effect = [[], [location]]
+    claim = _claim(state="폐허가 되었다")
+    claim.evidence = sentence
+    # The sentence is still in the episode: it's the reading of it that changed.
+    apply_new_information(db, uuid.uuid4(), episode_id, 3, sentence, [claim], [location.id], [])
+    assert location.geo_attrs == {}
+    assert location.attr_sources == {}
+
+
+def test_a_feature_from_another_sentence_is_kept_when_the_episode_also_says_a_state():
+    episode_id = uuid.uuid4()
+    location = Location(
+        id=uuid.uuid4(),
+        name="벨로스 성",
+        geo_attrs={"features": "높은 산 위"},
+        attr_sources={"features": {"episode_id": str(episode_id), "evidence": "벨로스 성은 높은 산 위에 있다."}},
+    )
+    db = MagicMock()
+    db.scalars.side_effect = [[], [location]]
+    claim = _claim(state="폐허가 되었다")
+    claim.evidence = "벨로스 성은 폐허가 되었다."
+    content = "벨로스 성은 높은 산 위에 있다. 벨로스 성은 폐허가 되었다."
+    apply_new_information(db, uuid.uuid4(), episode_id, 3, content, [claim], [location.id], [])
+    assert location.geo_attrs == {"features": "높은 산 위"}
