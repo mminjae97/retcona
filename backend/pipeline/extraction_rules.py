@@ -277,6 +277,17 @@ def features_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> 
     return predicate
 
 
+# A predicate that says the place changed or is in a changed state, not what it is
+# like: "폐허가 되었다", "불탔다", "무너졌다".
+_STATE_CHANGE = re.compile(
+    r"폐허|잿더미|무너|붕괴|불타|불탔|타버|파괴|멸망|함락|몰락|사라졌|사라진|황폐|가라앉|침몰|버려졌|(?:이|가)\s?(?:되었|됐)"
+)
+
+
+def is_state_change(predicate: str) -> bool:
+    return bool(_STATE_CHANGE.search(predicate))
+
+
 _FEATURES_MAX_LENGTH = 40
 _PREDICATE_EDGE = " 	\"'“”‘’「」『』.!?…~"
 _QUOTE = re.compile(r"[\"“”‘’「」『』]")

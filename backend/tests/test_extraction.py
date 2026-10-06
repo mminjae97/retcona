@@ -437,6 +437,18 @@ def test_a_comma_after_a_number_still_ends_the_clause():
     assert clauses("둘레가 1,000리에 달했다") == ["둘레가 1,000리에 달했다"]
 
 
+def test_a_change_of_a_place_s_state_is_a_state_not_a_feature():
+    [claim] = _run("검은 숲은 폐허가 되었다.", {}).claims
+    assert (claim.subject_kind, claim.subject, claim.attributes) == ("location", "검은 숲", {"state": "폐허가 되었다"})
+    [claim] = _run("검은 숲은 불타 사라졌다.", {}).claims
+    assert claim.attributes == {"state": "불타 사라졌다"}
+
+
+def test_a_place_that_is_described_and_then_changes_has_both():
+    claims = _run("검은 숲은 늘 안개로 덮여 있었다. 몇 해가 지나 검은 숲은 무너져 내렸다.", {}).claims
+    assert [c.attributes for c in claims] == [{"features": "늘 안개로 덮여 있었다"}, {"state": "무너져 내렸다"}]
+
+
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():
     assert _run("레온은 검은 숲 입구에서 말을 멈췄다.", {"검은 숲의 특징은?": "입구"}).claims == []
 

@@ -36,7 +36,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from ai import nli_rerank
 from infra.span_inference import NamedEntity
 from models.character import FIXED_ATTR_KEYS, MUTABLE_ATTR_KEYS
-from models.location import GEO_ATTR_KEYS
+from models.location import GEO_ATTR_KEYS, STATE_ATTR_KEYS
 from pipeline import extraction_rules as rules
 from pipeline.sentences import Sentence, split_sentences
 from pipeline.statements import character_statement, location_statement
@@ -51,7 +51,7 @@ _TEXT_MAX_LENGTH = 2000
 
 _ATTR_KEYS = {
     "character": set(FIXED_ATTR_KEYS + MUTABLE_ATTR_KEYS),
-    "location": set(GEO_ATTR_KEYS),
+    "location": set(GEO_ATTR_KEYS + STATE_ATTR_KEYS),
 }
 
 
@@ -291,7 +291,7 @@ def extract_claims(
     for question in questions:
         value = _clean_value(next(answers) if question.given is None else question.given)
         if question.attribute is None:
-            key, valid = "features", len(value) >= 2
+            key, valid = ("state" if rules.is_state_change(value) else "features"), len(value) >= 2
             statement = location_statement(question.who, value)
         else:
             value = rules.value_of(question.attribute, value, question.clause)

@@ -18,6 +18,9 @@ from models.base import Base, NovelScopedMixin, TimestampMixin
 # geo_attrs keys claim extraction fills in (7.4): the geographic features the
 # manuscript describes. Distances/connections live in relations (8.1).
 GEO_ATTR_KEYS = ("features",)
+# What changes over the story ("벨로스 성은 폐허가 되었다"): recorded per episode in
+# location_state_history, not held against the card's features (7.4).
+STATE_ATTR_KEYS = ("state",)
 
 
 class Location(Base, NovelScopedMixin, TimestampMixin):

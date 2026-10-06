@@ -106,3 +106,11 @@ The 6 mutable ones are still all missed.
 
 1. A body part ("오른손의", "왼팔의") is no possessor; a longer window for a cue's color word. (2)
 2. Extract the mutable attributes. (6)
+
+## Round 4 — 2026-10-06: a place's change of state is a state, not a feature
+
+A sentence like "벨로스 성은 폐허가 되었다" was read as the place's features (round 3's known limit): once the card says "높은 산 위에 서 있었다", the later sentence would be judged against it as a contradiction, when the story only changed the place. A place's predicate that says it changed or is in a changed state ("폐허", "불타", "무너", "멸망", "...가 되었다" and the like) is now taken as its **state** instead, and the merge step records it in `location_state_history` for the episode, as a character's hairstyle or outfit is in `character_state_history`; the judge compares only features (`GEO_ATTR_KEYS`) with the card, so a state is never held against it.
+
+3 passages (p46-p48, tag `location-state`) were added to the set: a place gone to ruin, burned away, and one described and then collapsed (a feature and a state). 4 of 4 right, and the whole set is now **51 right / 0 extra / 9 missed** (precision 1.000, recall 0.850, F1 0.919). The rule and the passages were written together, so this says the rule does what it's made for, not how it does on other prose.
+
+Not done: comparing a later episode's sentence with the place's latest state (a city described again after it fell), which is stage 4 (the state-history accumulation of design doc §7); the state's story time (`story_timestamp`) stays empty; and the word list is short, so a change said another way ("황량해졌다", "시들었다") is still read as a feature.
