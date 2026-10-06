@@ -1,6 +1,12 @@
 """characters, character_state_history tables (design doc 4.3).
 
 - source: manual (entered directly by the author) | auto_detected (auto-generated from the manuscript) (7.4)
+- gender: male | female | unspecified (the default), as the author sets it
+- pronoun: which pronoun the manuscript narrates the character with, when
+  that isn't what gender says (a woman living as a man whom the narration
+  calls 그): he (그) | she (그녀) | any. None follows gender. Claim extraction
+  uses it to tell characters apart when a sentence has only a pronoun
+  (pipeline/extraction_rules.py).
 - Fixed attributes: name, age, eye color, hair color, height, scars, origin
 - aliases: other names the manuscript calls the character by (a nickname, a
   title, a shortened name), as the author lists them. Claim extraction is
@@ -42,6 +48,8 @@ class Character(Base, NovelScopedMixin, TimestampMixin):
     name: Mapped[str] = mapped_column(String, nullable=False)
     aliases: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]", nullable=False)
     source: Mapped[str] = mapped_column(String, default="manual")  # manual | auto_detected
+    gender: Mapped[str] = mapped_column(String, default="unspecified", server_default="unspecified", nullable=False)
+    pronoun: Mapped[str | None] = mapped_column(String, nullable=True)  # he | she | any; None: follows gender
     fixed_attrs: Mapped[dict] = mapped_column(JSONB, default=dict)  # age, eye color, hair color, height, scars, origin, etc.
     mutable_attrs: Mapped[dict] = mapped_column(JSONB, default=dict)  # hairstyle, outfit, injury/health status, belongings
     personality: Mapped[dict] = mapped_column(JSONB, default=dict)  # personality keywords, speech traits, goals/values

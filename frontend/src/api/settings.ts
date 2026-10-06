@@ -60,8 +60,21 @@ export type Personality = Section<typeof PERSONALITY_FIELDS>;
 export const ALIASES_MAX = 20;
 export const NAME_MAX_LENGTH = 100;
 
+// Gender, and the pronoun the manuscript narrates the character with when
+// that isn't what gender says (a woman living as a man, whom the narration
+// calls 그). Claim extraction uses them to tell characters apart when a
+// sentence has only a pronoun. Stored as these codes
+// (backend/api/settings.py); the labels are this side's.
+export const GENDERS = { unspecified: "미지정", male: "남성", female: "여성" } as const;
+export type Gender = keyof typeof GENDERS;
+export const PRONOUNS = { he: "그", she: "그녀", any: "둘 다" } as const;
+export type Pronoun = keyof typeof PRONOUNS;
+
 export interface CharacterInput {
   name: string;
+  gender: Gender;
+  // null: follows gender
+  pronoun: Pronoun | null;
   aliases: string[];
   fixed_attrs: Partial<FixedAttrs>;
   mutable_attrs: Partial<MutableAttrs>;
@@ -71,6 +84,8 @@ export interface CharacterInput {
 export interface CharacterPublic {
   id: string;
   name: string;
+  gender: Gender;
+  pronoun: Pronoun | null;
   aliases: string[];
   source: "manual" | "auto_detected";
   fixed_attrs: FixedAttrs;
