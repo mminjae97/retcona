@@ -333,7 +333,7 @@ _PERSON_NOUNS = "녀석|놈|사내|남자|여자|소년|소녀|아이|사람|청
 # What can follow a pronoun: a space, the end, or punctuation ("그녀는, ...").
 _PRONOUN_END = r"(?=[\s,.!?…\"'”’」』)]|$)"
 _PRONOUN_PHRASE = re.compile(
-    r"(?<![가-힣])(?:그녀(?!석)(?P<she>)|그(?=(?:의|는|은|가|이|를|을|도|만)" + _PRONOUN_END + r")(?P<he>)|그\s?(?:"
+    r"(?<![가-힣])(?:그녀(?!석)(?P<she>)|그(?=(?:의|는|은|가|이|를|을|도)" + _PRONOUN_END + r")(?P<he>)|그\s?(?:"
     + _PERSON_NOUNS
     + r")(?P<noun>))"
     r"(?P<particle>의|는|은|가|이|를|을|도|만)?" + _PRONOUN_END
@@ -394,13 +394,13 @@ def name_for_pronoun(clause: str, name: str, pronoun: str = "any") -> str:
 
 _PRONOUNS = ("그", "그녀", "자신")
 # 그 alone is the demonstrative of "그 순간", "그 해"; it's a pronoun with a
-# particle ("그는", "그의"), or in front of a word for a person ("그 녀석").
+# particle ("그는", "그의"; not 만: "그만" is "enough"), or in front of a word for a person ("그 녀석").
 _PLURAL_PRONOUN = re.compile(r"\s*(?:그들|그녀들)")
 _PARTICLES_AFTER_PRONOUN = "의|는|은|가|이|를|을|도|만"
 _EARLY_PRONOUN = re.compile(
     r"(?<![가-힣])(?:"
     rf"그녀(?![가-힣]*들)(?:{_PARTICLES_AFTER_PRONOUN})?{_PRONOUN_END}"
-    rf"|그(?:{_PARTICLES_AFTER_PRONOUN}){_PRONOUN_END}"
+    rf"|그(?:{_PARTICLES_AFTER_PRONOUN.removesuffix('|만')}){_PRONOUN_END}"
     rf"|그\s?(?:{_PERSON_NOUNS})(?!들)"
     r")"
 )

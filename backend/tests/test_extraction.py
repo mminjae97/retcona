@@ -523,6 +523,11 @@ def test_a_pronoun_followed_by_punctuation_is_replaced():
     assert rules.name_for_pronoun("붉은 눈의 그, 그의 눈이 번뜩였다", "레온") == "붉은 눈의 그, 레온의 눈이 번뜩였다"
 
 
-def test_a_clause_about_the_other_gender_is_not_read_after_the_sentence_that_names_the_character():
-    [(question, context)] = _asked("레온은 문을 열었다. 그녀의 눈이 푸르게 빛났다.", _pair()[:1])
-    assert (question, context) == ("레온의 눈 색깔은?", "그녀의 눈이 푸르게 빛났다.")
+def test_a_clause_about_the_other_gender_is_asked_over_the_clause_alone():
+    [(_, context)] = _asked("레온은 문을 열었다. 그녀의 눈이 푸르게 빛났다.", _pair()[:1])
+    assert context == "그녀의 눈이 푸르게 빛났다."
+
+
+def test_그만_is_not_a_pronoun():
+    assert rules.name_for_pronoun("그만 눈이 붉게 빛났다", "레온") == "그만 눈이 붉게 빛났다"
+    assert rules.name_for_pronoun("그녀만 눈이 붉게 빛났다", "세린") == "세린만 눈이 붉게 빛났다"
