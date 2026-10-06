@@ -59,6 +59,14 @@ def test_a_very_long_sentence_is_cut_at_a_comma():
     assert all(len(part.text) <= MAX_SENTENCE_CHARS for part in parts)
 
 
+def test_a_long_quote_cut_at_a_comma_stays_dialogue_and_its_narration_stays_narration():
+    text = '"' + "가나다, " * 80 + '" 세린이 말했다.'
+    sentences = split_sentences(text)
+    assert len(sentences) > 1
+    assert all(len(s.text) == len(s.narration) for s in sentences)
+    assert "".join(s.narration for s in sentences).split() == ["세린이", "말했다."]
+
+
 # --- names -------------------------------------------------------------------
 
 
@@ -200,6 +208,19 @@ def test_a_pronoun_goes_to_the_one_character_the_sentence_before_names():
 def test_a_pronoun_with_two_candidates_is_left_alone():
     text = "레온은 세린을 보았다. 그의 눈이 붉게 빛났다."
     assert _run(text, {"레온의 눈 색깔은?": "붉게", "세린의 눈 색깔은?": "붉게"}).claims == []
+
+
+def test_a_cue_with_no_name_and_no_pronoun_goes_back_only_for_a_body_part():
+    assert _run("레온은 문을 열었다. 여섯 살 때의 일이었다.", {"레온의 나이는?": "여섯 살"}).claims == []
+    [claim] = _run("레온은 문을 열었다. 붉은 눈동자가 번뜩였다.", {"레온의 눈 색깔은?": "붉은"}).claims
+    assert claim.subject == "레온"
+
+
+def test_a_pronoun_possessor_in_a_sentence_that_names_someone_is_not_that_someone():
+    answers = {"세린의 눈 색깔은?": "푸른"}
+    assert _run("세린은 그의 푸른 눈을 보았다.", answers).claims == []
+    [claim] = _run("세린은 자신의 푸른 눈을 보았다.", answers).claims
+    assert claim.subject == "세린"
 
 
 def test_somebody_elses_eyes_are_not_the_named_characters():

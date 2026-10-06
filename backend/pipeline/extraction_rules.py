@@ -283,6 +283,7 @@ _LEADING_PRONOUN = re.compile(r"\s*(?:그녀|그)(?![가-힣]*들)(?:의|는|은
 # How far into a sentence a cue can start and still read as its subject
 # ("붉은 눈동자가 어둠 속에서 번뜩였다"), when the sentence has no name.
 _CUE_FIRST_CHARS = 12
+_BODY_ATTRIBUTES = ("eye_color", "hair_color", "scars", "height")
 # How many sentences back a pronoun's name is looked for.
 CONTEXT_SENTENCES = 2
 
@@ -309,6 +310,10 @@ def owner(sentences: list[Sentence], mentions: list[list[Mention]], index: int, 
         if named:
             return named[0].subject
         if genitive.group(1) in _PRONOUNS:
+            # "세린은 그의 푸른 눈을 보았다": 그의 is somebody the sentence doesn't
+            # name, not its subject (자신의 would be).
+            if here and genitive.group(1) != "자신":
+                return None
             pronoun_possessor = True
         else:
             return None  # somebody else's ("노인의 눈")
@@ -322,7 +327,10 @@ def owner(sentences: list[Sentence], mentions: list[list[Mention]], index: int, 
     if _PLURAL_PRONOUN.match(narration):
         return None
     lead = len(narration) - len(narration.lstrip())
-    if not (pronoun_possessor or _LEADING_PRONOUN.match(narration) or hit.start - lead <= _CUE_FIRST_CHARS):
+    # A dropped subject only for what the sentence's subject can be a body part
+    # of ("붉은 눈동자가 번뜩였다"); "여섯 살 때의 일이었다" isn't about anyone.
+    dropped_subject = hit.attribute.key in _BODY_ATTRIBUTES and hit.start - lead <= _CUE_FIRST_CHARS
+    if not (pronoun_possessor or _LEADING_PRONOUN.match(narration) or dropped_subject):
         return None
     candidates: dict[tuple[str, str], Subject] = {}
     for back in range(1, CONTEXT_SENTENCES + 1):

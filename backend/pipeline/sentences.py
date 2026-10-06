@@ -112,16 +112,16 @@ def split_sentences(manuscript: str) -> list[Sentence]:
             continue
         for start, end in _split_line(line):
             piece = line[start:end]
+            # Blanked before a long sentence is cut, so a cut inside a quote
+            # doesn't turn its closing quote into an opening one.
+            blanked = _blank_quotes(piece)
             for cut_start, cut_end in _cut_long(piece):
                 raw = piece[cut_start:cut_end]
                 text = raw.strip()
                 if not text:
                     continue
+                offset = cut_start + len(raw) - len(raw.lstrip())
                 sentences.append(
-                    Sentence(
-                        index=len(sentences),
-                        text=text,
-                        narration=_blank_quotes(text),
-                    )
+                    Sentence(index=len(sentences), text=text, narration=blanked[offset : offset + len(text)])
                 )
     return sentences
