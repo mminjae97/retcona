@@ -56,6 +56,8 @@ export interface ValidationRunSummary {
   // location), one per claim and attribute. Missing on runs from before
   // contradiction judgment.
   flags?: number;
+  // How many claims are waiting for the author to pick a card (7.1.1).
+  pending_links?: number;
 }
 
 export interface ValidationRun {
@@ -159,4 +161,51 @@ export function actOnFlag(novelId: string, episodeId: string, flagId: string, ac
     method: "PATCH",
     body: JSON.stringify({ action }),
   });
+}
+
+// Claims the extraction couldn't tie to one card (design doc 7.1.1) — a
+// pronoun that fits several characters, a name several share — wait for the
+// author to pick one of the candidates, or none. A pick is judged by the
+// worker: judging until it's done, and then it's gone from the list (and its
+// contradictions, if any, are among the flags).
+export interface PendingCandidate {
+  id: string;
+  kind: "character";
+  name: string;
+  // Tell characters with one name apart.
+  aliases: string[];
+}
+
+export interface PendingLink {
+  // The claim's id.
+  id: string;
+  status: "pending" | "judging";
+  // The manuscript sentence.
+  evidence_text: string | null;
+  // What it says, by setting-card key: { eye_color: "붉게" }.
+  attributes: Record<string, string>;
+  // The name the sentence gave, where it's one several characters share;
+  // null for a bare pronoun.
+  subject_name: string | null;
+  // The ones that still exist.
+  candidates: PendingCandidate[];
+  // judging: the card picked.
+  picked_id: string | null;
+}
+
+export function listPendingLinks(novelId: string, episodeId: string): Promise<PendingLink[]> {
+  return apiFetch<PendingLink[]>(`/novels/${novelId}/episodes/${episodeId}/pending-links`);
+}
+
+// subjectId null: the sentence isn't about any of the candidates ("해당 없음").
+export function pickPendingLink(
+  novelId: string,
+  episodeId: string,
+  claimId: string,
+  subjectId: string | null,
+): Promise<{ id: string; outcome: "judging" | "skipped" }> {
+  return apiFetch<{ id: string; outcome: "judging" | "skipped" }>(
+    `/novels/${novelId}/episodes/${episodeId}/pending-links/${claimId}`,
+    { method: "POST", body: JSON.stringify({ subject_id: subjectId }) },
+  );
 }

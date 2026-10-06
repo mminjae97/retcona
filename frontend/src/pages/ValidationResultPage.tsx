@@ -7,12 +7,24 @@
 // Or the setting it was judged against can be supplemented right there and the
 // flag alone judged again (7.5) — the worker does it; the page polls until it's
 // done.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// Above the flags, the sentences the extraction couldn't tie to one character —
+// a "그" that fits several, a name several share — ask the author which it is
+// (7.1.1); the pick is judged by the worker like a revalidation.
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, describeError } from "../api/client";
-import { actOnFlag, getEpisode, getLatestValidation, isRevalidating, listFlags, revalidateFlag } from "../api/episodes";
-import type { EpisodePublic, Flag, FlagAction, ValidationRun } from "../api/episodes";
+import {
+  actOnFlag,
+  getEpisode,
+  getLatestValidation,
+  isRevalidating,
+  listFlags,
+  listPendingLinks,
+  pickPendingLink,
+  revalidateFlag,
+} from "../api/episodes";
+import type { EpisodePublic, Flag, FlagAction, PendingLink, ValidationRun } from "../api/episodes";
 import { FIXED_ATTR_FIELDS } from "../api/settings";
 import { describeRunError, isRunActive } from "../utils/validationRun";
 import "./ValidationResultPage.css";
@@ -65,6 +77,17 @@ function describeActionError(err: unknown): string {
   return describeError(err);
 }
 
+// 409 details are codes (backend/api/episodes.py).
+function describeLinkError(err: unknown): string {
+  if (err instanceof ApiError && err.status === 409) {
+    if (err.message === "link_run_active") return "이 화의 검증이 진행 중입니다. 검증이 끝난 뒤 선택해 주세요.";
+    if (err.message === "link_card_missing") return "선택한 인물이 삭제되었습니다. 새로고침해 주세요.";
+    if (err.message === "link_not_a_candidate") return "고를 수 없는 인물입니다. 새로고침해 주세요.";
+    return "이미 처리된 항목입니다. 새로고침해 주세요.";
+  }
+  return describeError(err);
+}
+
 type Range = { start: number; end: number };
 
 // Where `sentence` is in `content`, every occurrence (a short line of dialogue
@@ -86,6 +109,17 @@ function locateAll(content: string, text: WordChars, sentence: string): Range[] 
   return occurrences(text.chars, wanted)
     .map((at) => ({ start: text.starts[at], end: text.ends[at + wanted.length - 1] }))
     .filter(whole);
+}
+
+// The manuscript just before a sentence (the first place it's at), for a
+// "그" that needs the sentences before it to be read: up to this many characters.
+const CONTEXT_BEFORE = 80;
+
+function textBefore(content: string, text: WordChars, sentence: string | null): string {
+  const [first] = sentence ? locateAll(content, text, sentence) : [];
+  if (!first) return "";
+  const before = content.slice(Math.max(0, first.start - CONTEXT_BEFORE), first.start).trim();
+  return first.start > CONTEXT_BEFORE && before ? `…${before}` : before;
 }
 
 // Whether a match is the sentence itself, not the tail or head of a longer
@@ -181,6 +215,11 @@ export default function ValidationResultPage() {
   const [episode, setEpisode] = useState<EpisodePublic | null>(null);
   const [run, setRun] = useState<ValidationRun | null>(null);
   const [flags, setFlags] = useState<Flag[]>([]);
+  // The claims waiting for the author to pick a card, in manuscript order.
+  const [pendingLinks, setPendingLinks] = useState<PendingLink[]>([]);
+  // The one being picked for, and which (a candidate's id, or "skip").
+  const [linkBusy, setLinkBusy] = useState<{ id: string; pick: string } | null>(null);
+  const [linkErrors, setLinkErrors] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   // The flag whose sentence was last jumped to, drawn more strongly.
@@ -205,12 +244,19 @@ export default function ValidationResultPage() {
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
-    Promise.all([getEpisode(novelId, episodeId), getLatestValidation(novelId, episodeId), listFlags(novelId, episodeId)])
-      .then(([loadedEpisode, latest, loadedFlags]) => {
+    Promise.all([
+      getEpisode(novelId, episodeId),
+      getLatestValidation(novelId, episodeId),
+      listFlags(novelId, episodeId),
+      listPendingLinks(novelId, episodeId),
+    ])
+      .then(([loadedEpisode, latest, loadedFlags, loadedLinks]) => {
         if (cancelled) return;
         setEpisode(loadedEpisode);
         setRun(latest);
         setFlags(sortFlags(loadedFlags));
+        setPendingLinks(loadedLinks);
+        setLinkErrors({});
         setActionErrors({});
         setActionNotices({});
         // Segment indexes and jump positions belong to the text just replaced.
@@ -252,6 +298,30 @@ export default function ValidationResultPage() {
       window.clearTimeout(timer);
     };
   }, [revalidating, flags, novelId, episodeId]);
+
+  // While a pick is being judged, check on it until it's done: the list (it
+  // leaves it when done) and the flags (what it found, if anything).
+  const judgingLinks = pendingLinks.some((link) => link.status === "judging");
+  useEffect(() => {
+    if (!judgingLinks || !novelId || !episodeId) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      Promise.all([listPendingLinks(novelId, episodeId), listFlags(novelId, episodeId)])
+        .then(([loadedLinks, loadedFlags]) => {
+          if (cancelled) return;
+          setPendingLinks(loadedLinks);
+          setFlags(sortFlags(loadedFlags));
+        })
+        // Tried again on the next tick: the pick still shows "judging".
+        .catch(() => {
+          if (!cancelled) setPendingLinks((current) => [...current]);
+        });
+    }, REVALIDATION_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [judgingLinks, pendingLinks, novelId, episodeId]);
 
   // NFC, as the backend compares text: a manuscript pasted from some systems
   // stores Hangul decomposed (NFD), and the model's sentences are composed.
@@ -349,6 +419,28 @@ export default function ValidationResultPage() {
     }
   }
 
+  // The author's pick for a claim: a candidate, or null for "해당 없음". The
+  // list is reloaded after (a pick starts being judged, a skip leaves it).
+  async function pickLink(link: PendingLink, subjectId: string | null) {
+    if (!novelId || !episodeId || actingRef.current) return;
+    actingRef.current = true;
+    setLinkBusy({ id: link.id, pick: subjectId ?? "skip" });
+    setLinkErrors(({ [link.id]: _, ...rest }) => rest);
+    try {
+      await pickPendingLink(novelId, episodeId, link.id, subjectId);
+      setPendingLinks(await listPendingLinks(novelId, episodeId));
+    } catch (err) {
+      setLinkErrors((current) => ({ ...current, [link.id]: describeLinkError(err) }));
+      // A 409 means the list is out of date (handled elsewhere, replaced by a new run).
+      listPendingLinks(novelId, episodeId)
+        .then(setPendingLinks)
+        .catch(() => {});
+    } finally {
+      actingRef.current = false;
+      setLinkBusy(null);
+    }
+  }
+
   const editorPath = `/novels/${novelId}/episodes/${episodeId}`;
 
   if (loading && !episode) return <div className="result-page">불러오는 중...</div>;
@@ -430,6 +522,29 @@ export default function ValidationResultPage() {
         </section>
 
         <section className="result-flags" aria-label="모순 후보">
+          {pendingLinks.length > 0 && (
+            <div className="link-section" aria-label="연결이 필요한 문장">
+              <h2>연결이 필요한 문장 {pendingLinks.length}개</h2>
+              <p className="result-hint">
+                누구에 대한 문장인지 정할 수 없었습니다. 알맞은 인물을 고르면 그 인물의 설정과 바로 비교하고, 다음
+                검증에서도 같은 선택을 씁니다.
+              </p>
+              <ol className="flag-list">
+                {pendingLinks.map((link) => (
+                  <LinkCard
+                    key={link.id}
+                    link={link}
+                    before={textBefore(content, contentWords, link.evidence_text)}
+                    runActive={isRunActive(run)}
+                    busy={linkBusy?.id === link.id ? linkBusy.pick : null}
+                    disabled={linkBusy !== null}
+                    error={linkErrors[link.id]}
+                    onPick={(subjectId) => pickLink(link, subjectId)}
+                  />
+                ))}
+              </ol>
+            </div>
+          )}
           <h2>
             모순 후보 {flags.length}개{flags.length > 0 && ` · 확인할 항목 ${openCount}개`}
           </h2>
@@ -475,6 +590,85 @@ function describeNoFlags(run: ValidationRun | null): string {
   if (run.status !== "succeeded") return "표시할 모순 후보가 없습니다.";
   if (run.summary.flags === undefined) return "모순 판정이 추가되기 전의 검증 결과입니다. 원고 화면에서 다시 검증해 주세요.";
   return "설정과 어긋나는 서술을 찾지 못했습니다.";
+}
+
+function candidateLabel(candidate: { name: string; aliases: string[] }): string {
+  return candidate.aliases.length > 0 ? `${candidate.name} (${candidate.aliases.join(", ")})` : candidate.name;
+}
+
+function LinkCard({
+  link,
+  before,
+  runActive,
+  busy,
+  disabled,
+  error,
+  onPick,
+}: {
+  link: PendingLink;
+  // The manuscript just before its sentence.
+  before: string;
+  runActive: boolean;
+  // Which pick is being sent: a candidate's id, or "skip".
+  busy: string | null;
+  disabled: boolean;
+  error: string | undefined;
+  onPick: (subjectId: string | null) => void;
+}) {
+  const judging = link.status === "judging";
+  const picked = link.candidates.find((candidate) => candidate.id === link.picked_id);
+  const blocked = runActive ? "이 화의 검증이 진행 중입니다. 검증이 끝난 뒤 선택할 수 있습니다." : undefined;
+  return (
+    <li className="flag-card link-card">
+      <p className="link-question">
+        {link.subject_name ? `"${link.subject_name}"은(는) 어느 인물인가요?` : "이 문장은 누구에 대한 내용인가요?"}
+      </p>
+      <p className="link-sentence">
+        {before && <span className="flag-missing">{before} </span>}
+        <strong>{link.evidence_text}</strong>
+      </p>
+      <dl className="flag-body">
+        {Object.entries(link.attributes).map(([key, value]) => (
+          <Fragment key={key}>
+            <dt>{ATTRIBUTES[key] ?? key}</dt>
+            <dd>{value}</dd>
+          </Fragment>
+        ))}
+      </dl>
+      {judging ? (
+        <p className="flag-state" role="status">
+          {picked ? `${picked.name}의 설정과 비교하는 중...` : "설정과 비교하는 중..."}
+        </p>
+      ) : (
+        <div className="flag-actions">
+          {link.candidates.map((candidate) => (
+            <button
+              key={candidate.id}
+              type="button"
+              onClick={() => onPick(candidate.id)}
+              disabled={disabled || runActive}
+              title={blocked}
+            >
+              {busy === candidate.id ? "처리 중..." : candidateLabel(candidate)}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => onPick(null)}
+            disabled={disabled || runActive}
+            title={blocked ?? "이 문장은 위 인물 누구에 대한 내용도 아닙니다."}
+          >
+            {busy === "skip" ? "처리 중..." : "해당 없음"}
+          </button>
+        </div>
+      )}
+      {error && (
+        <p className="result-error" role="alert">
+          {error}
+        </p>
+      )}
+    </li>
+  );
 }
 
 function FlagCard({
