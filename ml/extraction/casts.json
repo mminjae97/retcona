@@ -1,0 +1,46 @@
+{
+  "main": {
+    "characters": [
+      {"label": "레온", "name": "레온", "aliases": ["붉은 늑대", "레온하트"], "gender": "male", "pronoun": null},
+      {"label": "세린", "name": "세린", "aliases": [], "gender": "female", "pronoun": null},
+      {"label": "카엘", "name": "카엘", "aliases": ["기사단장"], "gender": "male", "pronoun": null},
+      {"label": "엘리제", "name": "엘리제", "aliases": ["공주"], "gender": "female", "pronoun": null}
+    ],
+    "locations": ["검은 숲", "벨로스 성", "은빛 호수", "북부"]
+  },
+  "namesake": {
+    "characters": [
+      {"label": "김철수(형)", "name": "김철수", "aliases": ["철수형"], "gender": "male", "pronoun": null},
+      {"label": "김철수(오빠)", "name": "김철수", "aliases": ["철수오빠"], "gender": "male", "pronoun": null},
+      {"label": "영희", "name": "영희", "aliases": [], "gender": "female", "pronoun": null}
+    ],
+    "locations": []
+  },
+  "unspecified": {
+    "characters": [
+      {"label": "도하", "name": "도하", "aliases": [], "gender": "unspecified", "pronoun": null},
+      {"label": "서윤", "name": "서윤", "aliases": [], "gender": "unspecified", "pronoun": null}
+    ],
+    "locations": []
+  },
+  "disguise": {
+    "characters": [
+      {"label": "하윤", "name": "하윤", "aliases": [], "gender": "female", "pronoun": "he"},
+      {"label": "도윤", "name": "도윤", "aliases": [], "gender": "male", "pronoun": null},
+      {"label": "서아", "name": "서아", "aliases": [], "gender": "female", "pronoun": null}
+    ],
+    "locations": ["항구 도시"]
+  },
+  "modern": {
+    "characters": [
+      {"label": "지우", "name": "지우", "aliases": [], "gender": "female", "pronoun": null},
+      {"label": "민재", "name": "민재", "aliases": ["민재 선배"], "gender": "male", "pronoun": null},
+      {"label": "수연", "name": "수연", "aliases": [], "gender": "female", "pronoun": null}
+    ],
+    "locations": ["한강 공원", "모닝 카페"]
+  },
+  "bare": {
+    "characters": [],
+    "locations": ["안개 마을"]
+  }
+}

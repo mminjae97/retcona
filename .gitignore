@@ -46,3 +46,6 @@ ml/ner/data/
 ml/ner/runs/
 ml/qa/data/
 ml/qa/runs/
+
+# --- extraction evaluation (ml/extraction): saved scores ---
+ml/extraction/runs/
