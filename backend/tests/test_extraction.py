@@ -541,6 +541,23 @@ def test_a_state_word_denied_by_the_words_after_it_is_still_a_feature():
         assert list(claim.attributes) == ["features"], text
 
 
+def test_what_did_not_happen_or_was_only_waited_for_is_not_a_state():
+    for text in ("검은 숲은 끝내 재건되지 못했다.", "검은 숲은 재건될 날만 기다렸다.", "검은 숲은 폐허 근처에 있었다."):
+        [claim] = _run(text, {}).claims
+        assert list(claim.attributes) == ["features"], text
+
+
+def test_more_ways_to_say_a_place_fell():
+    for text, state in (
+        ("검은 숲은 허물어졌다.", "허물어졌다"),
+        ("검은 숲은 쓰러졌다.", "쓰러졌다"),
+        ("검은 숲은 폐허가 된 지 오래였다.", "폐허가 된 지 오래였다"),
+        ("검은 숲은 이미 잿더미가 된 뒤였다.", "이미 잿더미가 된 뒤였다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"state": state}, text
+
+
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():
     assert _run("레온은 검은 숲 입구에서 말을 멈췄다.", {"검은 숲의 특징은?": "입구"}).claims == []
 

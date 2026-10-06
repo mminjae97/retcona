@@ -147,7 +147,7 @@ class _Question:
 
 def _location_key(value: str) -> str:
     """What a place's predicate is: a change of state or a feature."""
-    return "state" if rules.is_state_change(value) else "features"
+    return STATE_ATTR_KEYS[0] if rules.is_state_change(value) else GEO_ATTR_KEYS[0]
 
 
 def _clean_value(value: str) -> str:
