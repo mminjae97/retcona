@@ -3,11 +3,11 @@
 Each claim's subject is matched against the novel's characters/locations
 (resolve_subjects, then match_and_register). Characters can share a name
 (two people called 김철수, told apart by their aliases, api/settings.py), so
-the extraction step gives the model each known character with a ref, its
-name and its aliases, and the model answers with the ref of the one it means
-(pipeline/extract_claims.py) — used only where the name it gives is that
-character's name or alias. A claim with no usable ref is matched by name,
-then by alias; a name that fits more than one character is ambiguous and the
+the extraction step knows each known character by a ref, its name and its
+aliases, and a claim carries the ref of the one it's about, from the name or
+alias it found in the text (pipeline/extract_claims.py) — used only where the
+name the claim gives is that character's name or alias. A claim with no
+usable ref is matched by name, then by alias; a name that fits more than one character is ambiguous and the
 claim is left unlinked — neither guessed at nor made a new card. Locations go
 by name (where two share one, the oldest). Embedding similarity (chapter 5)
 isn't used yet.
@@ -118,7 +118,7 @@ def resolve_subjects(
     db: Session, novel_id: uuid.UUID, claims: list[ExtractedClaim], refs: dict[str, uuid.UUID]
 ) -> list[Match]:
     """The card each claim is about, as the novel's cards are now. refs: the
-    refs the extraction prompt gave the characters -> their card ids. A claim
+    refs the extraction gave the characters -> their card ids. A claim
     about a character found is named by the character's name from here on
     (the model may have used an alias)."""
     cards = _Cards(db, novel_id)
