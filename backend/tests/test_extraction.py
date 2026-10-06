@@ -371,6 +371,37 @@ def test_a_number_of_answers_that_does_not_match_the_questions_is_an_error():
         )
 
 
+def test_what_a_sentence_says_of_a_place_is_stated_as_it_says_it():
+    [claim] = _run("검은 숲은 안개가 짙었고, 레온은 그곳을 지났다.", {}).claims
+    assert claim.text == "검은 숲은 안개가 짙었고."
+    [claim] = _run("검은 숲은 한없이 넓다.", {}).claims
+    assert claim.text == "검은 숲은 한없이 넓다."
+
+
+def test_a_noun_ending_in_을_is_not_an_object():
+    [claim] = _run("검은 숲은 마을 북쪽에 펼쳐져 있었다.", {}).claims
+    assert claim.attributes == {"features": "마을 북쪽에 펼쳐져 있었다"}
+    assert _run("검은 숲은 마을을 삼켰다.", {}).claims == []
+
+
+def test_an_object_at_the_end_of_a_clause_is_an_object_too():
+    assert _run("검은 숲은 병사들을, 삼켰다.", {}).claims == []
+
+
+def test_only_a_topic_that_the_particle_ends_is_read():
+    for text in ("검은 숲이지만 안개는 걷혔다.", "멀리 검은 숲이 보였다.", "눈앞에 검은 숲이 나타났다."):
+        assert _run(text, {}).claims == []
+
+
+def test_a_quote_in_another_clause_does_not_take_a_place_s_features_away():
+    [claim] = _run('검은 숲은 안개가 짙었다, 레온은 "가자"고 말했다.', {}).claims
+    assert claim.attributes == {"features": "안개가 짙었다"}
+
+
+def test_a_pronoun_in_what_is_said_is_somebody_else_s_doing():
+    assert _run("검은 숲은 그가 지켜 왔다.", {}).claims == []
+
+
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():
     assert _run("레온은 검은 숲 입구에서 말을 멈췄다.", {"검은 숲의 특징은?": "입구"}).claims == []
 

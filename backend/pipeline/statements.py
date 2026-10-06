@@ -48,3 +48,9 @@ def character_statement(name: str, attribute: str, value: str) -> str:
 def location_statement(name: str, value: str) -> str:
     # A location's features read as what the place is ("검은 숲은 ...이다").
     return f"{name}{topic_particle(name)} {as_statement(value)}"
+
+
+def read_location_statement(name: str, predicate: str) -> str:
+    # What a sentence says of a place, as it says it ("검은 숲은 안개가 짙었고."):
+    # the predicate is already one, so no 이다.
+    return f"{name}{topic_particle(name)} {predicate.rstrip().rstrip('.')}."

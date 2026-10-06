@@ -246,13 +246,24 @@ def features_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> 
 
     Not a description: nothing after it, a line of dialogue, something done to an
     object ("병사들을 맞이했다") or with a person ("레온이 지켰다")."""
-    # The narration has its quoted parts blanked out: a quote after the place is a line it figures in.
-    if _QUOTE.search(sentence.text[mention.end :]):
+    narration = sentence.narration
+    # The topic of the sentence (은/는), with the particle ending there: not the
+    # subject of "벨로스 성이 보였다" (nothing said of the place) or the start of an
+    # ending ("검은 숲이지만").
+    after = narration[mention.end + 1 : mention.end + 2]
+    if narration[mention.end : mention.end + 1] not in ("은", "는") or (after and not after.isspace() and after not in ",，、"):
         return ""
     # What's said up to the end of the clause the topic particle is in.
-    end = next(stop for _, stop in _clauses(sentence.narration) if stop > mention.end)
-    predicate = " ".join(sentence.narration[mention.end + 1 : end].split()).strip(_PREDICATE_EDGE)
-    if not 2 <= len(predicate) <= _FEATURES_MAX_LENGTH or _NOT_A_DESCRIPTION.search(predicate):
+    end = next(stop for _, stop in _clauses(narration) if stop > mention.end)
+    # The narration has its quoted parts blanked out: a quote there is a line the place figures in.
+    if _QUOTE.search(sentence.text[mention.end : end]):
+        return ""
+    predicate = " ".join(narration[mention.end + 1 : end].split()).strip(_PREDICATE_EDGE)
+    if (
+        not 2 <= len(predicate) <= _FEATURES_MAX_LENGTH
+        or _NOT_A_DESCRIPTION.search(_VILLAGE_NOUNS.sub("", predicate))
+        or _PRONOUN_PHRASE.search(predicate)
+    ):
         return ""
     # A character in what's said (not one before the place: "레온이 보기에 검은 숲은 ...").
     if any(other.subject.kind == "character" and mention.end <= other.start < end for other in others):
@@ -263,8 +274,10 @@ def features_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> 
 _FEATURES_MAX_LENGTH = 40
 _PREDICATE_EDGE = " 	\"'“”‘’「」『』.!?…~"
 _QUOTE = re.compile(r"[\"“”‘’「」『』]")
-# An object particle on a word ("병사들을 ...").
-_NOT_A_DESCRIPTION = re.compile(r"(?<=[가-힣])[을를](?=\s)")
+# An object particle on a word ("병사들을 ..."), at the end of the clause too.
+_NOT_A_DESCRIPTION = re.compile(r"(?<=[가-힣])[을를](?=\s|$)")
+# Nouns that end in 을 themselves ("마을 북쪽에"), unless 을/를 follows ("마을을").
+_VILLAGE_NOUNS = re.compile(r"(?:마을|가을|고을)(?![을를])")
 
 
 @dataclass(frozen=True)

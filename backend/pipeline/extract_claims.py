@@ -39,7 +39,7 @@ from models.character import FIXED_ATTR_KEYS, MUTABLE_ATTR_KEYS
 from models.location import GEO_ATTR_KEYS
 from pipeline import extraction_rules as rules
 from pipeline.sentences import Sentence, split_sentences
-from pipeline.statements import character_statement, location_statement
+from pipeline.statements import character_statement, read_location_statement
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +292,7 @@ def extract_claims(
         value = _clean_value(next(answers) if question.given is None else question.given)
         if question.attribute is None:
             key, valid = "features", len(value) >= 2
-            statement = location_statement(question.who, value)
+            statement = read_location_statement(question.who, value)
         else:
             value = rules.value_of(question.attribute, value, question.clause)
             # The context can hold the sentences before the clause: an answer from
