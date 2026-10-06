@@ -18,7 +18,7 @@ CHARACTERS = [
 LOCATIONS = ["검은 숲"]
 
 
-def _run(text, answers=None, entities=None):
+def _run(text, answers=None, entities=None, characters=None):
     """extract_claims with the models stood in for: answers maps a question to
     its answer, entities a sentence's narration (stripped) to its NamedEntitys."""
     answers = answers or {}
@@ -30,7 +30,7 @@ def _run(text, answers=None, entities=None):
     def answer(questions):
         return [answers.get(question, "") for question, _ in questions]
 
-    return extract_claims(uuid.uuid4(), text, CHARACTERS, LOCATIONS, recognize=recognize, answer=answer)
+    return extract_claims(uuid.uuid4(), text, characters or CHARACTERS, LOCATIONS, recognize=recognize, answer=answer)
 
 
 # --- sentences ---------------------------------------------------------------
@@ -316,3 +316,71 @@ def test_a_place_the_sentence_is_about_gets_its_features():
 
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():
     assert _run("레온은 검은 숲 입구에서 말을 멈췄다.", {"검은 숲의 특징은?": "입구"}).claims == []
+
+
+# --- pronouns and gender ---------------------------------------------------------
+
+
+def _pair(**overrides):
+    """레온 and 세린, as the settings give them (a dict per card: gender, pronoun)."""
+    leon = {"ref": "c1", "name": "레온", "aliases": [], "gender": "male", "pronoun": None}
+    serin = {"ref": "c2", "name": "세린", "aliases": [], "gender": "female", "pronoun": None}
+    leon.update(overrides.get("leon", {}))
+    serin.update(overrides.get("serin", {}))
+    return [leon, serin]
+
+
+BOTH_NAMED = "레온은 세린을 보았다. "
+EYES = {"레온의 눈 색깔은?": "붉게", "세린의 눈 색깔은?": "붉게"}
+
+
+def _subjects(text, characters):
+    return [claim.subject for claim in _run(text, EYES, characters=characters).claims]
+
+
+def test_what_a_card_is_narrated_with_is_its_pronoun_or_what_its_gender_says():
+    assert rules.effective_pronoun("male", None) == "he"
+    assert rules.effective_pronoun("female", None) == "she"
+    assert rules.effective_pronoun("unspecified", None) == "any"
+    assert rules.effective_pronoun("female", "he") == "he"
+    assert rules.effective_pronoun("male", "any") == "any"
+    assert rules.effective_pronoun(None, None) == "any"
+
+
+def test_a_pronoun_that_shows_gender_picks_among_two_candidates():
+    assert _subjects(BOTH_NAMED + "그의 눈이 붉게 빛났다.", _pair()) == ["레온"]
+    assert _subjects(BOTH_NAMED + "그녀의 눈이 붉게 빛났다.", _pair()) == ["세린"]
+    assert _subjects(BOTH_NAMED + "그녀는 눈이 붉게 빛났다.", _pair()) == ["세린"]
+
+
+def test_that_man_and_that_girl_show_gender_but_that_fellow_does_not():
+    assert _subjects(BOTH_NAMED + "그 사내의 눈이 붉게 빛났다.", _pair()) == ["레온"]
+    assert _subjects(BOTH_NAMED + "그 소녀의 눈이 붉게 빛났다.", _pair()) == ["세린"]
+    assert _subjects(BOTH_NAMED + "그 녀석의 눈이 붉게 빛났다.", _pair()) == []
+
+
+def test_cards_without_a_gender_answer_to_either_pronoun():
+    unknown = _pair(leon={"gender": "unspecified"}, serin={"gender": "unspecified"})
+    assert _subjects(BOTH_NAMED + "그의 눈이 붉게 빛났다.", unknown) == []
+    # One of them known is enough to tell them apart, the other answers to either.
+    half = _pair(leon={"gender": "unspecified"})
+    assert _subjects(BOTH_NAMED + "그녀의 눈이 붉게 빛났다.", half) == []
+    assert _subjects(BOTH_NAMED + "그의 눈이 붉게 빛났다.", half) == ["레온"]
+
+
+def test_the_pronoun_a_card_is_narrated_with_beats_its_gender():
+    # A woman living as a man, whom the narration calls 그.
+    disguised = _pair(serin={"pronoun": "he"})
+    assert _subjects(BOTH_NAMED + "그의 눈이 붉게 빛났다.", disguised) == []
+    assert _subjects(BOTH_NAMED + "그녀의 눈이 붉게 빛났다.", disguised) == []
+    only_she = _pair(leon={"gender": "male"}, serin={"gender": "female", "pronoun": "she"})
+    assert _subjects(BOTH_NAMED + "그녀의 눈이 붉게 빛났다.", only_she) == ["세린"]
+    # Narrated with either: stays a candidate for both pronouns.
+    either = _pair(serin={"pronoun": "any"})
+    assert _subjects(BOTH_NAMED + "그녀의 눈이 붉게 빛났다.", either) == ["세린"]
+    assert _subjects(BOTH_NAMED + "그의 눈이 붉게 빛났다.", either) == []
+
+
+def test_with_one_candidate_the_pronoun_is_not_held_against_it():
+    assert _subjects("레온은 문을 열었다. 그녀의 눈이 붉게 빛났다.", _pair()) == ["레온"]
+    assert _subjects("세린은 문을 열었다. 그의 눈이 붉게 빛났다.", _pair()) == ["세린"]
