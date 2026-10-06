@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from models.claim_link_choice import ClaimLinkChoice
 from pipeline.entities import comparable_text, normalize_name
 from pipeline.extract_claims import ExtractedClaim
+from pipeline.statements import CHARACTER_ATTR_TOPICS, character_statement
 
 
 def link_key(evidence: str | None, subject: str) -> str:
@@ -72,5 +73,13 @@ def apply_choices(
                 ref = refs_of.get(picked)
                 if ref is not None and ref in claim.candidates:
                     claim.subject, claim.subject_ref, claim.candidates = cards[ref]["name"], ref, []
+                    # Said with the card's name, not "그": where the sentence doesn't
+                    # name it, the judgment reads this instead (pipeline/judges.py).
+                    statements = [
+                        character_statement(claim.subject, key, value)
+                        for key, value in claim.attributes.items()
+                        if key in CHARACTER_ATTR_TOPICS
+                    ]
+                    claim.text = " ".join(statements) or claim.text
         kept.append(claim)
     return kept

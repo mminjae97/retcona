@@ -44,6 +44,8 @@ def test_a_pick_makes_the_claim_one_about_that_card():
     [kept] = apply_choices([claim], {link_key(SENTENCE, ""): SERIN}, REFS, CARDS)
     assert (kept.subject, kept.subject_ref, kept.candidates) == ("세린", "c2", [])
     assert kept.attributes == {"eye_color": "붉게"}
+    # Said with her name now, as the judgment reads it where the sentence doesn't name her.
+    assert kept.text == "세린의 눈 색깔은 붉게이다."
 
 
 def test_not_any_of_them_drops_the_claim():
