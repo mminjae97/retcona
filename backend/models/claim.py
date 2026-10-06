@@ -8,6 +8,12 @@ claims: verification-target claim units extracted from the manuscript by the ext
     (subject_id is then cleared); renaming the card renames it too. None
     (and no card made) where the name fits more than one character
     (pipeline/entities.py).
+  - candidates / link_status: a claim the extraction couldn't tie to one card
+    — a pronoun that fits two characters, a name two characters share — is kept
+    with the cards it could be, [{"kind", "id", "name", "aliases"}], and link_status
+    "pending": the result screen has the author pick one, and then it's judged
+    ("judging" while the worker does). None for every other claim. What the
+    author picked is kept across runs (models/claim_link_choice.py).
   - evidence_text: the manuscript sentence the claim came from (shown as the
     basis on the result screen, 2.4)
   - attributes: what the claim says as setting-card keys (e.g. {"eye_color": ...}),
@@ -51,6 +57,8 @@ class Claim(Base, NovelScopedMixin, TimestampMixin):
     subject_name: Mapped[str | None] = mapped_column(String)
     evidence_text: Mapped[str | None] = mapped_column(Text)
     attributes: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}", nullable=False)
+    candidates: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]", nullable=False)
+    link_status: Mapped[str | None] = mapped_column(String)  # None | pending | judging
 
 
 class ContradictionFlag(Base, NovelScopedMixin, TimestampMixin):

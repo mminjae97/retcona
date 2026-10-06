@@ -3,6 +3,7 @@
 from models.base import Base
 from models import (  # noqa: F401
     character,
+    claim_link_choice,
     claim,
     email_verification,
     episode,
