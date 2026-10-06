@@ -94,6 +94,14 @@ def test_a_name_at_the_very_end_of_a_line_is_not_a_topic():
     assert [m.topic for m in registry.mentions("검은 숲은")] == [True]
 
 
+def test_a_name_is_not_found_at_the_start_of_a_longer_word():
+    registry = rules.Registry([{"ref": "c1", "name": "하늘", "aliases": []}, *CHARACTERS], [])
+    assert registry.mentions("하늘빛 눈동자와 보라색 머리") == []
+    assert registry.mentions("레온하르트는 웃었다") == []
+    for text in ("하늘은 웃었다.", "하늘이었다.", "하늘에게 말했다.", "하늘아, 와."):
+        assert [m.subject.ref for m in registry.mentions(text)] == ["c1"], text
+
+
 def test_a_name_inside_another_word_is_not_a_mention():
     assert rules.Registry(CHARACTERS, LOCATIONS).mentions("아레온 마을") == []
 
@@ -210,6 +218,16 @@ def test_a_pronoun_early_in_the_sentence_counts_even_when_something_comes_before
     answers = {"세린의 나이는?": "스물세 살", "세린의 출신은?": "부산"}
     [claim] = _run(text, answers).claims
     assert (claim.subject, claim.attributes) == ("세린", {"age": "스물세 살", "origin": "부산"})
+
+
+def test_a_demonstrative_is_not_a_pronoun_but_that_fellow_is():
+    before = "레온은 문을 열었다. "
+    assert _run(before + "그 순간 열일곱 살이었다.", {"레온의 나이는?": "열일곱 살"}).claims == []
+    [claim] = _run(before + "그 녀석의 눈이 붉게 빛났다.", {"레온의 눈 색깔은?": "붉게"}).claims
+    assert claim.subject == "레온"
+    [claim] = _run(before + "그 사내는 열일곱 살이었다.", {"레온의 나이는?": "열일곱 살"}).claims
+    assert claim.subject == "레온"
+    assert _run("세린은 그 녀석의 푸른 눈을 보았다.", {"세린의 눈 색깔은?": "푸른"}).claims == []
 
 
 def test_a_pronoun_with_two_candidates_is_left_alone():

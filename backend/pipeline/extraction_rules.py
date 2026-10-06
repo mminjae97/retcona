@@ -50,7 +50,13 @@ def normalize(text: str) -> str:
 # --- Names -----------------------------------------------------------------
 
 _NAME_BEFORE = r"(?<![0-9A-Za-z가-힣])"
-_NAME_AFTER = r"(?![A-Za-z0-9])"
+# What can follow a name: not more of a word ("하늘빛 눈동자" isn't 하늘, nor
+# "레온하르트" 레온), but a particle, an honorific or the copula after it.
+_AFTER_NAME_PARTICLES = (
+    "에게서|에게|에서|한테서|한테|께서|부터|까지|처럼|보다|조차|마저|밖에|으로|이랑|이었|이다|이라|이고|이며|이란|이야|이여|"
+    "은|는|이|가|을|를|의|에|와|과|도|만|뿐|로|랑|께|아|야|여|님|씨|군|양|였"
+)
+_NAME_AFTER = rf"(?![A-Za-z0-9])(?=$|[^가-힣]|(?:{_AFTER_NAME_PARTICLES}))"
 _TOPIC_PARTICLES = "은는이가"
 
 
@@ -278,8 +284,18 @@ def value_of(attribute: Attribute, answer: str, context: str) -> str:
 # --- Whose it is -------------------------------------------------------------
 
 _PRONOUNS = ("그", "그녀", "자신")
+# 그 alone is the demonstrative of "그 순간", "그 해"; it's a pronoun with a
+# particle ("그는", "그의"), or in front of a word for a person ("그 녀석").
+_PERSON_NOUNS = "녀석|놈|사내|남자|여자|소년|소녀|아이|사람|청년|노인|아가씨|여인|남성|여성"
 _PLURAL_PRONOUN = re.compile(r"\s*(?:그들|그녀들)")
-_EARLY_PRONOUN = re.compile(r"(?<![가-힣])(?:그녀|그)(?![가-힣]*들)(?:의|는|은|가|이|를|을|도|만)?(?=\s)")
+_PARTICLES_AFTER_PRONOUN = "의|는|은|가|이|를|을|도|만"
+_EARLY_PRONOUN = re.compile(
+    r"(?<![가-힣])(?:"
+    rf"그녀(?![가-힣]*들)(?:{_PARTICLES_AFTER_PRONOUN})?(?=\s)"
+    rf"|그(?:{_PARTICLES_AFTER_PRONOUN})(?=\s)"
+    rf"|그\s?(?:{_PERSON_NOUNS})(?!들)"
+    r")"
+)
 # How far into a sentence a cue can start and still read as its subject
 # ("붉은 눈동자가 어둠 속에서 번뜩였다"), when the sentence has no name.
 _CUE_FIRST_CHARS = 12
@@ -311,7 +327,11 @@ def owner(sentences: list[Sentence], mentions: list[list[Mention]], index: int, 
         named = [m for m in mentions[index] if m.subject.kind == "character" and m.end == possessor_end]
         if named:
             return named[0].subject
-        if genitive.group(1) in _PRONOUNS:
+        # "그 녀석의 눈": the possessor is the word for a person after a 그.
+        person_after_that = genitive.group(1) in _PERSON_NOUNS.split("|") and re.search(
+            r"(?<![가-힣])그\s?$", before[: genitive.start(1)]
+        )
+        if genitive.group(1) in _PRONOUNS or person_after_that:
             # "세린은 그의 푸른 눈을 보았다": 그의 is somebody the sentence doesn't
             # name, not its subject (자신의 would be).
             if here and genitive.group(1) != "자신":
