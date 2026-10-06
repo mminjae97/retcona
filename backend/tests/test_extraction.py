@@ -480,6 +480,30 @@ def test_a_change_of_state_is_one_even_with_a_noun_before_it():
         assert claim.attributes == {"state": state}
 
 
+def test_the_formal_past_is_not_a_noun_the_place_is():
+    [claim] = _run("검은 숲은 폐허로 변하였다.", {}).claims
+    assert claim.attributes == {"state": "폐허로 변하였다"}
+
+
+def test_a_noun_안_is_not_a_denial():
+    for text, state in (
+        ("검은 숲은 숲 안 전체가 폐허가 되었다.", "숲 안 전체가 폐허가 되었다"),
+        ("검은 숲은 불에 타 버렸다.", "불에 타 버렸다"),
+        ("검은 숲은 황량해졌다.", "황량해졌다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"state": state}
+
+
+def test_what_has_not_happened_is_not_a_change_of_state():
+    for text, feature in (
+        ("검은 숲은 금방 무너질 듯했다.", "금방 무너질 듯했다"),
+        ("검은 숲은 하마터면 무너질 뻔했다.", "하마터면 무너질 뻔했다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"features": feature}
+
+
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():
     assert _run("레온은 검은 숲 입구에서 말을 멈췄다.", {"검은 숲의 특징은?": "입구"}).claims == []
 

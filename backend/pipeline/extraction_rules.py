@@ -283,18 +283,25 @@ def features_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> 
 # the place is) and not be denied, so "오래전 몰락한 왕가의 거처였다", "잿더미 위에
 # 세워진 도시였다", "교역의 중심이 되었다" and "무너지지 않았다" are features.
 _STATE_CHANGE = re.compile(
-    r"폐허|잿더미|무너|붕괴|불타(?!는)|불탔|타버|파괴|멸망|함락|몰락|사라졌|황폐해졌|황폐화|가라앉|침몰|버려졌"
-    r"|재건|복구|복원|되살아|(?:황무지|불모지)가\s?되"
+    r"폐허|잿더미|무너|붕괴|불타(?!는)|불탔|타\s?버렸|파괴|멸망|함락|몰락|사라졌|황폐해졌|황폐화|황량해졌|시들었"
+    r"|가라앉|침몰|버려졌|재건|복구|복원|되살아|(?:황무지|불모지)가\s?되"
 )
-_DENIED = re.compile(r"않|적\s?(?:이\s?)?없|(?<![가-힣])못|(?<![가-힣])안\s|리\s?없|아니")
-_COPULA = re.compile(r"이었|였|이다")
+# Not a change that happened: denied, or only about to / tried to ("무너질 듯했다", "복구를 시도했다").
+_DENIED = re.compile(r"않|적\s?(?:이\s?)?없|리\s?없|아니|듯|뻔|시도|려고|나섰")
+# 안 / 못 before the verb ("안 무너졌다"), not the noun "안" ("성 안 전체가").
+_DENIED_BEFORE_VERB = re.compile(r"(?<![가-힣])[안못]\s")
+# "...이었다", "...였다": a noun the place is; not "변하였다".
+_COPULA = re.compile(r"이었|이다|(?<!하)였")
 
 
 def is_state_change(predicate: str) -> bool:
     words = predicate.split()
     if not words or _DENIED.search(predicate):
         return False
-    scope = words[-1] if _COPULA.search(words[-1]) else " ".join(words[-2:])
+    tail = " ".join(words[-2:])
+    if _DENIED_BEFORE_VERB.search(tail):
+        return False
+    scope = words[-1] if _COPULA.search(words[-1]) else tail
     return bool(_STATE_CHANGE.search(scope))
 
 
