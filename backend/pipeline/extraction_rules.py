@@ -283,16 +283,18 @@ def features_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> 
 # the place is) and not be denied, so "오래전 몰락한 왕가의 거처였다", "잿더미 위에
 # 세워진 도시였다", "교역의 중심이 되었다" and "무너지지 않았다" are features.
 _STATE_CHANGE = re.compile(
-    r"폐허|잿더미|무너|붕괴|불타(?!는)|불탔|타\s?버렸|파괴|멸망|함락|몰락|사라졌|황폐해졌|황폐화|황량해졌|시들었"
-    r"|가라앉|침몰|버려졌|재건|복구|복원|되살아|(?:황무지|불모지)가\s?되"
+    r"폐허|잿더미|무너|붕괴|불타(?!는)|불탔|타\s?버렸|파괴|멸망|함락|몰락|사라졌|없어졌|황폐해졌|황폐화|황량해졌|시들었"
+    r"|전소|소실|가라앉|침몰|버려졌|재건|복구|복원|되살아|(?:황무지|불모지)가\s?되"
 )
-# Not a change that happened: denied, or only about to / tried to ("무너질 듯했다", "복구를 시도했다").
-# Or only likened ("폐허 같았다"), or wished ("재건을 꿈꿨다").
+# Not a change that happened: denied, or only about to / tried to ("무너질 듯했다"),
+# or only likened ("폐허 같았다"), or wished ("재건을 꿈꿨다"). Looked for from the word
+# before the state word on, so an earlier clause ("막으려 했으나 결국 함락되었다")
+# doesn't veto it.
 _DENIED = re.compile(
-    r"않|적\s?(?:이\s?)?없|리\s?없|아니|듯|뻔|시도|려고|려\s?했|나섰|꿈|바랐|길\s?바|같[았은]|다름없|처럼|마치"
+    r"않|적\s?(?:이\s?)?없|리\s?없|아니|듯|뻔|(?<![가-힣])시도|려고|려\s?했|나섰|꿈|바랐|길\s?바|같았|다름없|처럼|마치"
 )
 # A verb that only carries the one before it ("폐허가 되어 버렸다").
-_AUXILIARY = re.compile(r"^(?:버렸|버린|있었|있다|있는|두었|놓았|놓였)")
+_AUXILIARY = re.compile(r"^(?:버렸|버린|있었|있다|있는|두었|놓았|놓였|말았)")
 # 안 / 못 before the verb ("안 무너졌다"), not the noun "안" ("성 안 전체가").
 _DENIED_BEFORE_VERB = re.compile(r"(?<![가-힣])[안못]\s")
 # "...이었다", "...였다": a noun the place is; not "변하였다".
@@ -301,14 +303,23 @@ _COPULA = re.compile(r"이었|이다|(?<!하)였")
 
 def is_state_change(predicate: str) -> bool:
     words = predicate.split()
-    if not words or _DENIED.search(predicate):
+    if not words:
         return False
     # The last two words, three where the last only carries the one before ("폐허가 되어 버렸다").
-    tail = " ".join(words[-3:] if len(words) > 2 and _AUXILIARY.match(words[-1]) else words[-2:])
-    if _DENIED_BEFORE_VERB.search(" ".join(words[-2:])):
+    first = len(words) - 1 if _COPULA.search(words[-1]) else max(
+        len(words) - (3 if len(words) > 2 and _AUXILIARY.match(words[-1]) else 2), 0
+    )
+    scope = " ".join(words[first:])
+    found = _STATE_CHANGE.search(scope)
+    if found is None:
         return False
-    scope = words[-1] if _COPULA.search(words[-1]) else tail
-    return bool(_STATE_CHANGE.search(scope))
+    # The word the state word is in, and the word before it, on to the end.
+    offset = len(" ".join(words[:first])) + (1 if first else 0) + found.start()
+    word = 0
+    while len(" ".join(words[: word + 1])) <= offset:
+        word += 1
+    after = " ".join(words[max(word - 1, 0) :])
+    return not (_DENIED.search(after) or _DENIED_BEFORE_VERB.search(after))
 
 
 _FEATURES_MAX_LENGTH = 40

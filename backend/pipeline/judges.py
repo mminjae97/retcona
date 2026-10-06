@@ -184,6 +184,10 @@ def judge_behavior(claims: list[ExtractedClaim], context_bundle: ContextBundle) 
 def judge_location(claims: list[ExtractedClaim], context_bundle: ContextBundle) -> list[Flag]:
     """A location's geographic features against its card, by NLI."""
     # TODO (stage 4): rule-based distance calculation, once relations carry distances
+    # TODO (stage 4): a later episode's features against the place's latest state
+    # (location_state_history, written by pipeline/merge.py): a city described again
+    # after it fell. Only features are compared with the card here; a "state" claim
+    # (a change the story makes) never is.
     return _judge(_pairs(claims, context_bundle, "location", GEO_ATTR_KEYS), "location")
 
 

@@ -523,6 +523,24 @@ def test_a_likeness_or_a_wish_is_not_a_change_of_state():
         assert claim.attributes == {"features": feature}
 
 
+def test_an_earlier_clause_does_not_veto_a_change_of_state():
+    for text, state in (
+        ("검은 숲은 병사들이 막으려 했으나 결국 함락되었다.", "병사들이 막으려 했으나 결국 함락되었다"),
+        ("검은 숲은 꿈꾸던 땅이 폐허가 되었다.", "꿈꾸던 땅이 폐허가 되었다"),
+        ("검은 숲은 결국 폐허가 되고 말았다.", "결국 폐허가 되고 말았다"),
+        ("검은 숲은 불에 타 없어졌다.", "불에 타 없어졌다"),
+        ("검은 숲은 화재로 전소되었다.", "화재로 전소되었다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"state": state}, text
+
+
+def test_a_state_word_denied_by_the_words_after_it_is_still_a_feature():
+    for text in ("검은 숲은 결코 무너지지 않았다.", "검은 숲은 마치 폐허 같았다.", "검은 숲은 금방 무너질 듯했다."):
+        [claim] = _run(text, {}).claims
+        assert list(claim.attributes) == ["features"], text
+
+
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():
     assert _run("레온은 검은 숲 입구에서 말을 멈췄다.", {"검은 숲의 특징은?": "입구"}).claims == []
 
