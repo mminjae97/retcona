@@ -496,3 +496,23 @@ def test_a_color_is_finished_from_the_clause_not_from_the_sentence_before():
         answer=answer,
     )
     assert [c.attributes.get("eye_color") for c in extraction.claims if "eye_color" in c.attributes] == ["붉게"]
+
+
+def test_a_value_the_model_takes_from_the_sentence_before_is_dropped():
+    extraction = extract_claims(
+        uuid.uuid4(),
+        "레온은 푸른 망토를 둘렀다. 그의 눈이 붉게 빛났다.",
+        CHARACTERS,
+        LOCATIONS,
+        recognize=lambda texts: [[] for _ in texts],
+        answer=lambda questions: ["푸른" for _ in questions],
+    )
+    assert not [c for c in extraction.claims if "eye_color" in c.attributes]
+
+
+def test_the_pronoun_that_fits_the_character_is_replaced_even_after_one_that_does_not():
+    assert (
+        rules.name_for_pronoun("그녀는 웃었고 그의 눈이 붉게 빛났다", "레온", "he")
+        == "그녀는 웃었고 레온의 눈이 붉게 빛났다"
+    )
+    assert rules.name_for_pronoun("그는 그녀의 눈을 보았다", "세린", "she") == "그는 세린의 눈을 보았다"

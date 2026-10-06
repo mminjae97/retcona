@@ -285,7 +285,9 @@ def extract_claims(
             statement = location_statement(question.who, value)
         else:
             value = rules.value_of(question.attribute, value, question.clause)
-            key, valid = question.attribute.key, bool(value)
+            # The context can hold the sentences before the clause: an answer from
+            # them (a cloak's color, an earlier age) isn't the clause's.
+            key, valid = question.attribute.key, bool(value) and value in question.clause
             statement = character_statement(question.who, key, value)
         if not valid:
             continue
