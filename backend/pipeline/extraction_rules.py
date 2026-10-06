@@ -325,12 +325,54 @@ def value_of(attribute: Attribute, answer: str, context: str) -> str:
     return value
 
 
+# A word for a person, after a 그 ("그 녀석"): a pronoun like 그 and 그녀.
+_PERSON_NOUNS = "녀석|놈|사내|남자|여자|소년|소녀|아이|사람|청년|노인|아가씨|여인|남성|여성"
+
+# --- Asking about a pronoun -----------------------------------------------------
+
+_PRONOUN_PHRASE = re.compile(
+    r"(?<![가-힣])(?:그녀(?!석)(?P<she>)|그(?=(?:의|는|은|가|이|를|을|도|만)(?:\s|$))(?P<he>)|그\s?(?:"
+    + _PERSON_NOUNS
+    + r")(?P<noun>))"
+    r"(?P<particle>의|는|은|가|이|를|을|도|만)?(?=\s|$)"
+)
+_ALTERNATING_PARTICLES = {
+    "은": ("은", "는"),
+    "는": ("은", "는"),
+    "이": ("이", "가"),
+    "가": ("이", "가"),
+    "을": ("을", "를"),
+    "를": ("을", "를"),
+}
+
+
+def with_particle(name: str, particle: str) -> str:
+    """The name and the particle, in the form its last syllable takes (레온은,
+    세린은, 엘리제는). A name that doesn't end in Hangul takes the consonant form."""
+    forms = _ALTERNATING_PARTICLES.get(particle)
+    if forms is None:
+        return name + particle
+    last = name[-1:]
+    vowel_final = "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 == 0
+    return name + forms[1 if vowel_final else 0]
+
+
+def name_for_pronoun(clause: str, name: str) -> str:
+    """The clause with the name where its first pronoun is ("그녀의 은빛 머리카락이"
+    -> "세린의 은빛 머리카락이"; 그, 그녀, 그 녀석 and the like): the QA model
+    answers a question about a person that its context names, and not about one
+    it only refers to."""
+    found = _PRONOUN_PHRASE.search(clause)
+    if found is None:
+        return clause
+    return clause[: found.start()] + with_particle(name, found.group("particle") or "") + clause[found.end() :]
+
+
 # --- Whose it is -------------------------------------------------------------
 
 _PRONOUNS = ("그", "그녀", "자신")
 # 그 alone is the demonstrative of "그 순간", "그 해"; it's a pronoun with a
 # particle ("그는", "그의"), or in front of a word for a person ("그 녀석").
-_PERSON_NOUNS = "녀석|놈|사내|남자|여자|소년|소녀|아이|사람|청년|노인|아가씨|여인|남성|여성"
 _PLURAL_PRONOUN = re.compile(r"\s*(?:그들|그녀들)")
 _PARTICLES_AFTER_PRONOUN = "의|는|은|가|이|를|을|도|만"
 _EARLY_PRONOUN = re.compile(

@@ -179,6 +179,34 @@ def _mentions(sentences: list[Sentence], registry: rules.Registry, recognize: Re
     return mentions
 
 
+def _question_parts(
+    sentences: list[Sentence],
+    mentions: list[list[rules.Mention]],
+    index: int,
+    owner: rules.Subject,
+    clause: tuple[int, int],
+    clause_text: str,
+) -> tuple[str, str]:
+    """(who the question names, the context it's asked over).
+
+    The QA model answers "no answer" to a question about a person its context
+    doesn't mention (ml/extraction/RESULTS.md round 2). So the question names the
+    owner as the clause writes it ("철수형", "공주") where the clause does; and
+    where the clause only refers to it ("그녀의 은빛 머리카락이"), puts its
+    name in for the pronoun and reads it after the nearest of the
+    sentences before that names it."""
+    narration = sentences[index].narration
+    for mention in mentions[index]:
+        if mention.subject.key == owner.key and clause[0] <= mention.start and mention.end <= clause[1]:
+            return narration[mention.start : mention.end], clause_text
+    context = rules.name_for_pronoun(clause_text, owner.name)
+    for back in range(1, rules.CONTEXT_SENTENCES + 1):
+        earlier = index - back
+        if earlier >= 0 and any(mention.subject.key == owner.key for mention in mentions[earlier]):
+            return owner.name, " ".join(sentences[earlier].narration.split()) + " " + context
+    return owner.name, context
+
+
 def _questions(sentences: list[Sentence], mentions: list[list[rules.Mention]]) -> list[_Question]:
     questions: list[_Question] = []
     seen: set[tuple] = set()
@@ -194,9 +222,12 @@ def _questions(sentences: list[Sentence], mentions: list[list[rules.Mention]]) -
                 subject, candidates, who = None, owner.subjects, "그녀" if owner.kind == "she" else "그"
             else:
                 subject, candidates, who = owner, (), owner.name
+            clause_text = " ".join(narration[hit.clause[0] : hit.clause[1]].split())
+            asked, context = who, clause_text
+            if subject is not None:
+                asked, context = _question_parts(sentences, mentions, i, subject, hit.clause, clause_text)
             question = _Question(
-                i, subject, candidates, who, hit.attribute, f"{who}의 {hit.attribute.label}?",
-                " ".join(narration[hit.clause[0] : hit.clause[1]].split()),
+                i, subject, candidates, who, hit.attribute, f"{asked}의 {hit.attribute.label}?", context
             )  # fmt: skip
             key = (i, question.about, hit.attribute.key)
             if key in seen:
