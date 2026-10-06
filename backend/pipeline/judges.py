@@ -41,22 +41,11 @@ from models.location import GEO_ATTR_KEYS
 from pipeline.context_bundle import Card, ContextBundle
 from pipeline.entities import normalize_name
 from pipeline.extract_claims import ExtractedClaim
+from pipeline.statements import character_statement, location_statement
 
 # A pair the model finds this likely to contradict is flagged. Past one half,
 # contradiction is also the most likely of the three labels.
 CONTRADICTION_THRESHOLD = 0.5
-
-# What each character key is called in the premise sentence, with its topic
-# particle. A location's features read as what the place is ("검은 숲은 ...이다").
-_CHARACTER_ATTR_TOPICS = {
-    "age": "나이는",
-    "eye_color": "눈 색깔은",
-    "hair_color": "머리색은",
-    "height": "신장은",
-    "scars": "흉터는",
-    "origin": "출신은",
-}
-
 
 @dataclass(frozen=True)
 class Flag:
@@ -79,35 +68,10 @@ class _Pair:
     evidence: str
 
 
-# Syllables before a final 다 that make it a predicate ending ("습했다",
-# "이다", "있다", "빛난다") rather than the end of a noun ("바다", "캐나다").
-_PREDICATE_STEMS = set("이하한난있없는된진졌렸웠났랐갔왔섰쳤썼았었였했됐")
-
-
-def _as_statement(value: str) -> str:
-    # "푸른색" -> "푸른색이다."; a value that's already a sentence (ends in a
-    # predicate or punctuation) is kept, with a period.
-    value = value.rstrip()
-    if value.endswith((".", "!", "?", "…")):
-        return value
-    if value.endswith("다") and value[-2:-1] in _PREDICATE_STEMS:
-        return f"{value}."
-    return f"{value}이다."
-
-
-def _topic_particle(word: str) -> str:
-    # 은 after a final consonant, 는 after a vowel; 은 when the word doesn't
-    # end in a Hangul syllable (digits, Latin).
-    last = word.rstrip()[-1:]
-    if "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 == 0:
-        return "는"
-    return "은"
-
-
 def _premise(card: Card, attribute: str, value: str) -> str:
     if card.kind == "character":
-        return f"{card.name}의 {_CHARACTER_ATTR_TOPICS[attribute]} {_as_statement(value)}"
-    return f"{card.name}{_topic_particle(card.name)} {_as_statement(value)}"
+        return character_statement(card.name, attribute, value)
+    return location_statement(card.name, value)
 
 
 def repeats(value: str, setting: str) -> bool:

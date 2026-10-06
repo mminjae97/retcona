@@ -10,10 +10,11 @@ queued -> running -> succeeded | failed. Steps:
 1. Claim the run: queued -> running, in one conditional UPDATE, so a job
    delivered twice runs once (10.4.4).
 2. Read the episode and the novel's known characters (each with a ref for
-   the model to answer with, its name and aliases) and location names, in a
+   the claim to carry, its name and aliases) and location names, in a
    short transaction.
-3. Call the model with no transaction open: it can take a while, and holding
-   the novel's row lock through it would block the author's saves.
+3. Extract the claims (the NER and QA models, no LLM: pipeline/extract_claims.py)
+   with no transaction open: it can take a while, and holding the novel's row
+   lock through it would block the author's saves.
 4. Find the card each claim is about (pipeline/entities.py), read those
    setting cards (the context bundle), and judge the claims against them —
    NLI, also with no transaction open.
@@ -49,7 +50,7 @@ from models.validation_run import ValidationRun
 from pipeline.context_bundle import get_context_bundle
 from pipeline.dismissals import dismissal_key, dismissed_keys
 from pipeline.entities import Match, match_and_register, resolve_subjects
-from pipeline.extract_claims import Extraction, ExtractionError, extract_claims
+from pipeline.extract_claims import Extraction, extract_claims
 from pipeline.judges import Flag, judge_appearance, judge_location
 from pipeline.merge import apply_new_information, merge_and_dedupe
 
@@ -96,7 +97,7 @@ def _lock_novel(db: Session, novel_id: uuid.UUID) -> None:
 class _Input(NamedTuple):
     content: str
     content_updated_at: datetime
-    # {"ref", "name", "aliases"} each, for the extraction prompt
+    # {"ref", "name", "aliases"} each, for the extraction
     characters: list[dict]
     # the prompt's refs -> card ids
     refs: dict[str, uuid.UUID]
@@ -269,12 +270,9 @@ def validate_episode(novel_id: uuid.UUID, run_id: uuid.UUID) -> None:
         run_input = _read_input(novel_id, episode_id)
         try:
             extraction = extract_claims(novel_id, run_input.content, run_input.characters, run_input.locations)
-        except ExtractionError as exc:
-            logger.warning("Validation run %s: couldn't read the model's response (%s)", run_id, exc)
-            raise RunFailed("bad_llm_response") from exc
-        except Exception as exc:
-            logger.exception("Validation run %s: the model call failed", run_id)
-            raise RunFailed("llm_failed") from exc
+        except InferenceError as exc:
+            logger.exception("Validation run %s: the NER/QA model failed", run_id)
+            raise RunFailed("inference_failed") from exc
         matches, flags = _judge(novel_id, episode_id, extraction, run_input.refs)
         _store(
             novel_id,

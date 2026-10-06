@@ -1,31 +1,45 @@
-"""Extract verification-target claims from the manuscript (design doc 7.1, first step).
+"""Extract verification-target claims from the manuscript (design doc 7.1.1, first step).
 
 Input: novel_id, manuscript text, the novel's known characters (a ref, the
   name and aliases of each) and location names
-Output: list of ExtractedClaims (claim_type: appearance | behavior (OOC) | location | spacetime)
+Output: ExtractedClaims (claim_type: appearance | location)
 
-The model is asked to give, for a claim about a known character, its ref
-(subject_ref) — characters can share a name — and its listed name, also when
-the manuscript calls it by an alias or another name; a known location by its
-listed name. Entity matching (pipeline/entities.py, 7.4) goes by the ref, and
-by name or alias where there's none.
+No LLM (7.1.1): the manuscript is split into sentences (pipeline/sentences.py);
+the characters and places each names are found by their registered names and
+aliases and by the NER model, for names not registered yet; the sentences with
+a cue for a card attribute ("눈동자", "머리카락", "살", ...) are asked, by the
+extractive QA model, for its value ("레온의 눈 색깔은?" -> "푸른색");
+pronouns and dropped subjects are linked by rules, only where there's one
+candidate (pipeline/extraction_rules.py). A claim about a known character
+carries its ref (subject_ref) — characters can share a name — and the
+registered name as its subject; entity matching (pipeline/entities.py, 7.4)
+goes by the ref, and by name or alias where there's none.
 
-What the model returns is checked here, item by item: a malformed claim is
-dropped (and counted in the log) rather than failing the whole episode, but a
-response that isn't the expected JSON at all is an ExtractionError.
+Behavior (OOC) and spacetime claims aren't extracted yet: nothing judges them
+until their stages (7.2) are built, and what they need from the extraction
+follows from the judgment.
+
+What the models see is narration only: a line of dialogue is what a character
+says, not the narrator stating a fact about a card.
 """
 
-import json
 import logging
+import re
+import unicodedata
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from ai import llm
+from ai import nli_rerank
+from infra.span_inference import NamedEntity
 from models.character import FIXED_ATTR_KEYS, MUTABLE_ATTR_KEYS
 from models.location import GEO_ATTR_KEYS
+from pipeline import extraction_rules as rules
+from pipeline.sentences import Sentence, split_sentences
+from pipeline.statements import character_statement, location_statement
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +53,6 @@ _ATTR_KEYS = {
     "character": set(FIXED_ATTR_KEYS + MUTABLE_ATTR_KEYS),
     "location": set(GEO_ATTR_KEYS),
 }
-
-
-class ExtractionError(Exception):
-    """The model's response couldn't be read as an extraction result."""
 
 
 class ExtractedClaim(BaseModel):
@@ -95,43 +105,146 @@ class Extraction:
     dropped: int = 0
 
 
-def _json_object(raw: str) -> dict:
-    # Models sometimes wrap the object in a code fence or a sentence; take the
-    # outermost {...}.
-    start, end = raw.find("{"), raw.rfind("}")
-    if start == -1 or end < start:
-        raise ExtractionError("no JSON object in the response")
-    try:
-        value = json.loads(raw[start : end + 1])
-    except json.JSONDecodeError as exc:
-        raise ExtractionError(f"invalid JSON: {exc}") from exc
-    if not isinstance(value, dict):
-        raise ExtractionError("the response is not a JSON object")
-    return value
+Recognize = Callable[[list[str]], list[list[NamedEntity]]]
+Answer = Callable[[list[tuple[str, str]]], list[str]]
+
+# Around an answer: quotes and sentence punctuation the span can run into.
+_VALUE_EDGE = " \t\"'“”‘’「」『』.,!?…~"
+_PERSON, _PLACE = "PS", "LC"
 
 
-def parse_extraction(raw: str) -> Extraction:
-    items = _json_object(raw).get("claims", [])
-    if not isinstance(items, list):
-        raise ExtractionError('"claims" is not a list')
-    extraction = Extraction()
-    for item in items:
-        try:
-            extraction.claims.append(ExtractedClaim.model_validate(item))
-        except ValidationError:
-            extraction.dropped += 1
-    return extraction
+@dataclass(frozen=True)
+class _Question:
+    sentence: int
+    subject: rules.Subject
+    attribute: rules.Attribute | None  # None: a location's features
+    question: str
+    context: str
+
+
+def _clean_value(value: str) -> str:
+    return " ".join(value.strip(_VALUE_EDGE).split())
+
+
+def _mentions(sentences: list[Sentence], registry: rules.Registry, recognize: Recognize) -> list[list[rules.Mention]]:
+    """Each sentence's mentions: the registered names and aliases, and the
+    names the NER model finds that aren't registered."""
+    registered = [registry.mentions(sentence.narration) for sentence in sentences]
+    indexes = [i for i, sentence in enumerate(sentences) if sentence.has_narration]
+    entities = recognize([sentences[i].narration for i in indexes]) if indexes else []
+    named = {i: [e for e in found if e.kind in (_PERSON, _PLACE)] for i, found in zip(indexes, entities, strict=True)}
+    # Names seen as they are, for taking particles off the ones that aren't.
+    known = registry.strings | {
+        rules.normalize(sentences[i].narration[e.start : e.end]) for i, found in named.items() for e in found
+    }
+    mentions = []
+    for i, sentence in enumerate(sentences):
+        found = list(registered[i])
+        for entity in named.get(i, []):
+            if any(entity.start < m.end and m.start < entity.end for m in registered[i]):
+                continue
+            surface = sentence.narration[entity.start : entity.end]
+            stem, particle = rules.split_particle(surface, known)
+            name = " ".join(unicodedata.normalize("NFC", stem).split())
+            if not 2 <= len(name) <= NAME_MAX_LENGTH or re.search(r"\d", name):
+                continue
+            subject = registry.resolve(name) or rules.Subject(
+                "character" if entity.kind == _PERSON else "location", name
+            )
+            found.append(
+                rules.Mention(
+                    entity.start, entity.start + len(stem), subject, particle in "은는이가" and bool(particle)
+                )
+            )
+        mentions.append(sorted(found, key=lambda mention: mention.start))
+    return mentions
+
+
+def _questions(sentences: list[Sentence], mentions: list[list[rules.Mention]]) -> list[_Question]:
+    questions: list[_Question] = []
+    seen: set[tuple] = set()
+    for i, sentence in enumerate(sentences):
+        if not sentence.has_narration:
+            continue
+        narration = sentence.narration
+        for hit in rules.cue_hits(narration):
+            subject = rules.owner(sentences, mentions, i, hit)
+            key = (i, subject.key if subject else None, hit.attribute.key)
+            if subject is None or key in seen:
+                continue
+            seen.add(key)
+            context = " ".join(narration[hit.clause[0] : hit.clause[1]].split())
+            questions.append(_Question(i, subject, hit.attribute, f"{subject.name}의 {hit.attribute.label}?", context))
+        for mention in mentions[i]:
+            key = (i, mention.subject.key, "features")
+            # A place the sentence is about, not one a character is said to be at.
+            if mention.subject.kind != "location" or not mention.topic or key in seen:
+                continue
+            seen.add(key)
+            question = f"{mention.subject.name}의 {rules.LOCATION_QUESTION}?"
+            questions.append(_Question(i, mention.subject, None, question, " ".join(narration.split())))
+    return questions
 
 
 def extract_claims(
-    novel_id: uuid.UUID, manuscript: str, known_characters: list[dict], known_locations: list[str]
+    novel_id: uuid.UUID,
+    manuscript: str,
+    known_characters: list[dict],
+    known_locations: list[str],
+    *,
+    recognize: Recognize | None = None,
+    answer: Answer | None = None,
 ) -> Extraction:
-    extraction = parse_extraction(llm.extract_claims(manuscript, known_characters, known_locations))
+    """recognize / answer: the NER and QA models (ai/nli_rerank.py, which
+    raises InferenceError where they can't run); tests give their own."""
+    recognize = recognize or nli_rerank.recognize_entities
+    answer = answer or nli_rerank.answer_questions
+    sentences = split_sentences(unicodedata.normalize("NFC", manuscript))
+    registry = rules.Registry(known_characters, known_locations)
+    mentions = _mentions(sentences, registry, recognize)
+    questions = _questions(sentences, mentions)
+    answers = answer([(q.question, q.context) for q in questions]) if questions else []
+
+    # One claim per sentence and subject, with all it says about the subject.
+    grouped: dict[tuple, tuple[_Question, dict[str, str], list[str]]] = {}
+    for question, raw in zip(questions, answers, strict=True):
+        value = _clean_value(raw)
+        if question.attribute is None:
+            key, valid = "features", len(value) >= 2
+            statement = location_statement(question.subject.name, value)
+        else:
+            value = rules.value_of(question.attribute, value, question.context)
+            key, valid = question.attribute.key, bool(value)
+            statement = character_statement(question.subject.name, key, value)
+        if not valid:
+            continue
+        _, attributes, statements = grouped.setdefault((question.sentence, question.subject.key), (question, {}, []))
+        attributes[key] = value
+        statements.append(statement)
+
+    extraction = Extraction()
+    for question, attributes, statements in grouped.values():
+        subject = question.subject
+        try:
+            extraction.claims.append(
+                ExtractedClaim(
+                    claim_type="appearance" if subject.kind == "character" else "location",
+                    subject_kind=subject.kind,
+                    subject=subject.name,
+                    subject_ref=subject.ref,
+                    text=" ".join(statements),
+                    evidence=sentences[question.sentence].text,
+                    attributes=attributes,
+                )
+            )
+        except ValidationError:
+            extraction.dropped += 1
+    logger.info(
+        "Novel %s: %d sentence(s), %d question(s), %d claim(s)",
+        novel_id, len(sentences), len(questions), len(extraction.claims),
+    )  # fmt: skip
     if extraction.dropped:
         logger.warning(
-            "Novel %s: dropped %d malformed claim(s) from the extraction, kept %d",
-            novel_id,
-            extraction.dropped,
-            len(extraction.claims),
+            "Novel %s: dropped %d malformed claim(s), kept %d", novel_id, extraction.dropped, len(extraction.claims)
         )
     return extraction
