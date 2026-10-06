@@ -77,6 +77,12 @@ directory falls back to a weaker public checkpoint (with a warning in its log).
       both where the service lists its sources: KorNLI (Ham et al., 2020,
       kakaobrain/kor-nlu-datasets) and KLUE (Park et al., 2021,
       KLUE-benchmark/KLUE).
+- [ ] The NER and QA models of claim extraction (`ml/ner/runs/klue`,
+      `ml/qa/runs/klue`) are kept on the training machine too: host them with
+      the NLI model and set `NER_MODEL` / `QA_MODEL` in production. They have no
+      public fallback, so a worker without them fails extraction (alert on it).
+- [ ] Attribution: their training data (KLUE-NER, KLUE-MRC) is CC BY-SA 4.0;
+      KLUE (Park et al., 2021) is already credited above.
 
 **Check:** a validation run on the production worker logs no fallback
 warning, and the flags match what the same episode gives locally.
