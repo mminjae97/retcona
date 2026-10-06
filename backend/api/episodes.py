@@ -859,7 +859,8 @@ def pick_pending_link(
         select(Claim).where(Claim.id == claim_id, Claim.novel_id == novel_id, Claim.episode_id == episode_id)
     )
     if claim is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Claim not found")
+        # A new run replaced it (or it was handled and dropped): not a claim that was never there.
+        raise HTTPException(status.HTTP_409_CONFLICT, LINK_HANDLED)
     _put_back_stale_picks(db, novel_id, episode_id)
     db.refresh(claim)
     if claim.link_status != "pending":
