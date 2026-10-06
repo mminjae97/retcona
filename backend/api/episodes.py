@@ -7,6 +7,9 @@ What the latest run found contradicting the settings is listed by GET .../flags,
 and the author acts on each flag with PATCH .../flags/{id} (2.4), or has one
 judged again after supplementing its setting, POST .../flags/{id}/revalidate
 (7.5) — a job for the CPU worker too.
+Claims the extraction couldn't tie to one card wait in GET .../pending-links
+for the author to pick one, POST .../pending-links/{id} (7.1.1); the worker
+judges the pick as well.
 Editing a `submitted` episode's content flips it back to `draft` (2.2),
 leaving existing validation results in place.
 """
@@ -32,6 +35,7 @@ from models.flag_revalidation import FlagRevalidation
 from models.location import Location
 from models.user import User
 from models.validation_run import ValidationRun
+from pipeline.claim_links import link_key, record_choice
 from pipeline.dismissals import dismissal_key, record_dismissal, remove_dismissal
 from pipeline.entities import normalize_name
 from pipeline.judges import repeats
@@ -712,3 +716,194 @@ def revalidate_flag(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Revalidation is unavailable right now")
     db.refresh(revalidations[0])
     return _flag_public(flag, claim, revalidations[0])
+
+
+# --- claims waiting for the author to pick a card (7.1.1) ---------------------
+
+# 409 details, as codes the result screen turns into messages.
+LINK_HANDLED = "link_handled"  # the claim isn't waiting for a pick (picked already, or a new run replaced it)
+LINK_NOT_A_CANDIDATE = "link_not_a_candidate"  # the card isn't one the claim could be
+LINK_CARD_MISSING = "link_card_missing"  # the card was deleted
+LINK_RUN_ACTIVE = "link_run_active"  # a run is validating the episode and would replace the claim
+# A pick still queued or judging this long after it was made is taken to be lost
+# (no worker running), and the claim goes back to pending, as an abandoned run
+# fails (RUN_ABANDON_AFTER).
+LINK_ABANDON_AFTER = RUN_ABANDON_AFTER
+_LINK_ACTIVE = ("queued", "judging")
+
+
+class PendingCandidate(BaseModel):
+    id: uuid.UUID
+    kind: str  # character
+    name: str
+    aliases: list[str]  # tell characters with one name apart
+
+
+class PendingLinkPublic(BaseModel):
+    id: uuid.UUID  # the claim
+    status: Literal["pending", "judging"]  # judging: picked, being judged
+    evidence_text: str | None  # the manuscript sentence
+    # What it says, as setting-card keys: {"eye_color": "붉게"}
+    attributes: dict[str, str]
+    # The name the sentence gave where it's one several characters share;
+    # None for a bare pronoun
+    subject_name: str | None
+    candidates: list[PendingCandidate]  # the ones that still exist
+    picked_id: uuid.UUID | None  # judging only
+
+
+class LinkPick(BaseModel):
+    # The character picked; None: the sentence isn't about any of them
+    subject_id: uuid.UUID | None
+
+
+class LinkPickResult(BaseModel):
+    id: uuid.UUID
+    outcome: Literal["judging", "skipped"]
+
+
+def _put_back_stale_picks(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID) -> None:
+    db.execute(
+        update(Claim)
+        .where(
+            Claim.novel_id == novel_id,
+            Claim.episode_id == episode_id,
+            Claim.link_status.in_(_LINK_ACTIVE),
+            Claim.link_requested_at < datetime.now(UTC) - LINK_ABANDON_AFTER,
+        )
+        .values(link_status="pending", subject_id=None, link_requested_at=None)
+    )
+
+
+def _pending_link_public(claim: Claim, alive: dict[uuid.UUID, Character]) -> PendingLinkPublic:
+    candidates = []
+    for option in claim.candidates or []:
+        try:
+            card = alive.get(uuid.UUID(str(option.get("id"))))
+        except ValueError:
+            continue
+        if card is not None:
+            candidates.append(
+                PendingCandidate(
+                    id=card.id,
+                    kind="character",
+                    name=card.name,
+                    aliases=[str(alias) for alias in card.aliases or []],
+                )
+            )
+    judging = claim.link_status in _LINK_ACTIVE
+    return PendingLinkPublic(
+        id=claim.id,
+        status="judging" if judging else "pending",
+        evidence_text=claim.evidence_text,
+        attributes={str(key): str(value) for key, value in (claim.attributes or {}).items()},
+        # A claim being judged already has the picked card's name.
+        subject_name=None if judging else claim.subject_name,
+        candidates=candidates,
+        picked_id=claim.subject_id if judging else None,
+    )
+
+
+@router.get("/{novel_id}/episodes/{episode_id}/pending-links", response_model=list[PendingLinkPublic])
+def list_pending_links(
+    novel_id: uuid.UUID,
+    episode_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[PendingLinkPublic]:
+    """The claims the extraction couldn't tie to one card — a pronoun that fits
+    several characters, a name several share — in the order of the manuscript,
+    for the author to pick a card for (7.1.1), with the picks being judged. A
+    new run replaces them."""
+    episode = _get_episode(db, novel_id, episode_id, user)
+    _put_back_stale_picks(db, novel_id, episode_id)
+    claims = list(
+        db.scalars(
+            select(Claim).where(
+                Claim.novel_id == novel_id,
+                Claim.episode_id == episode_id,
+                Claim.link_status.in_(("pending", *_LINK_ACTIVE)),
+            )
+        )
+    )
+    alive = {card.id: card for card in db.scalars(select(Character).where(Character.novel_id == novel_id))}
+    db.commit()
+
+    def position(claim: Claim) -> int:
+        found = episode.content.find(claim.evidence_text) if claim.evidence_text else -1
+        return found if found >= 0 else len(episode.content)
+
+    claims.sort(key=lambda claim: (position(claim), str(claim.id)))
+    return [_pending_link_public(claim, alive) for claim in claims]
+
+
+@router.post(
+    "/{novel_id}/episodes/{episode_id}/pending-links/{claim_id}",
+    response_model=LinkPickResult,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def pick_pending_link(
+    novel_id: uuid.UUID,
+    episode_id: uuid.UUID,
+    claim_id: uuid.UUID,
+    body: LinkPick,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> LinkPickResult:
+    """The author's pick for a claim waiting for one (7.1.1): a card among its
+    candidates, which the CPU worker judges the claim against now
+    (pipeline/judge_linked_claim.py), or none ("해당 없음"), which drops it.
+    Either is kept, so the next run applies it and doesn't ask again."""
+    _get_episode(db, novel_id, episode_id, user, for_update=True)
+    claim = db.scalar(
+        select(Claim).where(Claim.id == claim_id, Claim.novel_id == novel_id, Claim.episode_id == episode_id)
+    )
+    if claim is None:
+        # A new run replaced it (or it was handled and dropped): not a claim that was never there.
+        raise HTTPException(status.HTTP_409_CONFLICT, LINK_HANDLED)
+    _put_back_stale_picks(db, novel_id, episode_id)
+    db.refresh(claim)
+    if claim.link_status != "pending":
+        raise HTTPException(status.HTTP_409_CONFLICT, LINK_HANDLED)
+    # A run in progress replaces the claim when it finishes.
+    latest = _latest_run(db, novel_id, episode_id)
+    if latest is not None:
+        _abandon_if_stale(db, latest)
+        if latest.status in _ACTIVE_STATUSES:
+            raise HTTPException(status.HTTP_409_CONFLICT, LINK_RUN_ACTIVE)
+
+    key = link_key(claim.evidence_text, claim.subject_name or "")
+    if body.subject_id is None:
+        record_choice(db, novel_id, episode_id, key, None)
+        db.delete(claim)
+        db.commit()
+        return LinkPickResult(id=claim_id, outcome="skipped")
+
+    candidate_ids = {str(option.get("id")) for option in claim.candidates or []}
+    if str(body.subject_id) not in candidate_ids:
+        raise HTTPException(status.HTTP_409_CONFLICT, LINK_NOT_A_CANDIDATE)
+    card = db.scalar(select(Character).where(Character.id == body.subject_id, Character.novel_id == novel_id))
+    if card is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, LINK_CARD_MISSING)
+    record_choice(db, novel_id, episode_id, key, card.id)
+    # The name it came with stays (it's part of the key the pick is kept under,
+    # and what the claim goes back to if it isn't judged); the worker renames it
+    # for the card once it's judged.
+    claim.subject_id = card.id
+    claim.link_status = "queued"
+    claim.link_requested_at = func.now()
+    # Committed before it's enqueued, so the worker can't pick the job up
+    # before the state it expects exists.
+    db.commit()
+    try:
+        get_queue_client().enqueue({"job_id": str(claim_id), "type": "judge_linked_claim", "novel_id": str(novel_id)})
+    except Exception:
+        logger.exception("Could not enqueue the judgment of claim %s", claim_id)
+        db.execute(
+            update(Claim)
+            .where(Claim.id == claim_id, Claim.link_status == "queued")
+            .values(link_status="pending", subject_id=None, link_requested_at=None)
+        )
+        db.commit()
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Judging is unavailable right now")
+    return LinkPickResult(id=claim_id, outcome="judging")

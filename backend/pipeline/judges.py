@@ -81,9 +81,16 @@ def repeats(value: str, setting: str) -> bool:
     return re.search(pattern, normalize_name(value)) is not None
 
 
-def _pairs(claims: list[ExtractedClaim], bundle: ContextBundle, kind: str, keys: tuple[str, ...]) -> list[_Pair]:
+def _pairs(
+    claims: list[ExtractedClaim],
+    bundle: ContextBundle,
+    kind: str,
+    keys: tuple[str, ...],
+    other_subjects: set[str] = frozenset(),
+) -> list[_Pair]:
     this_episode = str(bundle.episode_id)
     subjects = {normalize_name(claim.subject) for claim in claims if claim.subject_kind == kind and claim.subject}
+    subjects |= other_subjects
     pairs = []
     for index, claim in enumerate(claims):
         if claim.subject_kind != kind:
@@ -160,9 +167,13 @@ def _judge(pairs: list[_Pair], error_type: str) -> list[Flag]:
     ]
 
 
-def judge_appearance(claims: list[ExtractedClaim], context_bundle: ContextBundle) -> list[Flag]:
-    """A character's fixed attributes (eye color, scars, origin, ...) against its card, by NLI."""
-    return _judge(_pairs(claims, context_bundle, "character", FIXED_ATTR_KEYS), "appearance")
+def judge_appearance(
+    claims: list[ExtractedClaim], context_bundle: ContextBundle, other_subjects: set[str] = frozenset()
+) -> list[Flag]:
+    """A character's fixed attributes (eye color, scars, origin, ...) against its card, by NLI.
+    other_subjects: the normalized names of the episode's other subjects, when
+    only some of its claims are judged (the sentence read depends on them)."""
+    return _judge(_pairs(claims, context_bundle, "character", FIXED_ATTR_KEYS, other_subjects), "appearance")
 
 
 def judge_behavior(claims: list[ExtractedClaim], context_bundle: ContextBundle) -> list[Flag]:
