@@ -459,6 +459,27 @@ def test_what_is_denied_or_only_a_role_is_a_feature_not_a_change_of_state():
         assert claim.attributes == {"features": feature}
 
 
+def test_a_state_word_that_does_not_end_the_predicate_is_a_feature():
+    for text, feature in (
+        ("검은 숲은 오래전 몰락한 왕가의 거처였다.", "오래전 몰락한 왕가의 거처였다"),
+        ("검은 숲은 잿더미 위에 세워진 도시였다.", "잿더미 위에 세워진 도시였다"),
+        ("검은 숲은 안 무너졌다.", "안 무너졌다"),
+        ("검은 숲은 무너질 리 없었다.", "무너질 리 없었다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"features": feature}
+
+
+def test_a_change_of_state_is_one_even_with_a_noun_before_it():
+    for text, state in (
+        ("검은 숲은 연못이 말라붙어 폐허가 되었다.", "연못이 말라붙어 폐허가 되었다"),
+        ("검은 숲은 폐허였다.", "폐허였다"),
+        ("검은 숲은 몇 해 뒤 재건되었다.", "몇 해 뒤 재건되었다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"state": state}
+
+
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():
     assert _run("레온은 검은 숲 입구에서 말을 멈췄다.", {"검은 숲의 특징은?": "입구"}).claims == []
 

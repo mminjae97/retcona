@@ -4,7 +4,7 @@ The claim extractor (`backend/pipeline/extract_claims.py`, design doc 7.1.1) wor
 
 ## Data
 
-`eval/passages.jsonl`: 54 passages of novel prose (fantasy and contemporary), written for this repository, with the claims each one holds. `casts.json` has the characters and locations registered when a passage is run (names, aliases, gender, pronoun), so the same cast serves several passages.
+`eval/passages.jsonl`: 56 passages of novel prose (fantasy and contemporary), written for this repository, with the claims each one holds. `casts.json` has the characters and locations registered when a passage is run (names, aliases, gender, pronoun), so the same cast serves several passages.
 
 A passage lists what the extractor should find — `gold`, one item per subject and attribute with the surface forms that count as the right value — and `pending`, what it should leave for the author to pick because the text doesn't say which of several characters it is. Everything else it extracts is a false positive. The passages are short on purpose and each has tags for the kind of case it tests, so a score can be read by case: a pronoun that gender settles, a possessor that isn't a named character ("노인의 눈"), a line of dialogue, an idiom that looks like a cue ("눈을 뜨자", "발자국"), a name two characters share, an alias, a name only the NER model knows, a figurative value ("칠흑 같은"), and longer scenes that mix them.
 

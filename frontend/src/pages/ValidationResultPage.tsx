@@ -36,7 +36,7 @@ const ERROR_TYPES: Record<string, string> = {
   spacetime: "시공간 모순",
 };
 
-const ATTRIBUTES: Record<string, string> = { ...FIXED_ATTR_FIELDS, features: "특징" };
+const ATTRIBUTES: Record<string, string> = { ...FIXED_ATTR_FIELDS, features: "특징", state: "상태" };
 
 // How often the page checks on revalidations in progress.
 const REVALIDATION_POLL_MS = 2000;

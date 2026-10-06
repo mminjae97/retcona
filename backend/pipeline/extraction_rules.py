@@ -278,17 +278,24 @@ def features_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> 
 
 
 # A predicate that says the place changed or is in a changed state, not what it is
-# like: "폐허가 되었다", "불탔다", "무너졌다". A word for the ending of a place and
-# nothing else, so "교역의 중심이 되었다" is a feature; and not where it's denied
-# ("무너지지 않았다", "함락된 적 없는").
+# like: "폐허가 되었다", "불탔다", "무너졌다", "재건되었다". The word has to end the
+# predicate (its last two words, or its last word where that is "...였다": a noun
+# the place is) and not be denied, so "오래전 몰락한 왕가의 거처였다", "잿더미 위에
+# 세워진 도시였다", "교역의 중심이 되었다" and "무너지지 않았다" are features.
 _STATE_CHANGE = re.compile(
-    r"폐허|잿더미|황무지|불모지|무너|붕괴|불타|불탔|타버|파괴|멸망|함락|몰락|사라졌|사라진|황폐|가라앉|침몰|버려졌"
+    r"폐허|잿더미|무너|붕괴|불타(?!는)|불탔|타버|파괴|멸망|함락|몰락|사라졌|황폐해졌|황폐화|가라앉|침몰|버려졌"
+    r"|재건|복구|복원|되살아|(?:황무지|불모지)가\s?되"
 )
-_DENIED = re.compile(r"않|적\s?(?:이\s?)?없|못|아니")
+_DENIED = re.compile(r"않|적\s?(?:이\s?)?없|(?<![가-힣])못|(?<![가-힣])안\s|리\s?없|아니")
+_COPULA = re.compile(r"이었|였|이다")
 
 
 def is_state_change(predicate: str) -> bool:
-    return bool(_STATE_CHANGE.search(predicate)) and not _DENIED.search(predicate)
+    words = predicate.split()
+    if not words or _DENIED.search(predicate):
+        return False
+    scope = words[-1] if _COPULA.search(words[-1]) else " ".join(words[-2:])
+    return bool(_STATE_CHANGE.search(scope))
 
 
 _FEATURES_MAX_LENGTH = 40

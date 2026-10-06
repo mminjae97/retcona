@@ -49,3 +49,5 @@
 {"id": "p49", "cast": "main", "tags": ["location", "location-state"], "text": "벨로스 성은 한 번도 함락된 적 없는 요새였다.", "gold": [{"subject": "벨로스 성", "kind": "location", "attribute": "features", "values": ["요새"]}]}
 {"id": "p50", "cast": "main", "tags": ["location", "location-state"], "text": "검은 숲은 결코 무너지지 않았다.", "gold": [{"subject": "검은 숲", "kind": "location", "attribute": "features", "values": ["무너지지 않"]}]}
 {"id": "p51", "cast": "main", "tags": ["location", "location-state"], "text": "벨로스 성은 교역의 중심이 되었다.", "gold": [{"subject": "벨로스 성", "kind": "location", "attribute": "features", "values": ["중심"]}]}
+{"id": "p52", "cast": "main", "tags": ["location", "location-state"], "text": "벨로스 성은 오래전 몰락한 왕가의 거처였다.", "gold": [{"subject": "벨로스 성", "kind": "location", "attribute": "features", "values": ["거처"]}]}
+{"id": "p53", "cast": "main", "tags": ["location", "location-state"], "text": "몇 해 뒤 벨로스 성은 폐허였다.", "gold": [{"subject": "벨로스 성", "kind": "location", "attribute": "state", "values": ["폐허"]}]}

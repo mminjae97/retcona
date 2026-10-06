@@ -145,6 +145,11 @@ class _Question:
         return self.subject.key if self.subject else ("?", *sorted(s.ref or "" for s in self.candidates))
 
 
+def _location_key(value: str) -> str:
+    """What a place's predicate is: a change of state or a feature."""
+    return "state" if rules.is_state_change(value) else "features"
+
+
 def _clean_value(value: str) -> str:
     return " ".join(value.strip(_VALUE_EDGE).split())
 
@@ -291,7 +296,7 @@ def extract_claims(
     for question in questions:
         value = _clean_value(next(answers) if question.given is None else question.given)
         if question.attribute is None:
-            key, valid = ("state" if rules.is_state_change(value) else "features"), len(value) >= 2
+            key, valid = _location_key(value), len(value) >= 2
             statement = location_statement(question.who, value)
         else:
             value = rules.value_of(question.attribute, value, question.clause)
