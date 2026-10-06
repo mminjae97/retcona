@@ -467,3 +467,32 @@ def test_a_question_about_a_pronoun_is_asked_over_the_sentence_that_names_the_ch
 def test_a_clause_that_names_the_character_is_asked_over_as_it_is():
     [(question, context)] = _asked("레온의 눈동자는 푸른색이었다.")
     assert (question, context) == ("레온의 눈 색깔은?", "레온의 눈동자는 푸른색이었다.")
+
+
+def test_a_pronoun_of_the_other_gender_is_not_replaced_by_the_name():
+    clause = "그녀의 눈이 푸르게 빛났다"
+    assert rules.name_for_pronoun(clause, "레온", "he") == clause
+    assert rules.name_for_pronoun(clause, "세린", "she") == "세린의 눈이 푸르게 빛났다"
+    assert rules.name_for_pronoun(clause, "레온", "any") == "레온의 눈이 푸르게 빛났다"
+    assert rules.name_for_pronoun("그 녀석의 눈이 붉게 빛났다", "레온", "she") == "레온의 눈이 붉게 빛났다"
+
+
+def test_a_name_earlier_in_the_sentence_is_read_over_with_the_clause():
+    [(question, context)] = _asked("레온이 웃자 붉은 눈이 번뜩였다.")
+    assert question == "레온의 눈 색깔은?"
+    assert context == "레온이 웃자 붉은 눈이 번뜩였다."
+
+
+def test_a_color_is_finished_from_the_clause_not_from_the_sentence_before():
+    def answer(questions):
+        return ["붉" for _ in questions]
+
+    extraction = extract_claims(
+        uuid.uuid4(),
+        "레온은 붉은 망토를 둘렀다. 레온의 눈이 붉게 빛났다.",
+        CHARACTERS,
+        LOCATIONS,
+        recognize=lambda texts: [[] for _ in texts],
+        answer=answer,
+    )
+    assert [c.attributes.get("eye_color") for c in extraction.claims if "eye_color" in c.attributes] == ["붉게"]

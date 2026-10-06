@@ -135,6 +135,8 @@ class _Question:
     attribute: rules.Attribute | None  # None: a location's features
     question: str
     context: str
+    # The clause the cue is in, for reading the value off (context may hold more)
+    clause: str
 
     @property
     def about(self) -> tuple:
@@ -196,10 +198,18 @@ def _question_parts(
     name in for the pronoun and reads it after the nearest of the
     sentences before that names it."""
     narration = sentences[index].narration
+    before = None
     for mention in mentions[index]:
-        if mention.subject.key == owner.key and clause[0] <= mention.start and mention.end <= clause[1]:
+        if mention.subject.key != owner.key:
+            continue
+        if clause[0] <= mention.start and mention.end <= clause[1]:
             return narration[mention.start : mention.end], clause_text
-    context = rules.name_for_pronoun(clause_text, owner.name)
+        if mention.end <= clause[0]:
+            before = mention
+    if before is not None:
+        # Named earlier in the sentence ("레온이 웃자 붉은 눈이 번뜩였다"): read from there.
+        return owner.name, " ".join(narration[: clause[1]].split())
+    context = rules.name_for_pronoun(clause_text, owner.name, owner.pronoun)
     for back in range(1, rules.CONTEXT_SENTENCES + 1):
         earlier = index - back
         if earlier >= 0 and any(mention.subject.key == owner.key for mention in mentions[earlier]):
@@ -227,7 +237,7 @@ def _questions(sentences: list[Sentence], mentions: list[list[rules.Mention]]) -
             if subject is not None:
                 asked, context = _question_parts(sentences, mentions, i, subject, hit.clause, clause_text)
             question = _Question(
-                i, subject, candidates, who, hit.attribute, f"{asked}의 {hit.attribute.label}?", context
+                i, subject, candidates, who, hit.attribute, f"{asked}의 {hit.attribute.label}?", context, clause_text
             )  # fmt: skip
             key = (i, question.about, hit.attribute.key)
             if key in seen:
@@ -242,7 +252,8 @@ def _questions(sentences: list[Sentence], mentions: list[list[rules.Mention]]) -
             seen.add(key)
             name = mention.subject.name
             question = f"{name}의 {rules.LOCATION_QUESTION}?"
-            questions.append(_Question(i, mention.subject, (), name, None, question, " ".join(narration.split())))
+            questions.append(_Question(i, mention.subject, (), name, None, question, " ".join(narration.split()), "")
+            )
     return questions
 
 
@@ -273,7 +284,7 @@ def extract_claims(
             key, valid = "features", len(value) >= 2
             statement = location_statement(question.who, value)
         else:
-            value = rules.value_of(question.attribute, value, question.context)
+            value = rules.value_of(question.attribute, value, question.clause)
             key, valid = question.attribute.key, bool(value)
             statement = character_statement(question.who, key, value)
         if not valid:

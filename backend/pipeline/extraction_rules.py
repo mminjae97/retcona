@@ -357,13 +357,17 @@ def with_particle(name: str, particle: str) -> str:
     return name + forms[1 if vowel_final else 0]
 
 
-def name_for_pronoun(clause: str, name: str) -> str:
+def name_for_pronoun(clause: str, name: str, pronoun: str = "any") -> str:
     """The clause with the name where its first pronoun is ("그녀의 은빛 머리카락이"
     -> "세린의 은빛 머리카락이"; 그, 그녀, 그 녀석 and the like): the QA model
     answers a question about a person that its context names, and not about one
-    it only refers to."""
+    it only refers to. Not where the pronoun is the other gender than the
+    character's (pronoun: he | she | any), as it points to somebody else."""
     found = _PRONOUN_PHRASE.search(clause)
     if found is None:
+        return clause
+    kind = _pronoun_kind(found.group())
+    if kind != "any" and pronoun not in (kind, "any"):
         return clause
     return clause[: found.start()] + with_particle(name, found.group("particle") or "") + clause[found.end() :]
 
