@@ -132,9 +132,17 @@ class CPUInferenceClient(InferenceClient):
 
     def load(self) -> str:
         self._load_nli()
-        self._load_span_model("ner")
-        self._load_span_model("qa")
-        return f"NLI {self._nli_model_name}, NER {self._ner_model_name}, QA {self._qa_model_name}"
+        loaded = [f"NLI {self._nli_model_name}"]
+        # Each on its own: a missing NER or QA model (a machine that hasn't
+        # trained them) is one warning, and doesn't hide the other or NLI. A
+        # run that needs it tries again and fails with the same message.
+        for kind, name in (("ner", self._ner_model_name), ("qa", self._qa_model_name)):
+            try:
+                self._load_span_model(kind)
+                loaded.append(f"{kind.upper()} {name}")
+            except Exception as exc:  # noqa: BLE001 — whatever the load hit, it's a warning here
+                logger.warning("Could not load the %s model: %s", kind.upper(), exc)
+        return ", ".join(loaded)
 
     def rerank(self, query: str, candidates: list[str]) -> list[float]:
         raise NotImplementedError
