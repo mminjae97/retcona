@@ -449,6 +449,16 @@ def test_a_place_that_is_described_and_then_changes_has_both():
     assert [c.attributes for c in claims] == [{"features": "늘 안개로 덮여 있었다"}, {"state": "무너져 내렸다"}]
 
 
+def test_what_is_denied_or_only_a_role_is_a_feature_not_a_change_of_state():
+    for text, feature in (
+        ("검은 숲은 한 번도 함락된 적 없는 요새였다.", "한 번도 함락된 적 없는 요새였다"),
+        ("검은 숲은 결코 무너지지 않았다.", "결코 무너지지 않았다"),
+        ("검은 숲은 교역의 중심이 되었다.", "교역의 중심이 되었다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"features": feature}
+
+
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():
     assert _run("레온은 검은 숲 입구에서 말을 멈췄다.", {"검은 숲의 특징은?": "입구"}).claims == []
 

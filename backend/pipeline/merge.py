@@ -7,8 +7,9 @@
   that's still empty is filled in, and the characters' mutable attributes
   (hairstyle, outfit, ...) are recorded in character_state_history for this
   episode, and a location's changes of state ("폐허가 되었다") in
-  location_state_history. An attribute the card already has is never changed here, flagged
-  or not: changing an existing setting is the author's call (2.4). The one
+  location_state_history. An attribute the card already has is never changed
+  here, flagged or not: changing an existing setting is the author's call
+  (2.4). The one
   exception is a value filled in from this same episode by an earlier run:
   that's the episode's own earlier wording, and the new wording replaces it —
   or, once the sentence it was taken from is gone from the episode, the value
@@ -95,7 +96,8 @@ def apply_new_information(
             elif claim.subject_kind == "character" and key in MUTABLE_ATTR_KEYS:
                 states.setdefault(subject_id, {}).setdefault(key, value)
             elif claim.subject_kind == "location" and key in STATE_ATTR_KEYS:
-                location_states.setdefault(subject_id, {}).setdefault(key, value)
+                # The last one the episode says: the state it leaves the place in.
+                location_states.setdefault(subject_id, {})[key] = value
 
     for model, attrs_field, kind in ((Character, "fixed_attrs", "character"), (Location, "geo_attrs", "location")):
         ids = [subject_id for (card_kind, subject_id) in card_values if card_kind == kind]
@@ -134,6 +136,8 @@ def apply_new_information(
         CharacterStateHistory(novel_id=novel_id, character_id=character_id, episode_index=episode_index, state=state)
         for character_id, state in states.items()
     )
+    # (Deleting a location, once there is a way to, deletes these rows first, as
+    # api/settings.py's delete_character does the character's.)
     db.execute(
         delete(LocationStateHistory).where(
             LocationStateHistory.novel_id == novel_id, LocationStateHistory.episode_index == episode_index

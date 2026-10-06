@@ -278,14 +278,17 @@ def features_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> 
 
 
 # A predicate that says the place changed or is in a changed state, not what it is
-# like: "폐허가 되었다", "불탔다", "무너졌다".
+# like: "폐허가 되었다", "불탔다", "무너졌다". A word for the ending of a place and
+# nothing else, so "교역의 중심이 되었다" is a feature; and not where it's denied
+# ("무너지지 않았다", "함락된 적 없는").
 _STATE_CHANGE = re.compile(
-    r"폐허|잿더미|무너|붕괴|불타|불탔|타버|파괴|멸망|함락|몰락|사라졌|사라진|황폐|가라앉|침몰|버려졌|(?:이|가)\s?(?:되었|됐)"
+    r"폐허|잿더미|황무지|불모지|무너|붕괴|불타|불탔|타버|파괴|멸망|함락|몰락|사라졌|사라진|황폐|가라앉|침몰|버려졌"
 )
+_DENIED = re.compile(r"않|적\s?(?:이\s?)?없|못|아니")
 
 
 def is_state_change(predicate: str) -> bool:
-    return bool(_STATE_CHANGE.search(predicate))
+    return bool(_STATE_CHANGE.search(predicate)) and not _DENIED.search(predicate)
 
 
 _FEATURES_MAX_LENGTH = 40
