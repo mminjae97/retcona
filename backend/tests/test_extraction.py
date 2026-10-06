@@ -537,3 +537,9 @@ def test_a_plural_pronoun_cut_by_the_window_is_not_a_singular_one():
     sentence = "어둠 속에서 바람이 불던 밤에는 그녀들은 눈이 붉게 빛났다."
     assert sentence.index("그녀들") == 18  # the window (20) ends between 그녀 and 들
     assert _subjects("세린은 문을 열었다. " + sentence, _pair()) == []
+
+
+def test_a_name_earlier_in_the_sentence_is_asked_as_the_sentence_writes_it():
+    [(question, context)] = _asked("레온하트가 웃었다, 붉은 눈이 번뜩였다.")
+    assert question == "레온하트의 눈 색깔은?"
+    assert context == "레온하트가 웃었다, 붉은 눈이 번뜩였다."

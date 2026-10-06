@@ -212,7 +212,7 @@ def _question_parts(
         return owner.name, clause_text
     if before is not None:
         # Named earlier in the sentence ("레온이 웃자 붉은 눈이 번뜩였다"): read from there.
-        return owner.name, " ".join(narration[: clause[1]].split())
+        return narration[before.start : before.end], " ".join(narration[: clause[1]].split())
     context = rules.name_for_pronoun(clause_text, owner.name, owner.pronoun)
     for back in range(1, rules.CONTEXT_SENTENCES + 1):
         earlier = index - back
