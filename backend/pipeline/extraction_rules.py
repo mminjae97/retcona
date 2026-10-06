@@ -493,7 +493,11 @@ def owner(
     # A dropped subject only for what the sentence's subject can be a body part
     # of ("붉은 눈동자가 번뜩였다"); "여섯 살 때의 일이었다" isn't about anyone.
     dropped_subject = hit.attribute.key in _BODY_ATTRIBUTES and hit.start - lead <= _CUE_FIRST_CHARS
-    early = _EARLY_PRONOUN.search(narration[: lead + _PRONOUN_WINDOW])
+    # Found in the whole sentence, then kept to the window: cut at its end, "그녀들은"
+    # would read as "그녀".
+    early = _EARLY_PRONOUN.search(narration)
+    if early and early.start() >= lead + _PRONOUN_WINDOW:
+        early = None
     if not (pronoun_possessor or early or dropped_subject):
         return None
     candidates: dict[tuple[str, str], Subject] = {}

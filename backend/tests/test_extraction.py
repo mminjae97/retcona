@@ -531,3 +531,9 @@ def test_a_clause_about_the_other_gender_is_asked_over_the_clause_alone():
 def test_그만_is_not_a_pronoun():
     assert rules.name_for_pronoun("그만 눈이 붉게 빛났다", "레온") == "그만 눈이 붉게 빛났다"
     assert rules.name_for_pronoun("그녀만 눈이 붉게 빛났다", "세린") == "세린만 눈이 붉게 빛났다"
+
+
+def test_a_plural_pronoun_cut_by_the_window_is_not_a_singular_one():
+    sentence = "어둠 속에서 바람이 불던 밤에는 그녀들은 눈이 붉게 빛났다."
+    assert sentence.index("그녀들") == 18  # the window (20) ends between 그녀 and 들
+    assert _subjects("세린은 문을 열었다. " + sentence, _pair()) == []
