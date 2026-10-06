@@ -251,7 +251,7 @@ def features_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> 
     # subject of "벨로스 성이 보였다" (nothing said of the place) or the start of an
     # ending ("검은 숲이지만").
     after = narration[mention.end + 1 : mention.end + 2]
-    if narration[mention.end : mention.end + 1] not in ("은", "는") or (after and not after.isspace() and after not in ",，、"):
+    if narration[mention.end : mention.end + 1] not in ("은", "는") or not after.isspace():
         return ""
     # What's said up to the end of the clause the topic particle is in.
     end = next(stop for _, stop in _clauses(narration) if stop > mention.end)
