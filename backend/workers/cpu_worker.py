@@ -18,6 +18,9 @@ Jobs:
 - revalidate_flag {novel_id, job_id = the flag revalidation's id}: one flag
   judged again after its setting was supplemented (7.5), enqueued by
   api/episodes.py
+- judge_linked_claim {novel_id, job_id = the claim's id}: a claim the
+  author picked a card for (7.1.1), judged against it; enqueued by
+  api/episodes.py
 """
 
 import logging
@@ -28,6 +31,7 @@ import uuid
 from ai.nli_rerank import load_models
 from infra.queue_client import get_queue_client
 from models.db import check_database
+from pipeline.judge_linked_claim import judge_linked_claim
 from pipeline.revalidate_flag import revalidate_flag
 from pipeline.validate_episode import validate_episode
 
@@ -43,6 +47,8 @@ def handle(job: dict) -> None:
         validate_episode(uuid.UUID(job["novel_id"]), uuid.UUID(job["job_id"]))
     elif job.get("type") == "revalidate_flag":
         revalidate_flag(uuid.UUID(job["novel_id"]), uuid.UUID(job["job_id"]))
+    elif job.get("type") == "judge_linked_claim":
+        judge_linked_claim(uuid.UUID(job["novel_id"]), uuid.UUID(job["job_id"]))
     else:
         logger.warning("Dropping job %s of unknown type %r", job.get("job_id"), job.get("type"))
 
