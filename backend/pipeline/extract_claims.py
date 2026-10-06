@@ -135,6 +135,8 @@ class _Question:
     attribute: rules.Attribute | None  # None: a location's features
     question: str
     context: str
+    # The clause the cue is in, for reading the value off (context may hold more)
+    clause: str
 
     @property
     def about(self) -> tuple:
@@ -179,6 +181,46 @@ def _mentions(sentences: list[Sentence], registry: rules.Registry, recognize: Re
     return mentions
 
 
+def _question_parts(
+    sentences: list[Sentence],
+    mentions: list[list[rules.Mention]],
+    index: int,
+    owner: rules.Subject,
+    clause: tuple[int, int],
+    clause_text: str,
+) -> tuple[str, str]:
+    """(who the question names, the context it's asked over).
+
+    The QA model answers "no answer" to a question about a person its context
+    doesn't mention (ml/extraction/RESULTS.md round 2). So the question names the
+    owner as the clause writes it ("철수형", "공주") where the clause does; and
+    where the clause only refers to it ("그녀의 은빛 머리카락이"), puts its
+    name in for the pronoun and reads it after the nearest of the
+    sentences before that names it."""
+    narration = sentences[index].narration
+    before = None
+    for mention in mentions[index]:
+        if mention.subject.key != owner.key:
+            continue
+        if clause[0] <= mention.start and mention.end <= clause[1]:
+            return narration[mention.start : mention.end], clause_text
+        if mention.end <= clause[0]:
+            before = mention
+    if rules.points_elsewhere(clause_text, owner.pronoun):
+        # "그녀의 눈" of a male character: the sentences before would only make the
+        # model read it as his.
+        return owner.name, clause_text
+    if before is not None:
+        # Named earlier in the sentence ("레온이 웃자 붉은 눈이 번뜩였다"): read from there.
+        return narration[before.start : before.end], " ".join(narration[: clause[1]].split())
+    context = rules.name_for_pronoun(clause_text, owner.name, owner.pronoun)
+    for back in range(1, rules.CONTEXT_SENTENCES + 1):
+        earlier = index - back
+        if earlier >= 0 and any(mention.subject.key == owner.key for mention in mentions[earlier]):
+            return owner.name, " ".join(sentences[earlier].narration.split()) + " " + context
+    return owner.name, context
+
+
 def _questions(sentences: list[Sentence], mentions: list[list[rules.Mention]]) -> list[_Question]:
     questions: list[_Question] = []
     seen: set[tuple] = set()
@@ -194,9 +236,12 @@ def _questions(sentences: list[Sentence], mentions: list[list[rules.Mention]]) -
                 subject, candidates, who = None, owner.subjects, "그녀" if owner.kind == "she" else "그"
             else:
                 subject, candidates, who = owner, (), owner.name
+            clause_text = " ".join(narration[hit.clause[0] : hit.clause[1]].split())
+            asked, context = who, clause_text
+            if subject is not None:
+                asked, context = _question_parts(sentences, mentions, i, subject, hit.clause, clause_text)
             question = _Question(
-                i, subject, candidates, who, hit.attribute, f"{who}의 {hit.attribute.label}?",
-                " ".join(narration[hit.clause[0] : hit.clause[1]].split()),
+                i, subject, candidates, who, hit.attribute, f"{asked}의 {hit.attribute.label}?", context, clause_text
             )  # fmt: skip
             key = (i, question.about, hit.attribute.key)
             if key in seen:
@@ -211,7 +256,8 @@ def _questions(sentences: list[Sentence], mentions: list[list[rules.Mention]]) -
             seen.add(key)
             name = mention.subject.name
             question = f"{name}의 {rules.LOCATION_QUESTION}?"
-            questions.append(_Question(i, mention.subject, (), name, None, question, " ".join(narration.split())))
+            questions.append(_Question(i, mention.subject, (), name, None, question, " ".join(narration.split()), "")
+            )
     return questions
 
 
@@ -242,8 +288,10 @@ def extract_claims(
             key, valid = "features", len(value) >= 2
             statement = location_statement(question.who, value)
         else:
-            value = rules.value_of(question.attribute, value, question.context)
-            key, valid = question.attribute.key, bool(value)
+            value = rules.value_of(question.attribute, value, question.clause)
+            # The context can hold the sentences before the clause: an answer from
+            # them (a cloak's color, an earlier age) isn't the clause's.
+            key, valid = question.attribute.key, bool(value) and value in question.clause
             statement = character_statement(question.who, key, value)
         if not valid:
             continue

@@ -43,3 +43,39 @@ Looking at the question asked and the answer the QA model gave for each:
 4. Extract the mutable attributes (6, once there's a question for each).
 
 The set is small (one or two items is noise), so each of these is judged by the whole table and by `--errors`, not by one number.
+
+## Round 2 — 2026-10-06: ask about the person the sentence names
+
+The largest loss of round 1 (10 of 24 misses): after a pronoun or an alias the sentence says "그녀의 은빛 머리카락이…" or "철수형의 눈동자는…" and the question named the card, "세린의 머리색은?"; the QA model answers "no answer" about a person its context doesn't mention. Four ways to give it a context that does were tried, each on top of the first change below.
+
+| Change | right | extra | missed | precision | recall | F1 |
+|---|---|---|---|---|---|---|
+| round 1 (the question always names the card) | 32 | 0 | 24 | 1.000 | 0.571 | 0.727 |
+| **alias:** name the person as the clause writes it ("철수형", "공주") | 35 | 0 | 21 | 1.000 | 0.625 | 0.769 |
+| + **pronoun as written:** "그녀의 머리색은?" | 38 | 1 | 18 | 0.974 | 0.679 | 0.800 |
+| + **name for the pronoun:** the clause with "세린" put in for "그녀" | 41 | 1 | 15 | 0.976 | 0.732 | 0.837 |
+| + **the sentence before:** the nearest of the two before it that names the person, then the clause | 42 | 1 | 14 | 0.977 | 0.750 | 0.848 |
+| + **both** of those | **43** | 1 | **13** | 0.977 | **0.768** | **0.860** |
+
+Kept: the alias change and the last (both). Each costs nothing in precision but the one extra, which is a case that was hidden before (below).
+
+By attribute, round 1 → round 2 (right / right + missed): hair color 5/12 → **12/12**, age 6/8 → **8/8**, eye color 13/21 → 14/21, height 1/3 → 2/3. By case: alias 3/6 → **6/6**, dialogue 3/5 → **5/5**, pronoun-he 7/15 → 13/15, pronoun-she 8/16 → 15/16, scenes 8/15 → 13/15, namesake 1/2 → **2/2**, figurative 0/1 → **1/1** (the QA model reads "칠흑 같았다" fine once it's asked about the right person).
+
+### The one extra: a "그녀" for a character the text doesn't name
+
+p36, "레온은 문을 열었다. 그녀의 눈이 푸르게 빛났다.": the "그녀" is someone else, and the extractor says Leon's eyes are blue. In round 1 it was there too, but the QA model happened to answer "no answer" (the question named Leon, the sentence didn't); now that it's asked about the right person, the rule shows. It's the single-candidate rule (a lone candidate isn't held against the pronoun, so that a wrong gender setting can't make claims vanish). With the genders the author set, 레온 is male and "그녀" says otherwise. Holding a lone candidate to the pronoun would fix it and cost the claims of an author who set a gender wrong; design doc 7.1.1 says "gender included" for exactly one fit.
+
+### What's left of the 13 misses
+
+- **A place's features (4)**: p16, p38 ×2, p45.
+- **By design (6)**: two names in a sentence with no possessor (p23 ×2), a plural "그들" (p29 ×2), "그녀의" in a sentence that names someone else (p42), a pronoun three sentences from its name (p35).
+- **A cue's color word out of reach (1)**: p03. **A height said as a verb (1)**: p14 ("키가 컸다"). **A body part taken for another person (1)**: p39 ("오른손의 흉터").
+
+The 6 mutable ones are still all missed.
+
+### What to try next
+
+1. A place's features from the sentence itself instead of a question. (up to 4)
+2. A body part ("오른손의", "왼팔의") is no possessor; a longer window for a cue's color word. (2)
+3. Decide the single-candidate rule above. (removes the 1 extra)
+4. Extract the mutable attributes. (6)

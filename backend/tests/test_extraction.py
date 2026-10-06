@@ -229,7 +229,8 @@ def test_a_claim_about_a_registered_character_carries_its_ref_and_the_sentence()
 
 
 def test_an_alias_makes_a_claim_about_the_card_under_its_name():
-    [claim] = _run("붉은 늑대의 눈동자는 푸른색이었다.", {"레온의 눈 색깔은?": "푸른색"}).claims
+    # The question names the alias the sentence uses: the QA model can't answer about someone the sentence doesn't.
+    [claim] = _run("붉은 늑대의 눈동자는 푸른색이었다.", {"붉은 늑대의 눈 색깔은?": "푸른색"}).claims
     assert (claim.subject, claim.subject_ref) == ("레온", "c1")
 
 
@@ -347,7 +348,12 @@ def _pair(**overrides):
 
 
 BOTH_NAMED = "레온은 세린을 보았다. "
-EYES = {"레온의 눈 색깔은?": "붉게", "세린의 눈 색깔은?": "붉게", "그의 눈 색깔은?": "붉게", "그녀의 눈 색깔은?": "붉게"}
+EYES = {
+    "레온의 눈 색깔은?": "붉게",
+    "세린의 눈 색깔은?": "붉게",
+    "그의 눈 색깔은?": "붉게",
+    "그녀의 눈 색깔은?": "붉게",
+}
 
 
 def _subjects(text, characters):
@@ -401,3 +407,139 @@ def test_the_pronoun_a_card_is_narrated_with_beats_its_gender():
 def test_with_one_candidate_the_pronoun_is_not_held_against_it():
     assert _subjects("레온은 문을 열었다. 그녀의 눈이 붉게 빛났다.", _pair()) == ["레온"]
     assert _subjects("세린은 문을 열었다. 그의 눈이 붉게 빛났다.", _pair()) == ["세린"]
+
+
+# --- what the question is asked over ---------------------------------------------
+
+
+def _asked(text, characters=None):
+    """The (question, context) pairs the QA model is given for a manuscript."""
+    asked = []
+
+    def answer(questions):
+        asked.extend(questions)
+        return [""] * len(questions)
+
+    extract_claims(
+        uuid.uuid4(),
+        text,
+        characters or CHARACTERS,
+        LOCATIONS,
+        recognize=lambda texts: [[] for _ in texts],
+        answer=answer,
+    )
+    return asked
+
+
+def test_a_pronoun_is_replaced_by_the_name_in_what_the_model_reads():
+    assert (
+        rules.name_for_pronoun("그녀의 은빛 머리카락이 바람에 흩날렸다", "세린")
+        == "세린의 은빛 머리카락이 바람에 흩날렸다"
+    )
+    assert (
+        rules.name_for_pronoun("그의 눈이 어둠 속에서 붉게 번뜩였다", "레온") == "레온의 눈이 어둠 속에서 붉게 번뜩였다"
+    )
+    assert rules.name_for_pronoun("그 녀석의 눈이 붉게 빛났다", "레온") == "레온의 눈이 붉게 빛났다"
+
+
+def test_the_particle_after_the_name_takes_the_form_of_its_last_syllable():
+    assert rules.name_for_pronoun("그는 스물아홉 살이었다", "카엘") == "카엘은 스물아홉 살이었다"
+    assert rules.name_for_pronoun("그녀는 스물아홉 살이었다", "엘리제") == "엘리제는 스물아홉 살이었다"
+    assert rules.name_for_pronoun("그녀가 웃었다", "세린") == "세린이 웃었다"
+    assert rules.name_for_pronoun("그녀가 웃었다", "엘리제") == "엘리제가 웃었다"
+
+
+def test_a_그_that_is_not_a_pronoun_is_left_alone():
+    for clause in ("그 순간 눈이 붉게 빛났다", "그리고 눈이 푸르렀다", "그곳의 눈이 푸르렀다", "눈이 붉게 빛났다"):
+        assert rules.name_for_pronoun(clause, "레온") == clause
+
+
+def test_a_question_about_a_pronoun_is_asked_over_the_sentence_that_names_the_character():
+    [(question, context)] = [
+        pair
+        for pair in _asked("세린은 열일곱 살이었다. 그녀의 은빛 머리카락이 바람에 흩날렸다.")
+        if "머리색" in pair[0]
+    ]
+    assert question == "세린의 머리색은?"
+    assert context == "세린은 열일곱 살이었다. 세린의 은빛 머리카락이 바람에 흩날렸다."
+
+
+def test_a_clause_that_names_the_character_is_asked_over_as_it_is():
+    [(question, context)] = _asked("레온의 눈동자는 푸른색이었다.")
+    assert (question, context) == ("레온의 눈 색깔은?", "레온의 눈동자는 푸른색이었다.")
+
+
+def test_a_pronoun_of_the_other_gender_is_not_replaced_by_the_name():
+    clause = "그녀의 눈이 푸르게 빛났다"
+    assert rules.name_for_pronoun(clause, "레온", "he") == clause
+    assert rules.name_for_pronoun(clause, "세린", "she") == "세린의 눈이 푸르게 빛났다"
+    assert rules.name_for_pronoun(clause, "레온", "any") == "레온의 눈이 푸르게 빛났다"
+    assert rules.name_for_pronoun("그 녀석의 눈이 붉게 빛났다", "레온", "she") == "레온의 눈이 붉게 빛났다"
+
+
+def test_a_name_earlier_in_the_sentence_is_read_over_with_the_clause():
+    [(question, context)] = _asked("레온이 웃자 붉은 눈이 번뜩였다.")
+    assert question == "레온의 눈 색깔은?"
+    assert context == "레온이 웃자 붉은 눈이 번뜩였다."
+
+
+def test_a_color_is_finished_from_the_clause_not_from_the_sentence_before():
+    def answer(questions):
+        return ["붉" for _ in questions]
+
+    extraction = extract_claims(
+        uuid.uuid4(),
+        "레온은 붉은 망토를 둘렀다. 레온의 눈이 붉게 빛났다.",
+        CHARACTERS,
+        LOCATIONS,
+        recognize=lambda texts: [[] for _ in texts],
+        answer=answer,
+    )
+    assert [c.attributes.get("eye_color") for c in extraction.claims if "eye_color" in c.attributes] == ["붉게"]
+
+
+def test_a_value_the_model_takes_from_the_sentence_before_is_dropped():
+    extraction = extract_claims(
+        uuid.uuid4(),
+        "레온은 푸른 망토를 둘렀다. 그의 눈이 붉게 빛났다.",
+        CHARACTERS,
+        LOCATIONS,
+        recognize=lambda texts: [[] for _ in texts],
+        answer=lambda questions: ["푸른" for _ in questions],
+    )
+    assert not [c for c in extraction.claims if "eye_color" in c.attributes]
+
+
+def test_the_pronoun_that_fits_the_character_is_replaced_even_after_one_that_does_not():
+    assert (
+        rules.name_for_pronoun("그녀는 웃었고 그의 눈이 붉게 빛났다", "레온", "he")
+        == "그녀는 웃었고 레온의 눈이 붉게 빛났다"
+    )
+    assert rules.name_for_pronoun("그는 그녀의 눈을 보았다", "세린", "she") == "그는 세린의 눈을 보았다"
+
+
+def test_a_pronoun_followed_by_punctuation_is_replaced():
+    assert rules.name_for_pronoun("그녀는, 열일곱 살이었다", "세린") == "세린은, 열일곱 살이었다"
+    assert rules.name_for_pronoun("붉은 눈의 그, 그의 눈이 번뜩였다", "레온") == "붉은 눈의 그, 레온의 눈이 번뜩였다"
+
+
+def test_a_clause_about_the_other_gender_is_asked_over_the_clause_alone():
+    [(_, context)] = _asked("레온은 문을 열었다. 그녀의 눈이 푸르게 빛났다.", _pair()[:1])
+    assert context == "그녀의 눈이 푸르게 빛났다."
+
+
+def test_그만_is_not_a_pronoun():
+    assert rules.name_for_pronoun("그만 눈이 붉게 빛났다", "레온") == "그만 눈이 붉게 빛났다"
+    assert rules.name_for_pronoun("그녀만 눈이 붉게 빛났다", "세린") == "세린만 눈이 붉게 빛났다"
+
+
+def test_a_plural_pronoun_cut_by_the_window_is_not_a_singular_one():
+    sentence = "어둠 속에서 바람이 불던 밤에는 그녀들은 눈이 붉게 빛났다."
+    assert sentence.index("그녀들") == 18  # the window (20) ends between 그녀 and 들
+    assert _subjects("세린은 문을 열었다. " + sentence, _pair()) == []
+
+
+def test_a_name_earlier_in_the_sentence_is_asked_as_the_sentence_writes_it():
+    [(question, context)] = _asked("레온하트가 웃었다, 붉은 눈이 번뜩였다.")
+    assert question == "레온하트의 눈 색깔은?"
+    assert context == "레온하트가 웃었다, 붉은 눈이 번뜩였다."
