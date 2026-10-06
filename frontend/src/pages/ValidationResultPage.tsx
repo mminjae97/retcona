@@ -248,7 +248,8 @@ export default function ValidationResultPage() {
       getEpisode(novelId, episodeId),
       getLatestValidation(novelId, episodeId),
       listFlags(novelId, episodeId),
-      listPendingLinks(novelId, episodeId),
+      // Not what the page is for: without it the flags are still shown.
+      listPendingLinks(novelId, episodeId).catch((): PendingLink[] => []),
     ])
       .then(([loadedEpisode, latest, loadedFlags, loadedLinks]) => {
         if (cancelled) return;
@@ -427,8 +428,17 @@ export default function ValidationResultPage() {
     setLinkBusy({ id: link.id, pick: subjectId ?? "skip" });
     setLinkErrors(({ [link.id]: _, ...rest }) => rest);
     try {
-      await pickPendingLink(novelId, episodeId, link.id, subjectId);
-      setPendingLinks(await listPendingLinks(novelId, episodeId));
+      const result = await pickPendingLink(novelId, episodeId, link.id, subjectId);
+      // Shown at once, then the list is reloaded; if that doesn't get through,
+      // the pick went through all the same, and the polling catches up.
+      setPendingLinks((current) =>
+        result.outcome === "skipped"
+          ? current.filter((item) => item.id !== link.id)
+          : current.map((item) => (item.id === link.id ? { ...item, status: "judging", picked_id: subjectId } : item)),
+      );
+      listPendingLinks(novelId, episodeId)
+        .then(setPendingLinks)
+        .catch(() => {});
     } catch (err) {
       setLinkErrors((current) => ({ ...current, [link.id]: describeLinkError(err) }));
       // A 409 means the list is out of date (handled elsewhere, replaced by a new run).
