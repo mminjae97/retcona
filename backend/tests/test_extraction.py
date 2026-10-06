@@ -147,6 +147,16 @@ def test_a_distance_or_a_shop_is_not_a_height():
     assert _attributes("오른손에 화상 자국이 있었다.") == {"scars"}
 
 
+def test_the_color_has_to_be_next_to_the_eye_or_hair():
+    assert _attributes("검은 옷을 입은 그는 머리를 숙였다.") == set()
+    assert _attributes("검은 숲에서 그의 눈이 흔들렸다.") == set()
+    assert _attributes("그의 눈을 똑바로 보라고 말했다.") == set()
+    assert _attributes("레온의 길고 푸른 눈이 번뜩였다.") == {"eye_color"}
+    assert _attributes("세린의 머리카락은 은빛이었다.") == {"hair_color"}
+    assert _attributes("그는 금발을 쓸어 넘겼다.") == {"hair_color"}
+    assert _attributes("눈동자는 보라색이었다.") == {"eye_color"}
+
+
 def test_snow_is_not_an_eye():
     assert _attributes("레온은 하얀 눈이 내리는 거리를 걸었다.") == set()
     assert _attributes("하얀 눈이 쌓인 길이었다.") == set()

@@ -156,7 +156,7 @@ def split_particle(surface: str, known: set[str]) -> tuple[str, str]:
 
 _COLOR = (
     "푸른|푸르|파란|파랗|붉|빨간|빨갛|검은|검다|검게|검정|까만|까맣|칠흑|갈색|밤색|녹색|초록|연두|회색|잿빛|"
-    "금빛|금색|금발|황금|은빛|은색|은발|백발|백색|하얀|하얗|새하얀|흰|하늘색|하늘빛|보랏빛|보라|자색|"
+    "금빛|금색|금발|황금|은빛|은색|은발|백발|백색|하얀|하얗|새하얀|흰|하늘색|하늘빛|보랏빛|보라색|자색|"
     "에메랄드|사파이어|호박색|청색|청록|흑발|흑색|주황|노란|노랗|분홍|핑크"
 )
 COLOR_RE = re.compile(_COLOR)
@@ -236,13 +236,28 @@ def _clauses(narration: str) -> list[tuple[int, int]]:
     return spans
 
 
+# How many words around the noun a color can be in: "레온의 길고 푸른 눈", "눈은
+# 푸른색이었다". Further off it's another thing's color ("검은 옷을 입은 그는
+# 머리를 숙였다").
+_WORDS_BEFORE = 2
+_WORDS_AFTER = 3
+
+
+def _color_near(clause: str, noun: re.Match) -> bool:
+    if COLOR_RE.search(noun.group()):  # "금발"
+        return True
+    before = " ".join(clause[: noun.start()].split()[-_WORDS_BEFORE:])
+    after = " ".join(clause[noun.end() :].split()[:_WORDS_AFTER])
+    return COLOR_RE.search(before) is not None or COLOR_RE.search(after) is not None
+
+
 def cue_hits(narration: str) -> list[CueHit]:
     hits = []
     for clause in _clauses(narration):
         text = narration[clause[0] : clause[1]]
         for attribute in ATTRIBUTES:
             match = attribute.noun.search(text)
-            if not match or (attribute.needs_color and not COLOR_RE.search(text)):
+            if not match or (attribute.needs_color and not _color_near(text, match)):
                 continue
             if attribute.unless and not match.groupdict().get("strong") and attribute.unless.search(text):
                 continue
