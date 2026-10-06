@@ -96,7 +96,7 @@ def _lock_novel(db: Session, novel_id: uuid.UUID) -> None:
 class _Input(NamedTuple):
     content: str
     content_updated_at: datetime
-    # {"ref", "name", "aliases"} each, for the extraction
+    # {"ref", "name", "aliases", "gender", "pronoun"} each, for the extraction
     characters: list[dict]
     # the prompt's refs -> card ids
     refs: dict[str, uuid.UUID]
@@ -117,16 +117,18 @@ def _read_input(novel_id: uuid.UUID, episode_id: uuid.UUID) -> _Input:
         # A short ref per character rather than its id: characters can share a
         # name, so the model answers with the ref of the one it means.
         characters, refs = [], {}
-        for number, (character_id, name, aliases) in enumerate(
+        for number, (character_id, name, aliases, gender, pronoun) in enumerate(
             db.execute(
-                select(Character.id, Character.name, Character.aliases)
+                select(Character.id, Character.name, Character.aliases, Character.gender, Character.pronoun)
                 .where(Character.novel_id == novel_id)
                 .order_by(Character.created_at, Character.id)
             ),
             start=1,
         ):
             ref = f"c{number}"
-            characters.append({"ref": ref, "name": name, "aliases": list(aliases or [])})
+            characters.append(
+                {"ref": ref, "name": name, "aliases": list(aliases or []), "gender": gender, "pronoun": pronoun}
+            )
             refs[ref] = character_id
         # Distinct: nothing stops two locations sharing a name, and the model needs it once.
         locations = list(db.scalars(select(Location.name).where(Location.novel_id == novel_id).distinct()))

@@ -18,7 +18,7 @@ claim does less harm than holding it against the wrong card.
 
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from pipeline.sentences import Sentence
 
@@ -28,6 +28,9 @@ class Subject:
     kind: str  # character | location
     name: str  # a registered card's name, or the name as the manuscript has it
     ref: str | None = None  # a known character's ref (pipeline/entities.py)
+    # The pronoun the manuscript narrates a character with: he (그), she (그녀)
+    # or any (not known, or either). Not part of who it is.
+    pronoun: str = field(default="any", compare=False)
 
     @property
     def key(self) -> tuple[str, str]:
@@ -41,6 +44,14 @@ class Mention:
     subject: Subject
     # Marked as the sentence's topic or subject (은/는/이/가): "검은 숲은 ..."
     topic: bool
+
+
+def effective_pronoun(gender: str | None, pronoun: str | None) -> str:
+    """The pronoun a card is narrated with: the one the author set, or what its
+    gender says (a card with neither answers to either)."""
+    if pronoun in ("he", "she", "any"):
+        return pronoun
+    return {"male": "he", "female": "she"}.get(gender or "", "any")
 
 
 def normalize(text: str) -> str:
@@ -68,7 +79,8 @@ class Registry:
     def __init__(self, characters: list[dict], locations: list[str]) -> None:
         self._by_string: dict[str, dict[tuple[str, str], Subject]] = {}
         for character in characters:
-            subject = Subject("character", character["name"], character.get("ref"))
+            pronoun = effective_pronoun(character.get("gender"), character.get("pronoun"))
+            subject = Subject("character", character["name"], character.get("ref"), pronoun)
             for string in [character["name"], *character.get("aliases", [])]:
                 self._add(string, subject)
         for location in locations:
@@ -334,6 +346,25 @@ _BODY_ATTRIBUTES = ("eye_color", "hair_color", "scars", "height")
 # How many sentences back a pronoun's name is looked for.
 CONTEXT_SENTENCES = 2
 
+_MALE_NOUNS = ("사내", "남자", "소년", "청년", "남성")
+_FEMALE_NOUNS = ("소녀", "여자", "아가씨", "여인", "여성")
+
+
+def _pronoun_kind(text: str) -> str:
+    """Whom a pronoun or a 그 + person points to: he (그, 그 사내), she (그녀,
+    그 소녀) or any (그 녀석, 자신: nothing to tell by)."""
+    if text.startswith("그녀석") or not text.startswith("그"):
+        return "any"
+    if text.startswith("그녀"):
+        return "she"
+    word = text[1:].strip()
+    if word.startswith(_FEMALE_NOUNS):
+        return "she"
+    if word.startswith(_MALE_NOUNS) or not word.startswith(tuple(_PERSON_NOUNS.split("|"))):
+        return "he"
+    return "any"
+
+
 _GENITIVE = re.compile(r"([가-힣A-Za-z0-9]+)의\s+(?:\S+\s+){0,2}$")
 
 
@@ -351,6 +382,7 @@ def owner(sentences: list[Sentence], mentions: list[list[Mention]], index: int, 
     before = narration[: hit.start]
     genitive = _GENITIVE.search(before)
     pronoun_possessor = False
+    possessor_kind = "any"
     if genitive:
         possessor_end = genitive.start(1) + len(genitive.group(1))
         named = [m for m in mentions[index] if m.subject.kind == "character" and m.end == possessor_end]
@@ -366,6 +398,7 @@ def owner(sentences: list[Sentence], mentions: list[list[Mention]], index: int, 
             if here and genitive.group(1) != "자신":
                 return None
             pronoun_possessor = True
+            possessor_kind = _pronoun_kind(("그" if person_after_that else "") + genitive.group(1))
         else:
             return None  # somebody else's ("노인의 눈")
 
@@ -381,10 +414,19 @@ def owner(sentences: list[Sentence], mentions: list[list[Mention]], index: int, 
     # A dropped subject only for what the sentence's subject can be a body part
     # of ("붉은 눈동자가 번뜩였다"); "여섯 살 때의 일이었다" isn't about anyone.
     dropped_subject = hit.attribute.key in _BODY_ATTRIBUTES and hit.start - lead <= _CUE_FIRST_CHARS
-    if not (pronoun_possessor or _EARLY_PRONOUN.search(narration[: lead + _PRONOUN_WINDOW]) or dropped_subject):
+    early = _EARLY_PRONOUN.search(narration[: lead + _PRONOUN_WINDOW])
+    if not (pronoun_possessor or early or dropped_subject):
         return None
     candidates: dict[tuple[str, str], Subject] = {}
     for back in range(1, CONTEXT_SENTENCES + 1):
         if index - back >= 0:
             candidates.update(_characters(mentions[index - back]))
+    if len(candidates) > 1:
+        # What the pronoun shows narrows them: 그 isn't a character narrated
+        # with 그녀, and a card that answers to either stays a candidate. With
+        # one candidate there's nothing to choose between, so the pronoun isn't held
+        # against it.
+        kind = possessor_kind if pronoun_possessor else _pronoun_kind(early.group()) if early else "any"
+        if kind != "any":
+            candidates = {key: subject for key, subject in candidates.items() if subject.pronoun in (kind, "any")}
     return next(iter(candidates.values())) if len(candidates) == 1 else None
