@@ -504,6 +504,25 @@ def test_what_has_not_happened_is_not_a_change_of_state():
         assert claim.attributes == {"features": feature}
 
 
+def test_a_state_a_verb_after_carries_is_a_state():
+    for text, state in (
+        ("검은 숲은 폐허가 되어 버렸다.", "폐허가 되어 버렸다"),
+        ("검은 숲은 잿더미가 되어 있었다.", "잿더미가 되어 있었다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"state": state}
+
+
+def test_a_likeness_or_a_wish_is_not_a_change_of_state():
+    for text, feature in (
+        ("검은 숲은 마치 폐허 같았다.", "마치 폐허 같았다"),
+        ("검은 숲은 폐허나 다름없었다.", "폐허나 다름없었다"),
+        ("검은 숲은 곧 함락되려 했다.", "곧 함락되려 했다"),
+    ):
+        [claim] = _run(text, {}).claims
+        assert claim.attributes == {"features": feature}
+
+
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():
     assert _run("레온은 검은 숲 입구에서 말을 멈췄다.", {"검은 숲의 특징은?": "입구"}).claims == []
 

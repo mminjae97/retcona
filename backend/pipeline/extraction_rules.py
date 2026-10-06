@@ -287,7 +287,12 @@ _STATE_CHANGE = re.compile(
     r"|가라앉|침몰|버려졌|재건|복구|복원|되살아|(?:황무지|불모지)가\s?되"
 )
 # Not a change that happened: denied, or only about to / tried to ("무너질 듯했다", "복구를 시도했다").
-_DENIED = re.compile(r"않|적\s?(?:이\s?)?없|리\s?없|아니|듯|뻔|시도|려고|나섰")
+# Or only likened ("폐허 같았다"), or wished ("재건을 꿈꿨다").
+_DENIED = re.compile(
+    r"않|적\s?(?:이\s?)?없|리\s?없|아니|듯|뻔|시도|려고|려\s?했|나섰|꿈|바랐|길\s?바|같[았은]|다름없|처럼|마치"
+)
+# A verb that only carries the one before it ("폐허가 되어 버렸다").
+_AUXILIARY = re.compile(r"^(?:버렸|버린|있었|있다|있는|두었|놓았|놓였)")
 # 안 / 못 before the verb ("안 무너졌다"), not the noun "안" ("성 안 전체가").
 _DENIED_BEFORE_VERB = re.compile(r"(?<![가-힣])[안못]\s")
 # "...이었다", "...였다": a noun the place is; not "변하였다".
@@ -298,8 +303,9 @@ def is_state_change(predicate: str) -> bool:
     words = predicate.split()
     if not words or _DENIED.search(predicate):
         return False
-    tail = " ".join(words[-2:])
-    if _DENIED_BEFORE_VERB.search(tail):
+    # The last two words, three where the last only carries the one before ("폐허가 되어 버렸다").
+    tail = " ".join(words[-3:] if len(words) > 2 and _AUXILIARY.match(words[-1]) else words[-2:])
+    if _DENIED_BEFORE_VERB.search(" ".join(words[-2:])):
         return False
     scope = words[-1] if _COPULA.search(words[-1]) else tail
     return bool(_STATE_CHANGE.search(scope))
