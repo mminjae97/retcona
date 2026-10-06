@@ -175,7 +175,7 @@ class ValidationRunPublic(BaseModel):
     episode_id: uuid.UUID
     status: str  # queued | running | succeeded | failed
     # failed only: abandoned | queue_unavailable | episode_missing |
-    # empty_manuscript | llm_failed | bad_llm_response | inference_failed | internal
+    # empty_manuscript | inference_failed | internal
     error: str | None
     # succeeded only: {claims, dropped_claims, new_characters, new_locations,
     # flags}. flags is how many flags the run found (absent on runs from

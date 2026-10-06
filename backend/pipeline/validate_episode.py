@@ -27,8 +27,7 @@ queued -> running -> succeeded | failed. Steps:
    kept either way (only empty attributes are filled in).
 
 A failure is recorded on the run as an error code the editor turns into a
-message: episode_missing, empty_manuscript, llm_failed, bad_llm_response,
-inference_failed, internal.
+message: episode_missing, empty_manuscript, inference_failed, internal.
 """
 
 import logging

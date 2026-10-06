@@ -25,12 +25,8 @@ export function describeRunError(code: string | null): string {
       return "이 화를 찾을 수 없어 검증하지 못했습니다.";
     case "empty_manuscript":
       return "원고가 비어 있어 검증하지 못했습니다.";
-    case "llm_failed":
-      return "원고 분석 서버에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.";
-    case "bad_llm_response":
-      return "원고 분석 결과를 해석하지 못했습니다. 다시 실행해 주세요.";
     case "inference_failed":
-      return "설정과 대조하는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
+      return "원고를 분석하거나 설정과 대조하는 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
     default:
       return "검증 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
   }
