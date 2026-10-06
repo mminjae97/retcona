@@ -647,7 +647,7 @@ flowchart TD
 
 - `QueueClient`는 `enqueue(job)` / `dequeue()` / `ack(job_id)` 세 메서드만 노출 — 비즈니스 로직은 이 인터페이스만 사용하고 구현체를 알지 못함. 운영 환경은 `PubSubQueueClient`, 로컬 개발은 Redis 기반 구현체 사용
 - `StorageClient`는 `GCSStorageClient`로 일러스트 이미지 등을 저장
-- `InferenceClient`(NLI·리랭커)와 `LLMClient`도 같은 패턴 — 각각 `INFERENCE_BACKEND=cpu|gpu`, `LLM_PROVIDER=external|self_hosted` 환경변수로 구현체를 고른다. 7장의 판단 모듈은 이 인터페이스만 호출하고 실제 백엔드가 무엇인지 알지 못하므로, 10.5의 단계적 전환이 비즈니스 로직 변경 없이 설정값 변경만으로 가능해진다
+- `InferenceClient`(NLI·NER·질의응답·리랭커)와 `LLMClient`도 같은 패턴 — 각각 `INFERENCE_BACKEND=cpu|gpu`, `LLM_PROVIDER=external|self_hosted` 환경변수로 구현체를 고른다. 7장의 판단 모듈은 이 인터페이스만 호출하고 실제 백엔드가 무엇인지 알지 못하므로, 10.5의 단계적 전환이 비즈니스 로직 변경 없이 설정값 변경만으로 가능해진다
 
 ##### 10.4.4 워커 코드 요구사항
 

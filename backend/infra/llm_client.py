@@ -1,21 +1,14 @@
 """LLMClient interface (design doc 10.4.3).
 
-Two models, one per purpose (chapter 5), each named in its own setting:
-- extraction (LLM_MODEL_EXTRACTION): claim extraction — the bulk of the calls
-  (every episode's whole manuscript, on every run), fact-finding in a fixed
-  JSON shape; a fast, cheaper model.
-- judgment (LLM_MODEL_JUDGMENT): OOC behavior judgment, the final check of
-  contradictions NLI finds ambiguous, spacetime assist — few calls, reasoning
-  over settings and context; a stronger model.
-LLM_PROVIDER=external|self_hosted|mock selects the implementation for both;
-mock (infra/mock_llm.py) is a development stand-in until models are chosen.
+One model, for OOC behavior judgment (LLM_MODEL_JUDGMENT; chapter 5, 7.2):
+few calls, reasoning over settings and context, so a stronger model. Claim
+extraction doesn't use an LLM (7.1.1).
+LLM_PROVIDER=external|self_hosted|mock selects the implementation;
+mock (infra/mock_llm.py) is a development stand-in until a model is chosen.
 """
 
 import os
 from abc import ABC, abstractmethod
-from typing import Literal
-
-LLMPurpose = Literal["extraction", "judgment"]
 
 
 class LLMClient(ABC):
@@ -43,11 +36,10 @@ class SelfHostedLLMClient(LLMClient):
         raise NotImplementedError("No self-hosted LLM is wired up yet; set LLM_PROVIDER=mock for development")
 
 
-def get_llm_client(purpose: LLMPurpose) -> LLMClient:
+def get_llm_client() -> LLMClient:
     provider = os.environ.get("LLM_PROVIDER", "external")
-    model = os.environ.get(f"LLM_MODEL_{purpose.upper()}", "")
+    model = os.environ.get("LLM_MODEL_JUDGMENT", "")
     if provider == "mock":
-        # Imported here: it reads ai/llm.py's prompt format, and ai/llm.py imports this module.
         from infra.mock_llm import MockLLMClient
 
         return MockLLMClient()

@@ -91,13 +91,12 @@ Code: `backend/infra/inference_client.py`, `ml/nli/`.
 
 ## 4. LLM for OOC judgment: choose and wire it up
 
-**Now:** `LLM_PROVIDER=mock` — no model. The LLM is used for OOC judgment only
-(design doc 7.2; claim extraction moves to in-house NER / QA models and rules,
-7.1.1 — until then `backend/infra/mock_llm.py` answers the extraction prompt
-from keyword rules). The external and self-hosted clients are stubs that fail
-(`llm_failed`). The model is set in `LLM_MODEL_JUDGMENT`
-(`backend/infra/llm_client.py`); `LLM_MODEL_EXTRACTION` goes away with the
-LLM extraction.
+**Now:** `LLM_PROVIDER=mock` — no model, and it judges nothing. The LLM is used
+for OOC judgment only (design doc 7.2); claim extraction runs on in-house NER /
+QA models and rules (7.1.1) with no LLM. The external and self-hosted clients
+are stubs that fail. The model is set in `LLM_MODEL_JUDGMENT`
+(`backend/infra/llm_client.py`). A failed LLM call needs an error code on the
+run once judgment is built (the editor turns codes into messages).
 
 **To do:**
 - [ ] Choose the model, trying it on real OOC cases (free options looked at:

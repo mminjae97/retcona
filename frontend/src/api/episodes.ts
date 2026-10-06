@@ -44,8 +44,6 @@ export type ValidationRunError =
   | "queue_unavailable"
   | "episode_missing"
   | "empty_manuscript"
-  | "llm_failed"
-  | "bad_llm_response"
   | "inference_failed"
   | "internal";
 
