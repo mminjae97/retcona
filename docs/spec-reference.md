@@ -472,8 +472,9 @@ flashback episodes) — keep them separate:
 | Embedding | KURE-v1 + BM25 hybrid | Combines semantic search with keyword matching |
 | Cross-encoder reranker | bge-reranker-v2-m3-ko family | Extracts top-K relevant past setting sentences |
 | NLI | klue-roberta + KorNLI base | Needs re-finetuning for novel narrative/dialogue register |
-| LLM — extraction (external API) | model TBD (fast, lower cost) | Claim extraction — most of the LLM calls |
-| LLM — judgment (external API) | model TBD (strong reasoning) | OOC judgment, ambiguous-contradiction final check, spacetime assist |
+| NER | klue-roberta, fine-tuned in-house | Claim extraction — finding character/location names (§7.1.1) |
+| Extractive QA | klue-roberta, fine-tuned in-house | Claim extraction — pulling attribute values out of a sentence (§7.1.1) |
+| LLM (external API) | model TBD | **OOC judgment only** — the hard cases left after rules and NLI (§7.2) |
 | DB | PostgreSQL + pgvector | Vector search and structured data in one DB |
 
 ---
@@ -533,13 +534,43 @@ Manuscript input -> extract_claims (claim extraction)
      -> -> validation result screen
 ```
 
+### 7.1.1 Claim extraction (no LLM)
+
+The LLM is used for OOC judgment only (§7.2); claim extraction runs on small
+in-house models and rules — it's most of the volume, so this removes its cost
+and lets it run locally.
+
+1. **Sentence split**: split the manuscript into sentences; mark dialogue
+   (inside quotes).
+2. **Names**: string-match registered names/aliases, plus an NER model for
+   names not registered yet.
+3. **Attribute cues**: only sentences with an attribute's cue words ("눈동자",
+   "머리카락", "흉터", "살", "출신", ...) are candidates.
+4. **Values**: an extractive QA model pulls the value out of the sentence
+   (e.g. "레온의 눈 색깔은?" -> "푸른색").
+5. **Pronouns / dropped subjects**: rules — among the characters named in the
+   sentence and the 2-3 before it, link only when exactly **one** candidate
+   fits (gender included), otherwise skip (missing a claim does less harm
+   than holding it against the wrong card). Judgment passes the preceding
+   named sentence along so NLI reads it in context. Character cards get a
+   gender field for this.
+6. **Namesakes**: not told apart by context — an alias in the text picks
+   the card; a name alone that fits several cards stays unlinked (§7.4).
+
+If pronoun handling proves too weak, a model trained on a coreference corpus
+is the next step.
+
 ### 7.2 Judgment modules
 
 | Module | Key input fields | Judgment method |
 |---|---|---|
-| Appearance/behavior violation | `fixed_attrs`, `latest_mutable_state`, `personality`, `world_settings` | Appearance: NLI. Behavior (OOC): LLM + personality/speech profile + world-rule-based reasoning |
+| Appearance/behavior violation | `fixed_attrs`, `latest_mutable_state`, `personality`, `world_settings` | Appearance: NLI. Behavior (OOC): speech level (honorifics etc.) by rules and contradictions of stated traits by NLI first; only the remaining hard cases go to the LLM + personality/speech profile + world-rule-based reasoning |
 | Location error | `fixed_attrs` (geography), `relations` (distance) | NLI + rule-based distance calculation |
-| Spacetime contradiction | `last_known_position`, `state_history`, `relations` | Rule-based time/distance checks + LLM assist |
+| Spacetime contradiction | `last_known_position`, `state_history`, `relations` | Rule-based time/distance checks |
+
+There is no LLM re-check of contradictions NLI finds ambiguous — the author
+makes the final call (accept / dismiss), and the dismissals collected over
+time tune NLI's contradiction threshold.
 
 ### 7.3 Parallelization notes
 
@@ -634,8 +665,8 @@ Frontend polls the API for job status
 
 | Worker type | Role | Characteristics | Scaling |
 |---|---|---|---|
-| CPU worker | Claim extraction orchestration, rule-based checks, LLM API calls | I/O-bound, throughput scales linearly with count | Horizontal autoscaling on queue depth |
-| GPU worker | Embedding, reranker, NLI inference | Needs batching for efficiency, adding instances alone doesn't help | Batch serving (vLLM) + limited scaling |
+| CPU worker | Claim extraction orchestration, rule-based checks, LLM API calls (OOC) | I/O-bound, throughput scales linearly with count | Horizontal autoscaling on queue depth |
+| GPU worker | Embedding, reranker, NLI / NER / QA inference | Needs batching for efficiency, adding instances alone doesn't help | Batch serving (vLLM) + limited scaling |
 
 #### GCP service mapping
 
@@ -807,7 +838,7 @@ both merge into "Ep.22 reunion".
 | 2 | Appearance mismatch + location contradiction detection (NLI-based) |
 | 3 | Re-validation after supplementing settings (per-flag re-judgment) |
 | 4 | Event timeline cross-check (state-history accumulation logic) |
-| 5 | OOC behavior detection (LLM-based) |
+| 5 | OOC behavior detection (rules and NLI + LLM) |
 | 6 | Concurrency handling (job queue, RLS, etc.) fully adopted + cloud deployment, worker autoscaling |
 | 7 | Character relationship graph / story timeline visualization |
 | 8 (optional) | Character illustration generation |
