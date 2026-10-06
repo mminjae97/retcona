@@ -194,8 +194,16 @@ class Personality(_AttrSection):
     goals: str | None = Field(None, max_length=_ATTR_MAX_LENGTH)  # goals/values
 
 
+Gender = Literal["male", "female", "unspecified"]
+# The pronoun the manuscript narrates the character with (그 / 그녀 / either);
+# None: what gender says (models/character.py).
+Pronoun = Literal["he", "she", "any"]
+
+
 class CharacterInput(BaseModel):
     name: str = Field(min_length=1, max_length=_NAME_MAX_LENGTH)
+    gender: Gender = "unspecified"
+    pronoun: Pronoun | None = None
     # Other names the manuscript calls it by (models/character.py).
     aliases: list[str] = Field(default_factory=list, max_length=_ALIASES_MAX)
     fixed_attrs: FixedAttrs = Field(default_factory=lambda: FixedAttrs())
@@ -232,6 +240,8 @@ class CharacterPublic(BaseModel):
 
     id: uuid.UUID
     name: str
+    gender: Gender
+    pronoun: Pronoun | None
     aliases: list[str]
     source: str  # manual | auto_detected
     fixed_attrs: FixedAttrs
@@ -304,6 +314,8 @@ def _apply(character: Character, body: CharacterInput) -> None:
         if fixed_attrs.get(key) == previous.get(key)
     }
     character.name = body.name
+    character.gender = body.gender
+    character.pronoun = body.pronoun
     character.aliases = body.aliases
     character.fixed_attrs = fixed_attrs
     character.mutable_attrs = body.mutable_attrs.stored()

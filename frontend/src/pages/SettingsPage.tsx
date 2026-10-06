@@ -9,9 +9,11 @@ import { ApiError, describeError } from "../api/client";
 import {
   ALIASES_MAX,
   FIXED_ATTR_FIELDS,
+  GENDERS,
   MUTABLE_ATTR_FIELDS,
   NAME_MAX_LENGTH,
   PERSONALITY_FIELDS,
+  PRONOUNS,
   WORLD_CATEGORIES,
   createCharacter,
   createWorldSetting,
@@ -22,7 +24,15 @@ import {
   updateCharacter,
   updateWorldSetting,
 } from "../api/settings";
-import type { CharacterInput, CharacterPublic, WorldCategory, WorldSettingInput, WorldSettingPublic } from "../api/settings";
+import type {
+  CharacterInput,
+  CharacterPublic,
+  Gender,
+  Pronoun,
+  WorldCategory,
+  WorldSettingInput,
+  WorldSettingPublic,
+} from "../api/settings";
 import "./SettingsPage.css";
 
 type Tab = "world" | "characters";
@@ -301,6 +311,8 @@ type SectionForm<Fields> = { [K in keyof Fields]: string };
 
 interface CharacterForm {
   name: string;
+  gender: Gender;
+  pronoun: Pronoun | ""; // "": follows gender
   aliases: string; // comma-separated, as typed
   fixed_attrs: SectionForm<typeof FIXED_ATTR_FIELDS>;
   mutable_attrs: SectionForm<typeof MUTABLE_ATTR_FIELDS>;
@@ -319,6 +331,8 @@ function sectionForm<Fields extends Record<string, string>>(
 function characterForm(character?: CharacterPublic): CharacterForm {
   return {
     name: character?.name ?? "",
+    gender: character?.gender ?? "unspecified",
+    pronoun: character?.pronoun ?? "",
     aliases: character?.aliases.join(", ") ?? "",
     fixed_attrs: sectionForm(FIXED_ATTR_FIELDS, character?.fixed_attrs),
     mutable_attrs: sectionForm(MUTABLE_ATTR_FIELDS, character?.mutable_attrs),
@@ -371,7 +385,12 @@ function CharactersSection({ novelId }: { novelId: string }) {
   async function handleSave(e: FormEvent) {
     e.preventDefault();
     if (busy || selected === null) return;
-    const input: CharacterInput = { ...form, name: form.name.trim(), aliases: splitAliases(form.aliases) };
+    const input: CharacterInput = {
+      ...form,
+      name: form.name.trim(),
+      pronoun: form.pronoun || null,
+      aliases: splitAliases(form.aliases),
+    };
     if (!input.name) {
       setFormError("이름을 입력해주세요.");
       return;
@@ -486,6 +505,34 @@ function CharactersSection({ novelId }: { novelId: string }) {
                     maxLength={NAME_MAX_LENGTH}
                     autoFocus={selected === "new"}
                   />
+                </label>
+                <label>
+                  성별
+                  <select value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value as Gender })}>
+                    {Object.entries(GENDERS).map(([code, label]) => (
+                      <option key={code} value={code}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  원고에서 쓰는 대명사 (선택)
+                  <select
+                    value={form.pronoun}
+                    onChange={(e) => setForm({ ...form, pronoun: e.target.value as Pronoun | "" })}
+                  >
+                    <option value="">성별에 따름</option>
+                    {Object.entries(PRONOUNS).map(([code, label]) => (
+                      <option key={code} value={code}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="alias-hint">
+                    원고가 이 캐릭터를 성별과 다른 대명사로 부르는 경우(예: 남장한 여성을 서술에서 "그"로 부름)에만
+                    지정하세요. "그"나 "그녀"만 쓰인 문장이 누구를 가리키는지 연결할 때 사용합니다.
+                  </span>
                 </label>
                 <label>
                   별칭
