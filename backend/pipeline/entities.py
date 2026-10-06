@@ -97,6 +97,10 @@ class _Cards:
         return card_id in (self.character_names if kind == "character" else self.location_ids)
 
     def find(self, claim: ExtractedClaim, refs: dict[str, uuid.UUID]) -> Match:
+        if not claim.subject:
+            # A pronoun that fits several characters: the author picks
+            # (pipeline/claim_links.py); no card, and none made.
+            return Match(None, ambiguous=True)
         key = normalize_name(claim.subject)
         if claim.subject_kind == "location":
             return Match(self.locations.get(key))

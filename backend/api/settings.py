@@ -34,6 +34,7 @@ from api.deps import get_owned_novel as _get_owned_novel
 from auth.dependencies import get_current_user
 from models.character import Character, CharacterStateHistory
 from models.claim import Claim
+from models.claim_link_choice import ClaimLinkChoice
 from models.db import get_db
 from models.flag_dismissal import FlagDismissal
 from models.relation import Relation
@@ -409,6 +410,12 @@ def delete_character(
     # The author's dismissals of flags about it have nothing left to match.
     db.execute(
         delete(FlagDismissal).where(FlagDismissal.novel_id == novel_id, FlagDismissal.subject_id == character_id)
+    )
+    # The same for what the author picked it for among a pronoun's candidates.
+    db.execute(
+        delete(ClaimLinkChoice).where(
+            ClaimLinkChoice.novel_id == novel_id, ClaimLinkChoice.subject_id == character_id
+        )
     )
     # Claims about it stay (they're the episode's), named but no longer linked.
     db.execute(

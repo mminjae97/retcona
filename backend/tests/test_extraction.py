@@ -266,9 +266,25 @@ def test_a_demonstrative_is_not_a_pronoun_but_that_fellow_is():
     assert _run("세린은 그 녀석의 푸른 눈을 보았다.", {"세린의 눈 색깔은?": "푸른"}).claims == []
 
 
-def test_a_pronoun_with_two_candidates_is_left_alone():
+def test_a_pronoun_with_two_candidates_is_left_for_the_author_to_pick():
     text = "레온은 세린을 보았다. 그의 눈이 붉게 빛났다."
-    assert _run(text, {"레온의 눈 색깔은?": "붉게", "세린의 눈 색깔은?": "붉게"}).claims == []
+    [claim] = _run(text, EYES).claims
+    assert (claim.subject, claim.subject_ref, claim.candidates) == ("", None, ["c1", "c2"])
+    assert claim.attributes == {"eye_color": "붉게"}
+    assert claim.evidence == "그의 눈이 붉게 빛났다."
+    assert claim.text == "그의 눈 색깔은 붉게이다."
+
+
+def test_a_pronoun_that_fits_a_card_the_author_has_not_made_is_not_offered():
+    # 하윤 is only a name the NER model found: there's no card to pick.
+    text = "레온은 하윤을 보았다. 그의 눈이 붉게 빛났다."
+    entities = {"레온은 하윤을 보았다.": [NamedEntity(5, 7, "PS")]}
+    assert _run(text, EYES, entities).claims == []
+
+
+def test_a_name_two_characters_share_is_left_for_the_author_to_pick():
+    [claim] = _run("김철수의 눈동자는 푸른색이었다.", {"김철수의 눈 색깔은?": "푸른색"}).claims
+    assert (claim.subject, claim.subject_ref, claim.candidates) == ("김철수", None, ["c3", "c4"])
 
 
 def test_a_cue_with_no_name_and_no_pronoun_goes_back_only_for_a_body_part():
@@ -331,11 +347,12 @@ def _pair(**overrides):
 
 
 BOTH_NAMED = "레온은 세린을 보았다. "
-EYES = {"레온의 눈 색깔은?": "붉게", "세린의 눈 색깔은?": "붉게"}
+EYES = {"레온의 눈 색깔은?": "붉게", "세린의 눈 색깔은?": "붉게", "그의 눈 색깔은?": "붉게", "그녀의 눈 색깔은?": "붉게"}
 
 
 def _subjects(text, characters):
-    return [claim.subject for claim in _run(text, EYES, characters=characters).claims]
+    """Who each claim is about; "?" for one left for the author to pick."""
+    return [claim.subject or "?" for claim in _run(text, EYES, characters=characters).claims]
 
 
 def test_what_a_card_is_narrated_with_is_its_pronoun_or_what_its_gender_says():
@@ -356,29 +373,29 @@ def test_a_pronoun_that_shows_gender_picks_among_two_candidates():
 def test_that_man_and_that_girl_show_gender_but_that_fellow_does_not():
     assert _subjects(BOTH_NAMED + "그 사내의 눈이 붉게 빛났다.", _pair()) == ["레온"]
     assert _subjects(BOTH_NAMED + "그 소녀의 눈이 붉게 빛났다.", _pair()) == ["세린"]
-    assert _subjects(BOTH_NAMED + "그 녀석의 눈이 붉게 빛났다.", _pair()) == []
+    assert _subjects(BOTH_NAMED + "그 녀석의 눈이 붉게 빛났다.", _pair()) == ["?"]
 
 
 def test_cards_without_a_gender_answer_to_either_pronoun():
     unknown = _pair(leon={"gender": "unspecified"}, serin={"gender": "unspecified"})
-    assert _subjects(BOTH_NAMED + "그의 눈이 붉게 빛났다.", unknown) == []
+    assert _subjects(BOTH_NAMED + "그의 눈이 붉게 빛났다.", unknown) == ["?"]
     # One of them known is enough to tell them apart, the other answers to either.
     half = _pair(leon={"gender": "unspecified"})
-    assert _subjects(BOTH_NAMED + "그녀의 눈이 붉게 빛났다.", half) == []
+    assert _subjects(BOTH_NAMED + "그녀의 눈이 붉게 빛났다.", half) == ["?"]
     assert _subjects(BOTH_NAMED + "그의 눈이 붉게 빛났다.", half) == ["레온"]
 
 
 def test_the_pronoun_a_card_is_narrated_with_beats_its_gender():
     # A woman living as a man, whom the narration calls 그.
     disguised = _pair(serin={"pronoun": "he"})
-    assert _subjects(BOTH_NAMED + "그의 눈이 붉게 빛났다.", disguised) == []
+    assert _subjects(BOTH_NAMED + "그의 눈이 붉게 빛났다.", disguised) == ["?"]
     assert _subjects(BOTH_NAMED + "그녀의 눈이 붉게 빛났다.", disguised) == []
     only_she = _pair(leon={"gender": "male"}, serin={"gender": "female", "pronoun": "she"})
     assert _subjects(BOTH_NAMED + "그녀의 눈이 붉게 빛났다.", only_she) == ["세린"]
     # Narrated with either: stays a candidate for both pronouns.
     either = _pair(serin={"pronoun": "any"})
     assert _subjects(BOTH_NAMED + "그녀의 눈이 붉게 빛났다.", either) == ["세린"]
-    assert _subjects(BOTH_NAMED + "그의 눈이 붉게 빛났다.", either) == []
+    assert _subjects(BOTH_NAMED + "그의 눈이 붉게 빛났다.", either) == ["?"]
 
 
 def test_with_one_candidate_the_pronoun_is_not_held_against_it():

@@ -31,6 +31,8 @@ class Subject:
     # The pronoun the manuscript narrates a character with: he (그), she (그녀)
     # or any (not known, or either). Not part of who it is.
     pronoun: str = field(default="any", compare=False)
+    # A name several characters share: their refs, for the author to pick from.
+    candidates: tuple[str, ...] = field(default=(), compare=False)
 
     @property
     def key(self) -> tuple[str, str]:
@@ -111,7 +113,8 @@ class Registry:
         if len(candidates) == 1:
             return candidates[0]
         if candidates and all(subject.kind == "character" for subject in candidates):
-            return Subject("character", " ".join(unicodedata.normalize("NFC", text).split()))
+            name = " ".join(unicodedata.normalize("NFC", text).split())
+            return Subject("character", name, candidates=tuple(s.ref for s in candidates if s.ref))
         return None
 
     def mentions(self, narration: str) -> list[Mention]:
@@ -372,9 +375,21 @@ def _characters(mentions: list[Mention]) -> dict[tuple[str, str], Subject]:
     return {m.subject.key: m.subject for m in mentions if m.subject.kind == "character"}
 
 
-def owner(sentences: list[Sentence], mentions: list[list[Mention]], index: int, hit: CueHit) -> Subject | None:
-    """The character a cue in sentences[index] is about, None where that isn't
-    clear. mentions[i]: sentences[i]'s mentions."""
+@dataclass(frozen=True)
+class Ambiguous:
+    """A cue whose owner is one of several characters the pronoun fits, which
+    the author can pick from."""
+
+    subjects: tuple[Subject, ...]  # registered characters, two or more
+    kind: str  # the pronoun's: he | she | any
+
+
+def owner(
+    sentences: list[Sentence], mentions: list[list[Mention]], index: int, hit: CueHit
+) -> Subject | Ambiguous | None:
+    """The character a cue in sentences[index] is about; Ambiguous where a
+    pronoun fits several registered characters; None where that isn't clear.
+    mentions[i]: sentences[i]'s mentions."""
     narration = sentences[index].narration
     here = _characters(mentions[index])
 
@@ -429,4 +444,10 @@ def owner(sentences: list[Sentence], mentions: list[list[Mention]], index: int, 
         kind = possessor_kind if pronoun_possessor else _pronoun_kind(early.group()) if early else "any"
         if kind != "any":
             candidates = {key: subject for key, subject in candidates.items() if subject.pronoun in (kind, "any")}
+        if len(candidates) > 1:
+            registered = tuple(subject for subject in candidates.values() if subject.ref)
+            # Only between cards the author has: one of an unregistered name
+            # can't be picked.
+            if len(registered) == len(candidates):
+                return Ambiguous(registered, kind)
     return next(iter(candidates.values())) if len(candidates) == 1 else None

@@ -58,9 +58,14 @@ _ATTR_KEYS = {
 class ExtractedClaim(BaseModel):
     claim_type: Literal["appearance", "behavior", "location", "spacetime"]
     subject_kind: Literal["character", "location"]
-    subject: str = Field(min_length=1, max_length=NAME_MAX_LENGTH)
+    # Empty only for a claim about "그" that fits several characters (candidates).
+    subject: str = Field(default="", max_length=NAME_MAX_LENGTH)
     # The known character's ref from the prompt; checked by entity matching.
     subject_ref: str | None = None
+    # Refs of the characters it could be, where it couldn't be tied to one: the
+    # author picks (pipeline/claim_links.py). A name several share has them
+    # too, as the subject.
+    candidates: list[str] = Field(default_factory=list)
     text: str = Field(min_length=1)
     evidence: str | None = None
     attributes: dict[str, str] = Field(default_factory=dict)
@@ -92,6 +97,12 @@ class ExtractedClaim(BaseModel):
         return {str(key): str(item).strip()[:ATTR_MAX_LENGTH] for key, item in value.items() if item is not None}
 
     @model_validator(mode="after")
+    def _has_a_subject_or_candidates(self) -> "ExtractedClaim":
+        if not self.subject and not self.candidates:
+            raise ValueError("A claim needs a subject or the characters it could be")
+        return self
+
+    @model_validator(mode="after")
     def _card_keys_only(self) -> "ExtractedClaim":
         # Only the keys a card of this kind has (a location has no eye color), non-empty.
         allowed = _ATTR_KEYS[self.subject_kind]
@@ -116,10 +127,18 @@ _PERSON, _PLACE = "PS", "LC"
 @dataclass(frozen=True)
 class _Question:
     sentence: int
-    subject: rules.Subject
+    # None: a pronoun that fits several characters (candidates)
+    subject: rules.Subject | None
+    candidates: tuple[rules.Subject, ...]
+    # Who the claim is said to be about: the name, or the pronoun
+    who: str
     attribute: rules.Attribute | None  # None: a location's features
     question: str
     context: str
+
+    @property
+    def about(self) -> tuple:
+        return self.subject.key if self.subject else ("?", *sorted(s.ref or "" for s in self.candidates))
 
 
 def _clean_value(value: str) -> str:
@@ -168,21 +187,31 @@ def _questions(sentences: list[Sentence], mentions: list[list[rules.Mention]]) -
             continue
         narration = sentence.narration
         for hit in rules.cue_hits(narration):
-            subject = rules.owner(sentences, mentions, i, hit)
-            key = (i, subject.key if subject else None, hit.attribute.key)
-            if subject is None or key in seen:
+            owner = rules.owner(sentences, mentions, i, hit)
+            if owner is None:
+                continue
+            if isinstance(owner, rules.Ambiguous):
+                subject, candidates, who = None, owner.subjects, "그녀" if owner.kind == "she" else "그"
+            else:
+                subject, candidates, who = owner, (), owner.name
+            question = _Question(
+                i, subject, candidates, who, hit.attribute, f"{who}의 {hit.attribute.label}?",
+                " ".join(narration[hit.clause[0] : hit.clause[1]].split()),
+            )  # fmt: skip
+            key = (i, question.about, hit.attribute.key)
+            if key in seen:
                 continue
             seen.add(key)
-            context = " ".join(narration[hit.clause[0] : hit.clause[1]].split())
-            questions.append(_Question(i, subject, hit.attribute, f"{subject.name}의 {hit.attribute.label}?", context))
+            questions.append(question)
         for mention in mentions[i]:
             key = (i, mention.subject.key, "features")
             # A place the sentence is about, not one a character is said to be at.
             if mention.subject.kind != "location" or not mention.topic or key in seen:
                 continue
             seen.add(key)
-            question = f"{mention.subject.name}의 {rules.LOCATION_QUESTION}?"
-            questions.append(_Question(i, mention.subject, None, question, " ".join(narration.split())))
+            name = mention.subject.name
+            question = f"{name}의 {rules.LOCATION_QUESTION}?"
+            questions.append(_Question(i, mention.subject, (), name, None, question, " ".join(narration.split())))
     return questions
 
 
@@ -211,27 +240,32 @@ def extract_claims(
         value = _clean_value(raw)
         if question.attribute is None:
             key, valid = "features", len(value) >= 2
-            statement = location_statement(question.subject.name, value)
+            statement = location_statement(question.who, value)
         else:
             value = rules.value_of(question.attribute, value, question.context)
             key, valid = question.attribute.key, bool(value)
-            statement = character_statement(question.subject.name, key, value)
+            statement = character_statement(question.who, key, value)
         if not valid:
             continue
-        _, attributes, statements = grouped.setdefault((question.sentence, question.subject.key), (question, {}, []))
+        _, attributes, statements = grouped.setdefault((question.sentence, question.about), (question, {}, []))
         attributes[key] = value
         statements.append(statement)
 
     extraction = Extraction()
     for question, attributes, statements in grouped.values():
         subject = question.subject
+        if subject is None:  # a pronoun that fits several characters
+            kind, name, ref, candidates = "character", "", None, [s.ref for s in question.candidates if s.ref]
+        else:
+            kind, name, ref, candidates = subject.kind, subject.name, subject.ref, list(subject.candidates)
         try:
             extraction.claims.append(
                 ExtractedClaim(
-                    claim_type="appearance" if subject.kind == "character" else "location",
-                    subject_kind=subject.kind,
-                    subject=subject.name,
-                    subject_ref=subject.ref,
+                    claim_type="appearance" if kind == "character" else "location",
+                    subject_kind=kind,
+                    subject=name,
+                    subject_ref=ref,
+                    candidates=candidates,
                     text=" ".join(statements),
                     evidence=sentences[question.sentence].text,
                     attributes=attributes,

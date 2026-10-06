@@ -46,10 +46,11 @@ from models.episode import Episode
 from models.location import Location
 from models.novel import Novel
 from models.validation_run import ValidationRun
+from pipeline.claim_links import apply_choices, load_choices
 from pipeline.context_bundle import get_context_bundle
 from pipeline.dismissals import dismissal_key, dismissed_keys
 from pipeline.entities import Match, match_and_register, resolve_subjects
-from pipeline.extract_claims import Extraction, extract_claims
+from pipeline.extract_claims import ExtractedClaim, Extraction, extract_claims
 from pipeline.judges import Flag, judge_appearance, judge_location
 from pipeline.merge import apply_new_information, merge_and_dedupe
 
@@ -136,9 +137,17 @@ def _read_input(novel_id: uuid.UUID, episode_id: uuid.UUID) -> _Input:
 
 
 def _judge(
-    novel_id: uuid.UUID, episode_id: uuid.UUID, extraction: Extraction, refs: dict[str, uuid.UUID]
+    novel_id: uuid.UUID,
+    episode_id: uuid.UUID,
+    extraction: Extraction,
+    refs: dict[str, uuid.UUID],
+    cards: dict[str, dict],
 ) -> tuple[list[Match], list[Flag]]:
     with SessionLocal() as db:
+        # What the author picked for claims the extraction couldn't tie to a card
+        # (pipeline/claim_links.py) turns them into claims about it, so they're
+        # judged like any other.
+        extraction.claims = apply_choices(extraction.claims, load_choices(db, novel_id, episode_id), refs, cards)
         matches = resolve_subjects(db, novel_id, extraction.claims, refs)
         bundle = get_context_bundle(db, novel_id, episode_id, matches)
     try:
@@ -150,6 +159,21 @@ def _judge(
         raise RunFailed("inference_failed") from exc
 
 
+def _candidates(
+    claim: ExtractedClaim, subject_id: uuid.UUID | None, refs: dict[str, uuid.UUID], cards: dict[str, dict]
+) -> list[dict]:
+    """The cards a claim with no card of its own could be, as the result screen
+    offers them: [{"kind", "id", "name", "aliases"}] — the aliases tell two
+    characters with one name apart; empty for a claim tied to one."""
+    if subject_id is None:
+        return [
+            {"kind": "character", "id": str(refs[ref]), "name": cards[ref]["name"], "aliases": cards[ref]["aliases"]}
+            for ref in claim.candidates
+            if ref in refs
+        ]
+    return []
+
+
 def _store(
     novel_id: uuid.UUID,
     run_id: uuid.UUID,
@@ -159,6 +183,8 @@ def _store(
     extraction: Extraction,
     matches: list[Match],
     flags: list[Flag],
+    refs: dict[str, uuid.UUID],
+    cards: dict[str, dict],
 ) -> None:
     with SessionLocal() as db:
         _lock_novel(db, novel_id)
@@ -191,6 +217,9 @@ def _store(
         registration = match_and_register(db, novel_id, extraction.claims, matches)
         subject_ids = registration.subject_ids
         claim_ids = [uuid.uuid4() for _ in extraction.claims]
+        # A claim that couldn't be tied to a card keeps the cards it could be,
+        # for the author to pick (pipeline/claim_links.py).
+        candidates = [_candidates(claim, subject_id, refs, cards) for claim, subject_id in zip(extraction.claims, subject_ids, strict=True)]
         db.add_all(
             Claim(
                 id=claim_id,
@@ -200,11 +229,15 @@ def _store(
                 claim_type=claim.claim_type,
                 subject_kind=claim.subject_kind,
                 subject_id=subject_id,
-                subject_name=claim.subject,
+                subject_name=claim.subject or None,
                 evidence_text=claim.evidence,
                 attributes=claim.attributes,
+                candidates=options,
+                link_status="pending" if options else None,
             )
-            for claim_id, claim, subject_id in zip(claim_ids, extraction.claims, subject_ids, strict=True)
+            for claim_id, claim, subject_id, options in zip(
+                claim_ids, extraction.claims, subject_ids, candidates, strict=True
+            )
         )
         statuses = [
             "dismissed"
@@ -239,6 +272,7 @@ def _store(
         run.content_updated_at = content_updated_at
         run.summary = {
             "claims": len(extraction.claims),
+            "pending_links": sum(1 for options in candidates if options),
             "dropped_claims": extraction.dropped,
             "new_characters": registration.new_characters,
             "new_locations": registration.new_locations,
@@ -274,7 +308,8 @@ def validate_episode(novel_id: uuid.UUID, run_id: uuid.UUID) -> None:
         except InferenceError as exc:
             logger.exception("Validation run %s: the NER/QA model failed", run_id)
             raise RunFailed("inference_failed") from exc
-        matches, flags = _judge(novel_id, episode_id, extraction, run_input.refs)
+        cards = {character["ref"]: character for character in run_input.characters}
+        matches, flags = _judge(novel_id, episode_id, extraction, run_input.refs, cards)
         _store(
             novel_id,
             run_id,
@@ -284,6 +319,8 @@ def validate_episode(novel_id: uuid.UUID, run_id: uuid.UUID) -> None:
             extraction,
             matches,
             flags,
+            run_input.refs,
+            cards,
         )
     except RunFailed as exc:
         _finish_failed(novel_id, run_id, exc.code)

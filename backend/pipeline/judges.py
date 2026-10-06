@@ -83,7 +83,7 @@ def repeats(value: str, setting: str) -> bool:
 
 def _pairs(claims: list[ExtractedClaim], bundle: ContextBundle, kind: str, keys: tuple[str, ...]) -> list[_Pair]:
     this_episode = str(bundle.episode_id)
-    subjects = {normalize_name(claim.subject) for claim in claims if claim.subject_kind == kind}
+    subjects = {normalize_name(claim.subject) for claim in claims if claim.subject_kind == kind and claim.subject}
     pairs = []
     for index, claim in enumerate(claims):
         if claim.subject_kind != kind:
