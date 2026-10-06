@@ -45,12 +45,14 @@ def character_statement(name: str, attribute: str, value: str) -> str:
     return f"{name}의 {CHARACTER_ATTR_TOPICS[attribute]} {as_statement(value)}"
 
 
+# What a feature cut off a sentence can end in besides a final 다 ("안개가 짙었고").
+_CONNECTIVES = ("고", "며", "면서", "지만", "는데", "으나", "아서", "어서")
+
+
 def location_statement(name: str, value: str) -> str:
-    # A location's features read as what the place is ("검은 숲은 ...이다").
+    # A location's features read as what the place is ("검은 숲은 ...이다"), or, where the
+    # value is what a sentence says of it ("한없이 넓다", "안개가 짙었고"), as that.
+    value = value.rstrip()
+    if " " in value and value.rstrip(".").endswith(("다", *_CONNECTIVES)):
+        return f"{name}{topic_particle(name)} {value.rstrip('.')}."
     return f"{name}{topic_particle(name)} {as_statement(value)}"
-
-
-def read_location_statement(name: str, predicate: str) -> str:
-    # What a sentence says of a place, as it says it ("검은 숲은 안개가 짙었고."):
-    # the predicate is already one, so no 이다.
-    return f"{name}{topic_particle(name)} {predicate.rstrip().rstrip('.')}."

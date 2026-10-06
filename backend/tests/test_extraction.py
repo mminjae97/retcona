@@ -402,6 +402,16 @@ def test_a_pronoun_in_what_is_said_is_somebody_else_s_doing():
     assert _run("검은 숲은 그가 지켜 왔다.", {}).claims == []
 
 
+def test_a_comma_in_a_number_does_not_end_the_clause():
+    [claim] = _run("검은 숲은 둘레가 1,000리에 달했다.", {}).claims
+    assert claim.attributes == {"features": "둘레가 1,000리에 달했다"}
+
+
+def test_노을_is_not_an_object():
+    [claim] = _run("검은 숲은 노을 속에 잠겼다.", {}).claims
+    assert claim.attributes == {"features": "노을 속에 잠겼다"}
+
+
 def test_a_place_only_mentioned_in_passing_is_not_asked_about():
     assert _run("레온은 검은 숲 입구에서 말을 멈췄다.", {"검은 숲의 특징은?": "입구"}).claims == []
 

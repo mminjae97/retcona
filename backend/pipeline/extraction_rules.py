@@ -277,7 +277,7 @@ _QUOTE = re.compile(r"[\"“”‘’「」『』]")
 # An object particle on a word ("병사들을 ..."), at the end of the clause too.
 _NOT_A_DESCRIPTION = re.compile(r"(?<=[가-힣])[을를](?=\s|$)")
 # Nouns that end in 을 themselves ("마을 북쪽에"), unless 을/를 follows ("마을을").
-_VILLAGE_NOUNS = re.compile(r"(?:마을|가을|고을)(?![을를])")
+_VILLAGE_NOUNS = re.compile(r"(?:마을|가을|고을|노을)(?![을를])")
 
 
 @dataclass(frozen=True)
@@ -289,7 +289,8 @@ class CueHit:
 
 def _clauses(narration: str) -> list[tuple[int, int]]:
     spans, start = [], 0
-    for match in re.finditer(r"[,，、]", narration):
+    # Not the comma inside a number ("1,000리").
+    for match in re.finditer(r"(?<!\d),(?!\d)|[，、]", narration):
         spans.append((start, match.start()))
         start = match.end()
     spans.append((start, len(narration)))
