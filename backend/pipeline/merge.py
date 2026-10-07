@@ -85,6 +85,8 @@ def apply_new_information(
     nothing. The caller holds the novel's row lock, so the cards read here are
     the ones being written."""
     flagged = {(flag.claim_index, flag.attribute) for flag in flags}
+    # A feature held against the place's state is no setting to add either.
+    flagged |= {(flag.claim_index, key) for flag in flags if flag.attribute in STATE_ATTR_KEYS for key in GEO_ATTR_KEYS}
     source = str(episode_id)
     # Cards entity matching just created go in first: the state history
     # below references them.

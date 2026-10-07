@@ -68,6 +68,8 @@ function describeActionError(err: unknown): string {
   if (err instanceof ApiError && err.status === 409) {
     if (err.message === "flag_card_missing") return "설정 카드가 삭제되어 반영할 수 없습니다.";
     if (err.message === "flag_no_value") return "이 항목은 반영할 값이 없습니다.";
+    if (err.message === "flag_no_setting")
+      return "상태 모순은 설정을 보완해 재검증할 수 없습니다. 원고를 고치거나 오탐으로 해제해 주세요.";
     if (err.message === "flag_run_active") return "이 화의 검증이 진행 중입니다. 검증이 끝난 뒤 반영해 주세요.";
     if (err.message === "flag_outdated") return "검증 이후 원고가 수정되었습니다. 다시 검증한 뒤 반영해 주세요.";
     if (err.message === "flag_setting_changed")
@@ -721,7 +723,10 @@ function FlagCard({
   const revalidation = flag.revalidation;
   // Only a flag on a card that's still there, and not while a run is going
   // (it replaces this run's flags when it finishes).
-  const canRevalidate = flag.status === "open" && flag.subject_id !== null && !!flag.attribute && !runActive;
+  // A state flag is held against what an earlier episode says, not a card value to supplement.
+  const isState = flag.attribute === "state";
+  const canRevalidate =
+    flag.status === "open" && flag.subject_id !== null && !!flag.attribute && !isState && !runActive;
 
   function openForm() {
     setDraft(flag.reference_text ?? "");
@@ -788,7 +793,7 @@ function FlagCard({
             </>
           )}
         </dd>
-        <dt>설정</dt>
+        <dt>{isState ? "이전 화의 상태" : "설정"}</dt>
         <dd>{flag.reference_text}</dd>
       </dl>
       {flag.status === "open" && (
@@ -816,7 +821,9 @@ function FlagCard({
                   ? "이 화의 검증이 진행 중입니다. 검증이 끝난 뒤 재검증할 수 있습니다."
                   : flag.subject_id === null
                     ? "설정 카드가 삭제되어 재검증할 수 없습니다."
-                    : undefined
+                    : isState
+                      ? "이전 화의 상태와 어긋난 항목이라 설정을 보완해 재검증할 수 없습니다. 원고를 고치거나 오탐으로 해제해 주세요."
+                      : undefined
               }
             >
               설정 보완 후 재검증

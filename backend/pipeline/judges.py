@@ -25,6 +25,11 @@ then, since a restatement shaped like the premise gets synonyms ("하늘빛" /
 the model when the card has a value from somewhere other than this episode
 and the claim's value doesn't simply repeat it.
 
+A place's features are also held against the state an earlier episode left it
+in (the context bundle's card.state): a flag with attribute "state", which says
+"the place was in this state", not that its card is wrong — so it has no setting
+to supplement and no value to accept; the author dismisses it or fixes the text.
+
 Only fixed attributes are judged: mutable ones (hairstyle, outfit, ...)
 change over the story, and a change is state history, not an error. Distance
 between locations needs distances in relations first — with spacetime
@@ -37,7 +42,7 @@ from dataclasses import dataclass
 
 from ai.nli_rerank import check_contradictions
 from models.character import FIXED_ATTR_KEYS
-from models.location import GEO_ATTR_KEYS
+from models.location import GEO_ATTR_KEYS, STATE_ATTR_KEYS
 from pipeline.context_bundle import Card, ContextBundle
 from pipeline.entities import normalize_name
 from pipeline.extract_claims import ExtractedClaim
@@ -66,6 +71,7 @@ class _Pair:
     premise: str
     hypothesis: str
     evidence: str
+    reference: str  # what the claim is held against, as the flag shows it
 
 
 def _premise(card: Card, attribute: str, value: str) -> str:
@@ -103,8 +109,37 @@ def _pairs(
         for attribute, value in claim.attributes.items():
             if attribute not in keys or not _to_judge(card, attribute, value, this_episode):
                 continue
-            premise = _premise(card, attribute, card.attrs[attribute])
-            pairs.append(_Pair(index, card, attribute, premise, hypothesis, evidence))
+            setting = card.attrs[attribute]
+            pairs.append(_Pair(index, card, attribute, _premise(card, attribute, setting), hypothesis, evidence, setting))
+    return pairs
+
+
+def _state_pairs(claims: list[ExtractedClaim], bundle: ContextBundle) -> list[_Pair]:
+    """A place's features against the state an earlier episode left it in: a
+    city described as thriving after it fell. Not a place this episode itself
+    changes the state of (the story changing the place back, or on, is not an
+    error, and what it says around the change is of the state it leaves it in,
+    not the old one), and not a place that has no state yet."""
+    subjects = {normalize_name(claim.subject) for claim in claims if claim.subject_kind == "location" and claim.subject}
+    changed = {
+        card.id
+        for index, claim in enumerate(claims)
+        if claim.subject_kind == "location"
+        and (card := bundle.card_for(index)) is not None
+        and any(key in claim.attributes for key in STATE_ATTR_KEYS)
+    }
+    pairs = []
+    for index, claim in enumerate(claims):
+        card = bundle.card_for(index)
+        if claim.subject_kind != "location" or card is None or not card.state or card.id in changed:
+            continue
+        if not any(claim.attributes.get(key) for key in GEO_ATTR_KEYS):
+            continue
+        evidence = claim.evidence or claim.text
+        hypothesis = _hypothesis(normalize_name(claim.subject), evidence, claim.text, subjects)
+        pairs.append(
+            _Pair(index, card, STATE_ATTR_KEYS[0], location_statement(card.name, card.state), hypothesis, evidence, card.state)
+        )
     return pairs
 
 
@@ -160,7 +195,7 @@ def _judge(pairs: list[_Pair], error_type: str) -> list[Flag]:
             attribute=pair.attribute,
             confidence=round(score.contradiction, 4),
             evidence_text=pair.evidence,
-            reference_text=pair.card.attrs[pair.attribute],
+            reference_text=pair.reference,
         )
         for pair, score in zip(pairs, scores, strict=True)
         if score.contradiction >= CONTRADICTION_THRESHOLD
@@ -182,13 +217,12 @@ def judge_behavior(claims: list[ExtractedClaim], context_bundle: ContextBundle) 
 
 
 def judge_location(claims: list[ExtractedClaim], context_bundle: ContextBundle) -> list[Flag]:
-    """A location's geographic features against its card, by NLI."""
+    """A location's geographic features against its card, and against the state
+    an earlier episode left it in (location_state_history), by NLI. A "state"
+    claim (a change the story makes) is held against neither."""
     # TODO (stage 4): rule-based distance calculation, once relations carry distances
-    # TODO (stage 4): a later episode's features against the place's latest state
-    # (location_state_history, written by pipeline/merge.py): a city described again
-    # after it fell. Only features are compared with the card here; a "state" claim
-    # (a change the story makes) never is.
-    return _judge(_pairs(claims, context_bundle, "location", GEO_ATTR_KEYS), "location")
+    pairs = _pairs(claims, context_bundle, "location", GEO_ATTR_KEYS) + _state_pairs(claims, context_bundle)
+    return _judge(pairs, "location")
 
 
 def judge_timeline(claims: list[ExtractedClaim], context_bundle: ContextBundle) -> list[Flag]:
