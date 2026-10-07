@@ -22,7 +22,10 @@ function AuthExpiryRedirect() {
   useEffect(
     () =>
       onAuthExpired(({ sessionEnded }) => {
-        if (location.pathname === "/login") return;
+        // The login screen is where this goes anyway, and the introduction is open to
+        // everyone: a visitor whose session has ended just sees it signed out (the
+        // header follows the same event), and isn't sent away from it.
+        if (location.pathname === "/login" || location.pathname === "/") return;
         // The token is already dead (apiFetch cleared it before firing this);
         // this navigate() can still be declined by a page's own useBlocker
         // (e.g. the editor, guarding unsaved/unbacked-up text) — the data
