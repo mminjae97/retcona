@@ -76,6 +76,40 @@ def test_coming_back_is_found():
 @pytest.mark.parametrize(
     "text",
     [
+        "레온은 언데드가 되어 일어났다.",
+        "레온은 언데드가 되었다.",
+        "네크로맨서가 레온을 되살렸다.",
+        "마법사는 레온의 시체를 언데드로 만들었다.",
+        "레온의 시체가 언데드가 되어 일어났다.",
+        "언데드가 된 레온이 나타났다.",
+    ],
+)
+def test_a_character_brought_back_as_the_undead_or_by_another_is_a_coming_back(text):
+    condition, presence = _said(text)["레온"]
+    assert rules.is_revival(condition) and not rules.is_death(condition) and presence == ""
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "레온은 다시 일어났다.",  # a fall and a getting up
+        "의사는 레온을 살려냈다.",  # saved from dying
+        "마법사는 레온을 되살리지 못했다.",
+        "마법사는 레온을 되살리는 꿈을 꾸었다.",
+    ],
+)
+def test_getting_up_again_or_a_failed_or_dreamed_revival_is_not_one(text):
+    assert not rules.is_revival(_said(text)["레온"][0])
+
+
+def test_the_one_who_brings_another_back_is_not_brought_back():
+    said = _said("세린은 레온을 되살렸다.")
+    assert said["세린"][0] == "" and rules.is_revival(said["레온"][0])
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
         "레온은 예전에 이곳에서 자랐다.",
         "레온은 세린의 무덤 앞에 섰다.",
         "세린은 죽은 레온을 기억했다.",
@@ -84,6 +118,18 @@ def test_coming_back_is_found():
 )
 def test_the_dead_remembered_mourned_or_seen_as_a_ghost_do_not_appear(text):
     assert all(presence == "" for _, presence in _said(text).values())
+
+
+def test_what_is_recorded_of_a_coming_back_is_read_as_one_by_the_judgment():
+    dead, back = uuid.uuid4(), uuid.uuid4()
+    db = MagicMock()
+    db.execute.return_value = [
+        _history(dead, 3, {"condition": "숨을 거두었다"}),
+        _history(dead, 5, {"condition": "되살렸다"}),
+        _history(back, 3, {"condition": "전사했다"}),
+        _history(back, 4, {"condition": "언데드가 된"}),
+    ]
+    assert deaths_before(db, uuid.uuid4(), 6, [dead, back]) == {}
 
 
 def test_a_character_doing_something_is_there():
