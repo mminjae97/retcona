@@ -82,6 +82,7 @@ def test_a_death_with_a_subject_of_its_own_is_not_the_sentences_subjects(text):
         "레온은 일찍이 죽었다.",
         "레온은 꿈을 이루지 못한 채 죽었다.",  # 꿈 is not what the death is likened to
         "레온은 따듯한 품에서 숨을 거두었다.",
+        "레온은 임무를 마치고 숨을 거두었다.",  # 마치다, not the adverb 마치
     ],
 )
 def test_a_death_is_still_the_subjects_with_a_verb_an_adverb_or_an_unrelated_word_before_it(text):
@@ -173,6 +174,20 @@ def test_a_character_doing_something_is_there():
     assert _said("레온은 문을 열고 들어섰다.")["레온"] == ("", "문을 열고 들어섰다")
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "레온은 전사들을 이끌고 들어섰다.",  # 전사 as a soldier
+        "레온은 편지를 전해주었다.",
+        "레온은 해가 떠올라도 문을 열고 들어섰다.",
+        "레온은 유해한 연기를 헤치고 들어섰다.",
+    ],
+)
+def test_words_that_only_look_like_the_dead_or_the_past_do_not_hide_a_presence(text):
+    condition, presence = _said(text)["레온"]
+    assert condition == "" and presence != ""
+
+
 # --- extraction ----------------------------------------------------------------
 
 
@@ -188,6 +203,13 @@ def test_a_death_is_a_condition_claim_whoever_it_is_of():
     assert (claim.claim_type, claim.subject, claim.subject_ref) == ("appearance", "레온", "c1")
     assert claim.attributes == {"condition": "숨을 거두었다"}
     assert claim.evidence == "레온은 숨을 거두었다."
+
+
+def test_a_claim_where_the_character_is_not_the_topic_is_restated_as_the_sentence():
+    [claim] = _extract("마법사가 레온을 되살렸다.").claims
+    assert claim.text == claim.evidence == "마법사가 레온을 되살렸다."
+    [claim] = _extract("레온은 다시 되살아났다.").claims
+    assert claim.text.startswith("레온은 ")
 
 
 def test_presence_is_only_claimed_of_a_character_who_died_before():

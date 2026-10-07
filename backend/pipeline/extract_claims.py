@@ -298,13 +298,16 @@ def _spacetime_claims(
             else:
                 continue
             seen.add(subject.key)
+            # Restated with the character as the subject only where it is the
+            # sentence's topic: "마법사가 레온을 되살렸다" isn't "레온은 되살렸다".
+            text = f"{subject.name}{topic_particle(subject.name)} {as_statement(said)}" if mention.topic else sentence.text
             found.append(
                 {
                     "claim_type": claim_type,
                     "subject_kind": "character",
                     "subject": subject.name,
                     "subject_ref": subject.ref,
-                    "text": f"{subject.name}{topic_particle(subject.name)} {as_statement(said)}",
+                    "text": text,
                     "evidence": sentence.text,
                     "attributes": {key: said},
                 }

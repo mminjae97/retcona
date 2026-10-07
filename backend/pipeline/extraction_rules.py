@@ -368,7 +368,8 @@ _REVIVE_OBJECT = re.compile(
 _BODY = r"(?:시체|시신|유해|유골|뼈|영혼|혼)"
 _AFTER_NAME = re.compile(rf"^(?:(?P<object>[을를])|의\s?{_BODY}(?:(?P<body_object>[을를])|[이가은는]))\s?(?P<tail>.*)$")
 # Not something that happened: likened, pretended, dreamed.
-_NOT_ACTUAL = re.compile(r"마치|처럼|듯|척|꿈|악몽|만약|차라리")
+# ("마치" only as the adverb, not the start of "마치고".)
+_NOT_ACTUAL = re.compile(r"(?<![가-힣])마치(?![가-힣])|처럼|듯|척|꿈|악몽|만약|차라리")
 # Adverbs in -이 ("어이없이 죽었다"), not a subject of their own.
 _ADVERB_I = re.compile(r"(?:없이|같이|깊이|높이|일찍이|가까이|괴로이|외로이|쓸쓸이|헛되이|고이)$")
 
@@ -381,10 +382,10 @@ def _not_actual(said: str) -> bool:
 # a memory: a character who died is spoken of, remembered, mourned, or seen as a
 # ghost, and none of it is the character turning up again.
 _NOT_PRESENT = re.compile(
-    r"소식|소문|무덤|묘비|묘지|장례|유해|시신|유품|추모|애도|죽음|죽은|죽었|죽기|숨진|사망|전사|유령|영혼|망령|환영|제사"
-    r"|예전|옛날|옛적|어릴\s?적|어린\s?시절|과거|지난|한때|당시|회상|떠올|기억|추억|그리워|그리움"
+    r"소식|소문|무덤|묘비|묘지|장례|유해(?!한)|시신|유품|추모|애도|죽음|죽은|죽었|죽기|숨진|사망|전사\s?(?:했|하였)|유령|영혼|망령|환영|제사"
+    r"|예전|옛날|옛적|어릴\s?적|어린\s?시절|과거|지난|한때|당시|회상|떠올리|떠올렸|기억|추억|그리워|그리움"
     # ...and what is told or left of them afterwards.
-    r"|유언|전설|전해|[다라]고\s?한다|알려져|불렸|불린"
+    r"|유언|전설|전해\s?(?:들|지|진|내려)|[다라]고\s?한다|알려져|불렸|불린"
 )
 
 
