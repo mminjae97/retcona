@@ -1,7 +1,8 @@
-// The frame every page sits in: a header with the service logo, the places of the
-// service to go to and, on the right, a login button — or, with a session, the
-// profile button (My Page and logout are there). Inside a novel's pages a second
-// row of the header lists that novel's screens.
+// The frame every page sits in: a header with the service logo (it leads to the
+// introduction), the dashboard link for a signed-in author and, on the right, a
+// login button — or, with a session, the profile button (My Page and logout are
+// there). Inside a novel's pages a second row of the header lists that novel's
+// screens.
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, useLocation, useMatch, useNavigate } from "react-router-dom";
@@ -128,9 +129,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
             <img src={logoUrl} alt="Retcona" />
           </Link>
           <nav className="app-nav" aria-label="주요 메뉴">
-            <HeaderLink to="/" end>
-              서비스 소개
-            </HeaderLink>
             {signedIn && <HeaderLink to="/dashboard">대시보드</HeaderLink>}
           </nav>
           <div className="app-topbar-end">
