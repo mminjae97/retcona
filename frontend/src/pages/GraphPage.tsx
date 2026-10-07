@@ -170,7 +170,8 @@ export default function GraphPage() {
               selectedRelationId={editingId}
               onSelectRelation={(id) => {
                 const relation = relations.find((other) => other.id === id);
-                if (relation) startEditing(relation);
+                // Not while a save or delete is under way: it would swap the form out from under it.
+                if (relation && !busy) startEditing(relation);
               }}
             />
             <p className="graph-hint">캐릭터는 끌어서 옮길 수 있고, 선을 누르면 그 관계를 수정할 수 있습니다.</p>

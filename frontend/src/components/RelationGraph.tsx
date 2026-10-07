@@ -37,7 +37,12 @@ function pairKey(a: string, b: string): string {
 function endpoints(link: GraphLink) {
   const source = link.source as GraphNode;
   const target = link.target as GraphNode;
-  const [sx, sy, tx, ty] = [source.x ?? 0, source.y ?? 0, target.x ?? 0, target.y ?? 0];
+  const [sx, sy, tx, ty] = [
+    source.x ?? WIDTH / 2,
+    source.y ?? HEIGHT / 2,
+    target.x ?? WIDTH / 2,
+    target.y ?? HEIGHT / 2,
+  ];
   const dx = tx - sx;
   const dy = ty - sy;
   const length = Math.hypot(dx, dy) || 1;
@@ -80,18 +85,20 @@ export default function RelationGraph({ characters, relations, selectedRelationI
       name: character.name,
       ...positions.current.get(character.id),
     }));
-    const known = new Set(nodes.map((node) => node.id));
+    const byId = new Map(nodes.map((node) => [node.id, node]));
     const counts = new Map<string, number>();
     const links: GraphLink[] = [];
     for (const relation of relations) {
-      if (!known.has(relation.from_id) || !known.has(relation.to_id)) continue;
+      const source = byId.get(relation.from_id);
+      const target = byId.get(relation.to_id);
+      if (!source || !target) continue;
       const pair = pairKey(relation.from_id, relation.to_id);
       const slot = counts.get(pair) ?? 0;
       counts.set(pair, slot + 1);
       links.push({
         id: relation.id,
-        source: relation.from_id,
-        target: relation.to_id,
+        source,
+        target,
         type: relation.relation_type,
         directed: relation.directed,
         slot,
@@ -99,7 +106,7 @@ export default function RelationGraph({ characters, relations, selectedRelationI
       });
     }
     for (const link of links) {
-      link.of = counts.get(pairKey(link.source as string, link.target as string)) ?? 1;
+      link.of = counts.get(pairKey((link.source as GraphNode).id, (link.target as GraphNode).id)) ?? 1;
     }
     return { nodes, links };
   }, [characters, relations]);
@@ -117,6 +124,8 @@ export default function RelationGraph({ characters, relations, selectedRelationI
       .force("charge", d3.forceManyBody().strength(-1400))
       .force("center", d3.forceCenter(WIDTH / 2, HEIGHT / 2))
       .force("collide", d3.forceCollide(RADIUS + 14))
+      // Characters that already have a place settle where they are, rather than the whole graph being laid out again.
+      .alpha(nodes.every((node) => positions.current.has(node.id)) ? 0.15 : 1)
       .on("tick", () => {
         for (const node of nodes) {
           node.x = Math.max(RADIUS, Math.min(WIDTH - RADIUS, node.x ?? WIDTH / 2));
