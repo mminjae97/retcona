@@ -39,6 +39,7 @@ from models.location import (
 from pipeline.context_bundle import source_episodes
 from pipeline.entities import comparable_text
 from pipeline.extract_claims import ExtractedClaim
+from pipeline.extraction_rules import is_death, is_revival
 from pipeline.judges import Flag
 
 
@@ -108,7 +109,11 @@ def apply_new_information(
                 # restatement, which the manuscript never contains.
                 card_values.setdefault((claim.subject_kind, subject_id), {}).setdefault(key, (value, claim.evidence))
             elif claim.subject_kind == "character" and key in MUTABLE_ATTR_KEYS:
-                states.setdefault(subject_id, {}).setdefault(key, value)
+                if key == "condition" and (is_death(value) or is_revival(value)):
+                    # A death (or coming back) outweighs a wound before it: it's the state the episode leaves them in.
+                    states.setdefault(subject_id, {})[key] = value
+                else:
+                    states.setdefault(subject_id, {}).setdefault(key, value)
             elif claim.subject_kind == "location" and key in STATE_ATTR_KEYS:
                 # The last one the episode says: the state it leaves the place in.
                 location_states.setdefault(subject_id, {})[key] = value

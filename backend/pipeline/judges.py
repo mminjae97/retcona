@@ -7,7 +7,7 @@ they can run in parallel and be swapped out easily (6.2).
 |---|---|---|
 | Appearance/behavior violation | fixed_attrs, latest_mutable_state, personality, world_settings | Appearance: NLI / Behavior (OOC): LLM |
 | Location error | fixed_attrs (terrain), relations (distance) | NLI + rule-based distance calculation |
-| Spacetime contradiction | last_known_position, state_history, relations | Rule-based time/distance verification + LLM assist |
+| Spacetime contradiction | last_known_position, state_history, relations | Rule-based time/distance verification |
 
 Appearance and location (stage 2) compare what a claim says about a card
 attribute with the card's value for it. NLI takes the card's value as a
@@ -41,16 +41,21 @@ import uuid
 from dataclasses import dataclass
 
 from ai.nli_rerank import check_contradictions
-from models.character import FIXED_ATTR_KEYS
+from models.character import FIXED_ATTR_KEYS, SPACETIME_ATTR_KEYS
 from models.location import GEO_ATTR_KEYS, STATE_ATTR_KEYS
 from pipeline.context_bundle import Card, ContextBundle
 from pipeline.entities import normalize_name
 from pipeline.extract_claims import ExtractedClaim
+from pipeline.extraction_rules import is_revival
 from pipeline.statements import character_statement, location_statement
 
 # A pair the model finds this likely to contradict is flagged. Past one half,
 # contradiction is also the most likely of the three labels.
 CONTRADICTION_THRESHOLD = 0.5
+# What a flag from the rules (not the model) carries as its confidence: a fixed
+# value, since a character shown after dying may be a flashback or a ghost,
+# which the rules can't tell and the author can.
+RULE_CONFIDENCE = 0.7
 
 @dataclass(frozen=True)
 class Flag:
@@ -226,5 +231,44 @@ def judge_location(claims: list[ExtractedClaim], context_bundle: ContextBundle) 
 
 
 def judge_timeline(claims: list[ExtractedClaim], context_bundle: ContextBundle) -> list[Flag]:
-    # TODO (stage 4): rule-based time/distance verification + LLM assist
-    raise NotImplementedError
+    """A character who died in an earlier episode shown again (7.2), by rules:
+    a "presence" claim (pipeline/extract_claims.py) about a card that
+    context_bundle says died and hasn't come back. One flag per character, for the
+    first sentence that shows it; not where this episode brings the character back
+    itself. The flag's reference is the death ("3화: 숨을 거두었다"); it has no card value
+    to accept or supplement, only to dismiss (a flashback, a ghost) or to fix in the text."""
+    # TODO (stage 4): rule-based time/distance verification (travel, age, season),
+    # once the extraction reads in-story time and relations carry distances
+    comes_back = {
+        card.id
+        for index, claim in enumerate(claims)
+        if claim.subject_kind == "character"
+        and (card := context_bundle.card_for(index)) is not None
+        and is_revival(claim.attributes.get("condition", ""))
+    }
+    flags: list[Flag] = []
+    flagged: set[uuid.UUID] = set()
+    for index, claim in enumerate(claims):
+        card = context_bundle.card_for(index)
+        if (
+            claim.subject_kind != "character"
+            or card is None
+            or not card.died
+            or card.id in comes_back
+            or card.id in flagged
+            or not any(claim.attributes.get(key) for key in SPACETIME_ATTR_KEYS)
+        ):
+            continue
+        flagged.add(card.id)
+        flags.append(
+            Flag(
+                claim_index=index,
+                subject_id=card.id,
+                error_type="spacetime",
+                attribute=SPACETIME_ATTR_KEYS[0],
+                confidence=RULE_CONFIDENCE,
+                evidence_text=claim.evidence or claim.text,
+                reference_text=card.died,
+            )
+        )
+    return flags

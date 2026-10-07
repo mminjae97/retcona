@@ -15,9 +15,11 @@ carries its ref (subject_ref) — characters can share a name — and the
 registered name as its subject; entity matching (pipeline/entities.py, 7.4)
 goes by the ref, and by name or alias where there's none.
 
-Behavior (OOC) and spacetime claims aren't extracted yet: nothing judges them
-until their stages (7.2) are built, and what they need from the extraction
-follows from the judgment.
+Behavior (OOC) claims aren't extracted yet: nothing judges them until their
+stage (7.2) is built. Spacetime claims are (rules only): a character's death or
+coming back (its "condition", which the settings record per episode), and
+a character shown in a sentence of narration ("presence"), for the judgment to
+hold against a death in an earlier episode (pipeline/extraction_rules.py).
 
 What the models see is narration only: a line of dialogue is what a character
 says, not the narrator stating a fact about a card.
@@ -35,11 +37,16 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 
 from ai import nli_rerank
 from infra.span_inference import NamedEntity
-from models.character import FIXED_ATTR_KEYS, MUTABLE_ATTR_KEYS
+from models.character import FIXED_ATTR_KEYS, MUTABLE_ATTR_KEYS, SPACETIME_ATTR_KEYS
 from models.location import GEO_ATTR_KEYS, STATE_ATTR_KEYS
 from pipeline import extraction_rules as rules
 from pipeline.sentences import Sentence, split_sentences
-from pipeline.statements import character_statement, location_statement
+from pipeline.statements import (
+    as_statement,
+    character_statement,
+    location_statement,
+    topic_particle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +57,7 @@ ATTR_MAX_LENGTH = 500
 _TEXT_MAX_LENGTH = 2000
 
 _ATTR_KEYS = {
-    "character": set(FIXED_ATTR_KEYS + MUTABLE_ATTR_KEYS),
+    "character": set(FIXED_ATTR_KEYS + MUTABLE_ATTR_KEYS + SPACETIME_ATTR_KEYS),
     "location": set(GEO_ATTR_KEYS + STATE_ATTR_KEYS),
 }
 
@@ -268,6 +275,46 @@ def _questions(sentences: list[Sentence], mentions: list[list[rules.Mention]]) -
     return questions
 
 
+def _spacetime_claims(
+    sentences: list[Sentence], mentions: list[list[rules.Mention]], dead: set[str]
+) -> list[dict]:
+    """What the narration says of the characters it names as the subject of a
+    sentence: a death or a coming back (a "condition" claim), or, of the
+    characters whose refs are in dead (died in an earlier episode), just that
+    they are there (a "presence" claim) — for any other it would be a claim of
+    nearly every sentence. The fields of an ExtractedClaim, per sentence and
+    character."""
+    found = []
+    for sentence, here in zip(sentences, mentions, strict=True):
+        seen: set[tuple[str, str]] = set()
+        for mention in here:
+            subject = mention.subject
+            if subject.key in seen:
+                continue
+            if condition := rules.condition_of(sentence, mention, here):
+                claim_type, key, said = "appearance", "condition", condition
+            elif subject.ref in dead and (presence := rules.presence_of(sentence, mention, here)):
+                claim_type, key, said = "spacetime", "presence", presence
+            else:
+                continue
+            seen.add(subject.key)
+            # Restated with the character as the subject only where it is the
+            # sentence's topic: "마법사가 레온을 되살렸다" isn't "레온은 되살렸다".
+            text = f"{subject.name}{topic_particle(subject.name)} {as_statement(said)}" if mention.topic else sentence.text
+            found.append(
+                {
+                    "claim_type": claim_type,
+                    "subject_kind": "character",
+                    "subject": subject.name,
+                    "subject_ref": subject.ref,
+                    "text": text,
+                    "evidence": sentence.text,
+                    "attributes": {key: said},
+                }
+            )
+    return found
+
+
 def extract_claims(
     novel_id: uuid.UUID,
     manuscript: str,
@@ -277,7 +324,9 @@ def extract_claims(
     recognize: Recognize | None = None,
     answer: Answer | None = None,
 ) -> Extraction:
-    """recognize / answer: the NER and QA models (ai/nli_rerank.py, which
+    """known_characters: each may carry "died", the death an earlier episode
+    records (pipeline/context_bundle.py deaths_before).
+    recognize / answer: the NER and QA models (ai/nli_rerank.py, which
     raises InferenceError where they can't run); tests give their own."""
     recognize = recognize or nli_rerank.recognize_entities
     answer = answer or nli_rerank.answer_questions
@@ -330,6 +379,12 @@ def extract_claims(
                     attributes=attributes,
                 )
             )
+        except ValidationError:
+            extraction.dropped += 1
+    dead = {character["ref"] for character in known_characters if character.get("died")}
+    for fields in _spacetime_claims(sentences, mentions, dead):
+        try:
+            extraction.claims.append(ExtractedClaim(**fields))
         except ValidationError:
             extraction.dropped += 1
     logger.info(

@@ -47,11 +47,11 @@ from models.location import Location
 from models.novel import Novel
 from models.validation_run import ValidationRun
 from pipeline.claim_links import apply_choices, load_choices
-from pipeline.context_bundle import get_context_bundle
+from pipeline.context_bundle import deaths_before, get_context_bundle
 from pipeline.dismissals import dismissal_key, dismissed_keys
 from pipeline.entities import Match, match_and_register, resolve_subjects
 from pipeline.extract_claims import ExtractedClaim, Extraction, extract_claims
-from pipeline.judges import Flag, judge_appearance, judge_location
+from pipeline.judges import Flag, judge_appearance, judge_location, judge_timeline
 from pipeline.merge import apply_new_information, merge_and_dedupe
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,7 @@ def _lock_novel(db: Session, novel_id: uuid.UUID) -> None:
 class _Input(NamedTuple):
     content: str
     content_updated_at: datetime
-    # {"ref", "name", "aliases", "gender", "pronoun"} each, for the extraction
+    # {"ref", "name", "aliases", "gender", "pronoun", "died"} each, for the extraction
     characters: list[dict]
     # the prompt's refs -> card ids
     refs: dict[str, uuid.UUID]
@@ -107,7 +107,7 @@ class _Input(NamedTuple):
 def _read_input(novel_id: uuid.UUID, episode_id: uuid.UUID) -> _Input:
     with SessionLocal() as db:
         row = db.execute(
-            select(Episode.content, Episode.updated_at)
+            select(Episode.content, Episode.updated_at, Episode.episode_index)
             .join(Novel, Novel.id == Episode.novel_id)
             .where(Episode.id == episode_id, Episode.novel_id == novel_id, Novel.deleted_at.is_(None))
         ).one_or_none()
@@ -118,17 +118,24 @@ def _read_input(novel_id: uuid.UUID, episode_id: uuid.UUID) -> _Input:
         # A short ref per character rather than its id: characters can share a
         # name, so the model answers with the ref of the one it means.
         characters, refs = [], {}
-        for number, (character_id, name, aliases, gender, pronoun) in enumerate(
-            db.execute(
-                select(Character.id, Character.name, Character.aliases, Character.gender, Character.pronoun)
-                .where(Character.novel_id == novel_id)
-                .order_by(Character.created_at, Character.id)
-            ),
-            start=1,
-        ):
+        rows = db.execute(
+            select(Character.id, Character.name, Character.aliases, Character.gender, Character.pronoun)
+            .where(Character.novel_id == novel_id)
+            .order_by(Character.created_at, Character.id)
+        ).all()
+        # Who died in the episodes before this one: only they are looked for in it (spacetime).
+        deaths = deaths_before(db, novel_id, row.episode_index, [character_id for character_id, *_ in rows])
+        for number, (character_id, name, aliases, gender, pronoun) in enumerate(rows, start=1):
             ref = f"c{number}"
             characters.append(
-                {"ref": ref, "name": name, "aliases": list(aliases or []), "gender": gender, "pronoun": pronoun}
+                {
+                    "ref": ref,
+                    "name": name,
+                    "aliases": list(aliases or []),
+                    "gender": gender,
+                    "pronoun": pronoun,
+                    "died": deaths.get(character_id),
+                }
             )
             refs[ref] = character_id
         # Distinct: nothing stops two locations sharing a name, and the model needs it once.
@@ -152,7 +159,11 @@ def _judge(
         bundle = get_context_bundle(db, novel_id, episode_id, matches)
     try:
         return matches, merge_and_dedupe(
-            [judge_appearance(extraction.claims, bundle), judge_location(extraction.claims, bundle)]
+            [
+                judge_appearance(extraction.claims, bundle),
+                judge_location(extraction.claims, bundle),
+                judge_timeline(extraction.claims, bundle),
+            ]
         )
     except InferenceError as exc:
         logger.exception("Novel %s: the NLI model failed", novel_id)

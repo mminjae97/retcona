@@ -119,21 +119,18 @@ def _history(location_id, *states):
 def test_the_latest_earlier_state_of_each_place_is_the_one_found():
     place, other = uuid.uuid4(), uuid.uuid4()
     db = MagicMock()
-    db.scalar.return_value = 5  # this episode's index
     # Latest episode first, as the query orders them; one with nothing to say of the place's state.
     db.execute.return_value = (
         _history(place, {"features": "x"}, {"state": "재건되었다"}, {"state": "폐허가 되었다"})
         + _history(other, {"state": "불탔다"})
     )
-    assert _latest_states(db, uuid.uuid4(), uuid.uuid4(), [place, other]) == {
+    assert _latest_states(db, uuid.uuid4(), 5, [place, other]) == {
         place: "재건되었다",
         other: "불탔다",
     }
 
 
-def test_no_state_is_looked_for_without_places_or_for_an_unknown_episode():
+def test_no_state_is_looked_for_without_places():
     db = MagicMock()
-    assert _latest_states(db, uuid.uuid4(), uuid.uuid4(), []) == {}
-    db.scalar.return_value = None
-    assert _latest_states(db, uuid.uuid4(), uuid.uuid4(), [uuid.uuid4()]) == {}
+    assert _latest_states(db, uuid.uuid4(), 5, []) == {}
     db.execute.assert_not_called()

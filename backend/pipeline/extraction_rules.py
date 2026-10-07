@@ -329,6 +329,148 @@ def is_state_change(predicate: str) -> bool:
     return not (_DENIED.search(after) or _DENIED_BEFORE_VERB.search(after))
 
 
+# What a character does or undergoes, said in a sentence it is the subject of: its
+# death, its coming back, or just that it is there. The spacetime judgment holds
+# what comes after a death against it (pipeline/judges.py judge_spacetime).
+#
+# A death, as the predicate ends: "숨을 거두었다", "죽고 말았다". The word has to end the
+# predicate, so "죽었다고 생각했다", "죽었다는 소식을 들었다", "죽지 않았다", "죽을 뻔했다"
+# and "죽은 척했다" are not it.
+_ENDING = r"(?:다|습니다|어요|어|죠|네|군)?$"
+_DEATH = re.compile(
+    r"(?:죽었|죽어\s?버렸|죽고\s?말았|숨졌|숨을\s?(?:거두었|거뒀)|숨이\s?끊(?:어졌|겼)|사망(?:했|하였)|전사(?:했|하였)"
+    r"|절명했|운명했|목숨을\s?잃었|세상을\s?떠났|생을\s?마(?:감했|쳤)|처형(?:당했|되었|됐))" + _ENDING
+)
+# Alive again, said of the character itself: "되살아났다", "부활했다". A plain "다시
+# 일어났다" is a fall and a getting up, not this.
+_REVIVAL = re.compile(r"(?:되살아났|되살아나|부활했|부활하였|다시\s?살아났|소생했)" + _ENDING)
+# Back as one of the undead ("언데드가 되어 일어났다", "좀비가 되었다", "언데드로 다시
+# 일어났다"), however it was done: becoming one, not an undead doing something
+# ("좀비가 일어섰다" is of the zombie).
+_UNDEAD = r"(?:언데드|좀비|강시|스켈레톤|구울)"
+_RISE = r"(?:일어났|일어섰|깨어났|움직였|걸어\s?나왔)"
+_UNDEAD_RISE = re.compile(
+    _UNDEAD
+    + rf"(?:(?:이|가|로)\s?(?:(?:되어서?|변해)\s?(?:다시\s?)?(?:되었|됐|변했|{_RISE})|되었|됐|변했)|로\s?(?:다시\s?)?{_RISE})"
+    + _ENDING
+)
+# ...or said right before the name ("언데드가 된 레온이 나타났다").
+_UNDEAD_STATE = re.compile(_UNDEAD + r"(?:이|가|로)?\s?(?:된|변한|되어\s?버린)\s?$")
+# Brought back by somebody else, said of the character as its object ("마법사가 레온을
+# 되살렸다", "레온을 언데드로 만들었다"). Not "살려냈다": that's saved from dying.
+_REVIVE_OBJECT = re.compile(
+    r"(?:되살렸|되살려\s?냈|부활시켰|소생시켰|" + _UNDEAD + r"(?:로|가)?\s?(?:만들었|만들어\s?냈|되살렸|일으켜\s?세웠))"
+    + _ENDING
+)
+# What follows the name when the sentence is about the character as an object, or as
+# whose body ("레온의 시체를 ...", "레온의 시체가 ..."): the object's particle, or the
+# corpse's with what is said of it.
+_BODY = r"(?:시체|시신|유해|유골|뼈|영혼|혼)"
+_AFTER_NAME = re.compile(rf"^(?:(?P<object>[을를])|의\s?{_BODY}(?:(?P<body_object>[을를])|[이가은는]))\s?(?P<tail>.*)$")
+# Not something that happened: likened, pretended, dreamed.
+# ("마치" only as the adverb, not the start of "마치고".)
+_NOT_ACTUAL = re.compile(r"(?<![가-힣])마치(?![가-힣])|처럼|듯|척|꿈|악몽|만약|차라리")
+# Adverbs in -이 ("어이없이 죽었다"), not a subject of their own.
+_ADVERB_I = re.compile(r"(?:없이|같이|깊이|높이|일찍이|가까이|괴로이|외로이|쓸쓸이|헛되이|고이)$")
+
+
+def _not_actual(said: str) -> bool:
+    """Whether what the predicate ends in is likened, pretended or dreamed: said
+    in its last three words, so a "꿈을 이루지 못한 채 죽었다" isn't one."""
+    return _NOT_ACTUAL.search(" ".join(said.split()[-3:])) is not None
+# A sentence that is about the dead rather than showing them, or about the past or
+# a memory: a character who died is spoken of, remembered, mourned, or seen as a
+# ghost, and none of it is the character turning up again.
+_NOT_PRESENT = re.compile(
+    r"소식|소문|무덤|묘비|묘지|장례|유해(?!한)|시신|유품|추모|애도|죽음|죽은|죽었|죽기|숨진|사망|전사\s?(?:했|하였)|유령|영혼|망령|환영|제사"
+    r"|예전|옛날|옛적|어릴\s?적|어린\s?시절|과거|지난|한때|당시|회상|떠올리|떠올렸|기억|추억|그리워|그리움"
+    # ...and what is told or left of them afterwards.
+    r"|유언|전설|전해\s?(?:들|지|진|내려)|[다라]고\s?한다|알려져|불렸|불린"
+)
+
+
+def _said_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> str:
+    """What the sentence says of a character it is the subject of (은/는/이/가):
+    from the particle to the end of the sentence, "" where nothing is said of it
+    or another subject takes over (the predicate may be that one's)."""
+    if not mention.topic or mention.subject.kind != "character" or mention.subject.candidates:
+        return ""
+    if any(other.topic and other.start >= mention.end for other in others if other is not mention):
+        return ""
+    return " ".join(sentence.narration[mention.end + 1 :].split()).strip(_PREDICATE_EDGE)
+
+
+def _death_of_another(said: str) -> bool:
+    """Whether the death the predicate ends in is somebody else's: the word
+    before it is a subject of its own ("눈앞에서 동료가 죽었다", "그가 숨을 거두었다"),
+    where "피가 많이 나서 죽었다" has a verb between."""
+    found = _DEATH.search(said.strip(_PREDICATE_EDGE))
+    before = said.strip(_PREDICATE_EDGE)[: found.start()].split() if found else []
+    return bool(before) and re.search(r"[가-힣][이가]$", before[-1]) is not None and not _ADVERB_I.search(before[-1])
+
+
+def _revival_of_self(said: str) -> bool:
+    return _REVIVAL.search(said) is not None or _UNDEAD_RISE.search(said) is not None
+
+
+def _revived_by_another(sentence: Sentence, mention: Mention) -> str:
+    """"마법사가 레온을 되살렸다" -> "되살렸다", "레온의 시체가 언데드가 되어 일어났다"
+    -> "언데드가 되어 일어났다": a character brought back, or whose body is, said of
+    it as an object or as whose body it is; "" where it isn't."""
+    if mention.subject.kind != "character" or mention.subject.candidates:
+        return ""
+    after = _AFTER_NAME.match(sentence.narration[mention.end :])
+    if after is None:
+        return ""
+    tail = " ".join(after.group("tail").split()).strip(_PREDICATE_EDGE)
+    if not tail or _not_actual(tail):
+        return ""
+    if after.group("object") or after.group("body_object"):
+        return tail if _REVIVE_OBJECT.search(tail) else ""
+    return tail if _revival_of_self(tail) else ""
+
+
+def condition_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> str:
+    """A death, or a coming back from one, the sentence says of the character it
+    is about ("레온은 결국 숨을 거두었다" -> "결국 숨을 거두었다", "마법사가 레온을
+    되살렸다" -> "되살렸다", "언데드가 된 레온이 나타났다" -> "언데드가 된"); "" where it
+    says neither."""
+    said = _said_of(sentence, mention, others)
+    if not said:
+        return _revived_by_another(sentence, mention)
+    if _not_actual(said):
+        return ""
+    if (is_death(said) and not _death_of_another(said)) or _revival_of_self(said):
+        return said
+    # Said of the character before its name: "언데드가 된 레온은 ...".
+    undead = _UNDEAD_STATE.search(sentence.narration[: mention.start])
+    return undead.group().strip() if undead else ""
+
+
+def is_death(value: str) -> bool:
+    return _DEATH.search(value.strip(_PREDICATE_EDGE)) is not None
+
+
+def is_revival(value: str) -> bool:
+    """Whether a "condition" a claim or the state history keeps is a coming back,
+    whichever way the sentence said it."""
+    value = value.strip(_PREDICATE_EDGE)
+    return any(
+        pattern.search(value) is not None for pattern in (_REVIVAL, _UNDEAD_RISE, _REVIVE_OBJECT, _UNDEAD_STATE)
+    )
+
+
+def presence_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> str:
+    """What the sentence has the character it is about do or be, as the
+    narration tells it now ("레온은 문을 열고 들어섰다" -> "문을 열고 들어섰다"); ""
+    for a sentence about the dead, the past or a memory (_NOT_PRESENT), and for a
+    death or revival (condition_of)."""
+    said = _said_of(sentence, mention, others)
+    if len(said) < 2 or _NOT_PRESENT.search(sentence.narration) or condition_of(sentence, mention, others):
+        return ""
+    return said
+
+
 _FEATURES_MAX_LENGTH = 40
 _PREDICATE_EDGE = " 	\"'“”‘’「」『』.!?…~"
 _QUOTE = re.compile(r"[\"“”‘’「」『』]")

@@ -24,10 +24,11 @@ from dataclasses import dataclass, field, replace
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from models.character import Character
+from models.character import Character, CharacterStateHistory
 from models.episode import Episode
 from models.location import STATE_ATTR_KEYS, Location, LocationStateHistory
 from pipeline.entities import Match
+from pipeline.extraction_rules import is_death, is_revival
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,9 @@ class Card:
     # A location's latest change of state ("폐허가 되었다") in the episodes before
     # this one, from location_state_history; None for a character or no change yet.
     state: str | None = None
+    # A character who died in an earlier episode, and hasn't come back since:
+    # "3화: 숨을 거두었다" (pipeline/judges.py judge_spacetime); None otherwise.
+    died: str | None = None
 
 
 @dataclass
@@ -74,16 +78,39 @@ def source_episodes(attr_sources: object) -> dict[str, str]:
     }
 
 
+def deaths_before(
+    db: Session, novel_id: uuid.UUID, episode_index: int, character_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """{character id: the death an episode before episode_index records, as
+    "N화: ...", for a character that hasn't come back since}, from the "condition"
+    its state history keeps per episode (pipeline/merge.py)."""
+    if not character_ids:
+        return {}
+    died: dict[uuid.UUID, str] = {}
+    for row in db.execute(
+        select(CharacterStateHistory.character_id, CharacterStateHistory.episode_index, CharacterStateHistory.state)
+        .where(
+            CharacterStateHistory.novel_id == novel_id,
+            CharacterStateHistory.character_id.in_(character_ids),
+            CharacterStateHistory.episode_index < episode_index,
+        )
+        .order_by(CharacterStateHistory.episode_index)
+    ):
+        condition = text_values(row.state).get("condition")
+        if condition and is_death(condition):
+            died[row.character_id] = f"{row.episode_index}화: {condition}"
+        elif condition and is_revival(condition):
+            died.pop(row.character_id, None)
+    return died
+
+
 def _latest_states(
-    db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, location_ids: list[uuid.UUID]
+    db: Session, novel_id: uuid.UUID, episode_index: int, location_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, str]:
     """{location id: the state the latest earlier episode left it in}. Only
     episodes before this one: its own change of state is what it says, and a
     later episode's is not yet what this one is held to."""
     if not location_ids:
-        return {}
-    episode_index = db.scalar(select(Episode.episode_index).where(Episode.id == episode_id, Episode.novel_id == novel_id))
-    if episode_index is None:
         return {}
     states: dict[uuid.UUID, str] = {}
     for row in db.execute(
@@ -121,9 +148,13 @@ def get_context_bundle(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, 
             attrs=text_values(location.geo_attrs),
             sources=source_episodes(location.attr_sources),
         )
-    states = _latest_states(db, novel_id, episode_id, [card.id for card in cards.values() if card.kind == "location"])
-    for card_id, state in states.items():
-        cards[card_id] = replace(cards[card_id], state=state)
+    episode_index = db.scalar(select(Episode.episode_index).where(Episode.id == episode_id, Episode.novel_id == novel_id))
+    if episode_index is not None:
+        ids = {kind: [card.id for card in cards.values() if card.kind == kind] for kind in ("character", "location")}
+        for card_id, state in _latest_states(db, novel_id, episode_index, ids["location"]).items():
+            cards[card_id] = replace(cards[card_id], state=state)
+        for card_id, died in deaths_before(db, novel_id, episode_index, ids["character"]).items():
+            cards[card_id] = replace(cards[card_id], died=died)
     return ContextBundle(
         episode_id=episode_id,
         claim_cards=[cards.get(match.card_id) if match.card_id is not None else None for match in matches],

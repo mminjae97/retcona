@@ -39,6 +39,10 @@ from models.base import Base, NovelScopedMixin, TimestampMixin
 # shows up on that screen filled in.
 FIXED_ATTR_KEYS = ("age", "eye_color", "hair_color", "height", "scars", "origin")
 MUTABLE_ATTR_KEYS = ("hairstyle", "outfit", "condition", "belongings")
+# What a spacetime claim says of a character (7.2): that it is there, in a sentence
+# the narration tells now. Not a card attribute: it gives the spacetime judgment
+# something to hold against what the story said happened before (a death).
+SPACETIME_ATTR_KEYS = ("presence",)
 
 
 class Character(Base, NovelScopedMixin, TimestampMixin):
