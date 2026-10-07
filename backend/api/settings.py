@@ -205,6 +205,8 @@ class CharacterInput(BaseModel):
     name: str = Field(min_length=1, max_length=_NAME_MAX_LENGTH)
     gender: Gender = "unspecified"
     pronoun: Pronoun | None = None
+    # May be shown after dying: not flagged for it (models/character.py).
+    appears_after_death: bool = False
     # Other names the manuscript calls it by (models/character.py).
     aliases: list[str] = Field(default_factory=list, max_length=_ALIASES_MAX)
     fixed_attrs: FixedAttrs = Field(default_factory=lambda: FixedAttrs())
@@ -243,6 +245,7 @@ class CharacterPublic(BaseModel):
     name: str
     gender: Gender
     pronoun: Pronoun | None
+    appears_after_death: bool
     aliases: list[str]
     source: str  # manual | auto_detected
     fixed_attrs: FixedAttrs
@@ -317,6 +320,7 @@ def _apply(character: Character, body: CharacterInput) -> None:
     character.name = body.name
     character.gender = body.gender
     character.pronoun = body.pronoun
+    character.appears_after_death = body.appears_after_death
     character.aliases = body.aliases
     character.fixed_attrs = fixed_attrs
     character.mutable_attrs = body.mutable_attrs.stored()

@@ -178,6 +178,12 @@
   text-decoration: underline;
 }
 
+.flag-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
 .flag-actions {
   display: flex;
   align-items: center;

@@ -119,13 +119,23 @@ def _read_input(novel_id: uuid.UUID, episode_id: uuid.UUID) -> _Input:
         # name, so the model answers with the ref of the one it means.
         characters, refs = [], {}
         rows = db.execute(
-            select(Character.id, Character.name, Character.aliases, Character.gender, Character.pronoun)
+            select(
+                Character.id,
+                Character.name,
+                Character.aliases,
+                Character.gender,
+                Character.pronoun,
+                Character.appears_after_death,
+            )
             .where(Character.novel_id == novel_id)
             .order_by(Character.created_at, Character.id)
         ).all()
-        # Who died in the episodes before this one: only they are looked for in it (spacetime).
-        deaths = deaths_before(db, novel_id, row.episode_index, [character_id for character_id, *_ in rows])
-        for number, (character_id, name, aliases, gender, pronoun) in enumerate(rows, start=1):
+        # Who died in the episodes before this one: only they are looked for in it
+        # (spacetime), except those the author says may be shown after dying.
+        deaths = deaths_before(
+            db, novel_id, row.episode_index, [character_id for character_id, *_, allowed in rows if not allowed]
+        )
+        for number, (character_id, name, aliases, gender, pronoun, _) in enumerate(rows, start=1):
             ref = f"c{number}"
             characters.append(
                 {

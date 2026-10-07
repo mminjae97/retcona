@@ -14,6 +14,9 @@
   alias, not both: cards with one name need aliases, none shared, to be told
   apart (api/settings.py).
 - Mutable attributes: hairstyle, outfit, injury/health status, belongings
+- appears_after_death: the author says the character may be shown after dying
+  (flashbacks, a ghost, a coming back the rules don't recognize), so the
+  spacetime judgment doesn't flag it turning up again (pipeline/judges.py)
 - personality: personality/speech patterns (for OOC judgment, 7.2)
 - attr_sources: where each fixed attribute validation filled in (7.4) came
   from, for the ones the author didn't enter: {key: {"episode_id": ...,
@@ -27,7 +30,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, Integer, String
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, false
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -54,6 +57,7 @@ class Character(Base, NovelScopedMixin, TimestampMixin):
     source: Mapped[str] = mapped_column(String, default="manual")  # manual | auto_detected
     gender: Mapped[str] = mapped_column(String, default="unspecified", server_default="unspecified", nullable=False)
     pronoun: Mapped[str | None] = mapped_column(String, nullable=True)  # he | she | any; None: follows gender
+    appears_after_death: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), nullable=False)
     fixed_attrs: Mapped[dict] = mapped_column(JSONB, default=dict)  # age, eye color, hair color, height, scars, origin, etc.
     mutable_attrs: Mapped[dict] = mapped_column(JSONB, default=dict)  # hairstyle, outfit, injury/health status, belongings
     personality: Mapped[dict] = mapped_column(JSONB, default=dict)  # personality keywords, speech traits, goals/values

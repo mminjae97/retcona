@@ -75,6 +75,7 @@ export interface CharacterInput {
   gender: Gender;
   // null: follows gender
   pronoun: Pronoun | null;
+  appears_after_death: boolean;
   aliases: string[];
   fixed_attrs: Partial<FixedAttrs>;
   mutable_attrs: Partial<MutableAttrs>;
@@ -86,6 +87,7 @@ export interface CharacterPublic {
   name: string;
   gender: Gender;
   pronoun: Pronoun | null;
+  appears_after_death: boolean;
   aliases: string[];
   source: "manual" | "auto_detected";
   fixed_attrs: FixedAttrs;

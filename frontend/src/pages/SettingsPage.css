@@ -120,6 +120,17 @@
   font-size: 12px;
 }
 
+.setting-form label.checkbox-label {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.checkbox-label .alias-hint {
+  flex-basis: 100%;
+}
+
 .character-aliases {
   margin-left: 6px;
   font-size: 12px;
