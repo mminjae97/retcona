@@ -32,6 +32,12 @@ function describeTimelineError(err: unknown): string {
   return describeError(err);
 }
 
+// Oldest first within an episode, as the server lists them (stable, so what was
+// already in order and what was just added keep theirs).
+function byEpisode(events: EventPublic[]): EventPublic[] {
+  return [...events].sort((a, b) => a.episode_index - b.episode_index);
+}
+
 function toggled(ids: string[], id: string): string[] {
   return ids.includes(id) ? ids.filter((other) => other !== id) : [...ids, id];
 }
@@ -126,12 +132,15 @@ export default function TimelinePanel({ novelId, characters }: Props) {
     try {
       if (editingEventId) {
         const saved = await updateEvent(novelId, editingEventId, input);
-        setEvents((prev) => (prev ?? []).map((event) => (event.id === saved.id ? saved : event)));
+        setEvents((prev) => byEpisode((prev ?? []).map((event) => (event.id === saved.id ? saved : event))));
+        stopEditingEvent();
       } else {
         const saved = await createEvent(novelId, input);
-        setEvents((prev) => [...(prev ?? []), saved]);
+        setEvents((prev) => byEpisode([...(prev ?? []), saved]));
+        // Events come in a run of one episode: keep its number for the next.
+        setEventForm({ ...EMPTY_EVENT, episode_index: saved.episode_index });
+        setEventError(null);
       }
-      stopEditingEvent();
     } catch (err) {
       setEventError(describeTimelineError(err));
     } finally {
