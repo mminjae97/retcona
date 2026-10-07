@@ -146,11 +146,23 @@ export async function fetchCurrentUserId(): Promise<string | null> {
   }
 }
 
-export function updateNickname(nickname: string): Promise<UserPublic> {
-  return apiFetch<UserPublic>("/auth/me", {
+// The signed-in account's profile changed (a new nickname): whoever shows it, like
+// the header, subscribes rather than asking the server again.
+const PROFILE_CHANGED_EVENT = "retcona:profile-changed";
+
+export function onProfileChanged(listener: (user: UserPublic) => void): () => void {
+  const handler = (e: Event) => listener((e as CustomEvent<UserPublic>).detail);
+  window.addEventListener(PROFILE_CHANGED_EVENT, handler);
+  return () => window.removeEventListener(PROFILE_CHANGED_EVENT, handler);
+}
+
+export async function updateNickname(nickname: string): Promise<UserPublic> {
+  const user = await apiFetch<UserPublic>("/auth/me", {
     method: "PATCH",
     body: JSON.stringify({ nickname }),
   });
+  window.dispatchEvent(new CustomEvent<UserPublic>(PROFILE_CHANGED_EVENT, { detail: user }));
+  return user;
 }
 
 export interface DeletionResult {

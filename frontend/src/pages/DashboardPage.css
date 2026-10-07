@@ -26,12 +26,6 @@
   color: var(--color-text-muted);
 }
 
-.dashboard-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .dashboard-page h2 {
   margin: 0 0 10px;
   font-size: 16px;
