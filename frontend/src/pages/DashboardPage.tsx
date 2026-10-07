@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getMe } from "../api/auth";
 import type { UserPublic } from "../api/auth";
-import { clearToken, describeError } from "../api/client";
+import { describeError, signOut } from "../api/client";
 import { listNovels } from "../api/novels";
 import type { NovelPublic } from "../api/novels";
 import "./DashboardPage.css";
@@ -43,7 +43,7 @@ export default function DashboardPage() {
 
   function handleLogout() {
     // The session lives in the token alone: forgetting it ends the session here.
-    clearToken();
+    signOut();
     navigate("/login", { replace: true });
   }
 

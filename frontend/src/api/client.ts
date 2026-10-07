@@ -28,6 +28,14 @@ export function setToken(value: string, userId: string): void {
 
 export const clearToken = (): void => tokenStore.clear();
 
+// The author signs out. Unlike a session that ends under them (a 401), nothing
+// has been lost: a later call that finds no token is a visitor's, not an
+// expired session's, and the login screen shouldn't say otherwise.
+export function signOut(): void {
+  tokenStore.clear();
+  sessionSeen = false;
+}
+
 export class ApiError extends Error {
   status: number;
 
