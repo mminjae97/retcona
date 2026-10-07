@@ -32,6 +32,9 @@ export function getRedirectState(state: unknown): LoginRedirectState {
   };
 }
 
+// Where a login lands when there is nowhere to go back to: the dashboard.
+const AFTER_LOGIN = "/dashboard";
+
 // Back to the page the ended session was on, but only for that same account:
 // someone else signing in there would land on a page that isn't theirs. If a
 // session had ended but whose is unknown (it began before the id was
@@ -39,5 +42,5 @@ export function getRedirectState(state: unknown): LoginRedirectState {
 export function destinationAfterLogin(redirect: LoginRedirectState, signedInUserId: string | null): string {
   const sameAccount =
     !redirect.sessionEnded || (redirect.expiredUserId !== null && signedInUserId === redirect.expiredUserId);
-  return sameAccount ? (redirect.returnTo ?? "/") : "/";
+  return sameAccount ? (redirect.returnTo ?? AFTER_LOGIN) : AFTER_LOGIN;
 }

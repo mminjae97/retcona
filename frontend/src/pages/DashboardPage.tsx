@@ -3,16 +3,15 @@
 // relationship graph · timeline, and to My Page, where novels are created and
 // managed. The "pre-writing brief / checklist" the flow lists is not built yet.
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { getMe } from "../api/auth";
 import type { UserPublic } from "../api/auth";
-import { describeError, signOut } from "../api/client";
+import { describeError } from "../api/client";
 import { listNovels } from "../api/novels";
 import type { NovelPublic } from "../api/novels";
 import "./DashboardPage.css";
 
 export default function DashboardPage() {
-  const navigate = useNavigate();
   const [user, setUser] = useState<UserPublic | null>(null);
   const [novels, setNovels] = useState<NovelPublic[] | null>(null);
   const [novelsError, setNovelsError] = useState<string | null>(null);
@@ -41,26 +40,12 @@ export default function DashboardPage() {
     loadNovels();
   }, []);
 
-  function handleLogout() {
-    // The session lives in the token alone: forgetting it ends the session here.
-    signOut();
-    navigate("/login", { replace: true });
-  }
-
   return (
     <div className="dashboard-page">
       <header className="dashboard-header">
         <div>
           <h1>{user ? `${user.nickname}님, 안녕하세요` : "대시보드"}</h1>
           <p className="dashboard-lead">이어서 쓸 작품을 골라 주세요.</p>
-        </div>
-        <div className="dashboard-actions">
-          <Link className="link-button" to="/mypage">
-            마이페이지
-          </Link>
-          <button type="button" onClick={handleLogout}>
-            로그아웃
-          </button>
         </div>
       </header>
 
