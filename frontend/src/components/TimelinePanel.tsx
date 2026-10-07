@@ -160,9 +160,10 @@ export default function TimelinePanel({ novelId, characters }: Props) {
       setLinks((prev) => prev.filter((link) => link.from_id !== event.id && link.to_id !== event.id));
       if (editingEventId === event.id) stopEditingEvent();
       if (editingLinkId && links.some((link) => link.id === editingLinkId && (link.from_id === event.id || link.to_id === event.id))) {
+        // The link being edited went with it.
         stopEditingLink();
-      } else if (linkForm.from_id === event.id || linkForm.to_id === event.id) {
-        // A link being drafted that names it: that end is gone.
+      } else {
+        // A link being drafted or edited that picked it for one end: that end is gone.
         setLinkForm((prev) => ({
           ...prev,
           from_id: prev.from_id === event.id ? "" : prev.from_id,

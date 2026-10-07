@@ -41,6 +41,8 @@ export default function GraphPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<"graph" | "timeline">("graph");
+  // Once opened, the timeline stays mounted (hidden) so what was being written in it survives a look at the other tab.
+  const [timelineOpened, setTimelineOpened] = useState(false);
 
   function load() {
     if (!novelId) return;
@@ -58,6 +60,8 @@ export default function GraphPage() {
     setRelations([]);
     setForm(EMPTY_FORM);
     setEditingId(null);
+    setTab("graph");
+    setTimelineOpened(false);
     load();
   }, [novelId]);
 
@@ -154,7 +158,10 @@ export default function GraphPage() {
             role="tab"
             aria-selected={tab === "timeline"}
             className={tab === "timeline" ? "active" : undefined}
-            onClick={() => setTab("timeline")}
+            onClick={() => {
+              setTab("timeline");
+              setTimelineOpened(true);
+            }}
           >
             타임라인
           </button>
@@ -167,11 +174,15 @@ export default function GraphPage() {
         </p>
       )}
 
+      {characters !== null && timelineOpened && (
+        <div hidden={tab !== "timeline"}>
+          <TimelinePanel key={novelId} novelId={novelId ?? ""} characters={characters} />
+        </div>
+      )}
+
       {characters === null ? (
         !loadError && <p>불러오는 중...</p>
-      ) : tab === "timeline" ? (
-        <TimelinePanel novelId={novelId ?? ""} characters={characters} />
-      ) : characters.length < 2 ? (
+      ) : tab === "timeline" ? null : characters.length < 2 ? (
         <p className="empty-state">
           관계를 그리려면 캐릭터가 두 명 이상 필요합니다.{" "}
           <Link to={`/novels/${novelId}/settings`}>설정 관리</Link>에서 캐릭터를 추가하거나, 원고를 검증하면 등장한
