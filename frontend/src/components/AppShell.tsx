@@ -1,7 +1,7 @@
-// The frame every page sits in: a top bar (the service name, and on the right a
-// login button — or, with a session, the profile button) and a sidebar that
-// takes the author to the places of the service. Inside a novel's pages the
-// sidebar also lists that novel's screens.
+// The frame every page sits in: a header with the service logo, the places of the
+// service to go to and, on the right, a login button — or, with a session, the
+// profile button (My Page and logout are there). Inside a novel's pages a second
+// row of the header lists that novel's screens.
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, useLocation, useMatch, useNavigate } from "react-router-dom";
@@ -10,10 +10,8 @@ import type { UserPublic } from "../api/auth";
 import { signOut } from "../api/client";
 import { listNovels } from "../api/novels";
 import { useSignedIn } from "../utils/useSignedIn";
+import logoUrl from "../assets/favicon.png";
 import "./AppShell.css";
-
-// Below this width the sidebar is a drawer the menu button opens, not a column.
-const WIDE_QUERY = "(min-width: 861px)";
 
 function ProfileMenu({ user }: { user: UserPublic | null }) {
   const navigate = useNavigate();
@@ -79,9 +77,9 @@ function ProfileMenu({ user }: { user: UserPublic | null }) {
   );
 }
 
-function SidebarLink({ to, end, children }: { to: string; end?: boolean; children: ReactNode }) {
+function HeaderLink({ to, end, children }: { to: string; end?: boolean; children: ReactNode }) {
   return (
-    <NavLink to={to} end={end} className={({ isActive }) => (isActive ? "sidebar-link active" : "sidebar-link")}>
+    <NavLink to={to} end={end} className={({ isActive }) => (isActive ? "header-link active" : "header-link")}>
       {children}
     </NavLink>
   );
@@ -92,7 +90,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const signedIn = useSignedIn();
   const [user, setUser] = useState<UserPublic | null>(null);
   const [novelTitle, setNovelTitle] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(() => window.matchMedia(WIDE_QUERY).matches);
   const novelMatch = useMatch("/novels/:novelId/*");
   const novelId = signedIn ? (novelMatch?.params.novelId ?? null) : null;
 
@@ -110,7 +107,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     };
   }, [signedIn]);
 
-  // The novel's name, for the sidebar's heading.
+  // The novel's name, for the second row.
   useEffect(() => {
     setNovelTitle(null);
     if (!novelId) return;
@@ -123,63 +120,41 @@ export default function AppShell({ children }: { children: ReactNode }) {
     };
   }, [novelId]);
 
-  // The drawer closes behind a navigation.
-  useEffect(() => {
-    if (!window.matchMedia(WIDE_QUERY).matches) setSidebarOpen(false);
-  }, [location.key]);
-
   return (
     <div className="app-shell">
-      <header className="app-topbar">
-        <button
-          type="button"
-          className="sidebar-toggle"
-          aria-label="메뉴 열기·닫기"
-          aria-expanded={sidebarOpen}
-          onClick={() => setSidebarOpen((prev) => !prev)}
-        >
-          ☰
-        </button>
-        <Link className="app-brand" to="/">
-          Retcona
-        </Link>
-        <div className="app-topbar-end">
-          {signedIn ? (
-            <ProfileMenu user={user} />
-          ) : (
-            location.pathname !== "/login" && (
-              <Link className="login-button" to="/login">
-                로그인
-              </Link>
-            )
-          )}
+      <header className="app-header">
+        <div className="app-topbar">
+          <Link className="app-logo" to="/" aria-label="Retcona 홈">
+            <img src={logoUrl} alt="Retcona" />
+          </Link>
+          <nav className="app-nav" aria-label="주요 메뉴">
+            <HeaderLink to="/" end>
+              서비스 소개
+            </HeaderLink>
+            {signedIn && <HeaderLink to="/dashboard">대시보드</HeaderLink>}
+          </nav>
+          <div className="app-topbar-end">
+            {signedIn ? (
+              <ProfileMenu user={user} />
+            ) : (
+              location.pathname !== "/login" && (
+                <Link className="login-button" to="/login">
+                  로그인
+                </Link>
+              )
+            )}
+          </div>
         </div>
+        {novelId && (
+          <nav className="app-subnav" aria-label="작품 메뉴">
+            <span className="subnav-title">{novelTitle ?? "현재 작품"}</span>
+            <HeaderLink to={`/novels/${novelId}/episodes`}>화 목록 · 원고</HeaderLink>
+            <HeaderLink to={`/novels/${novelId}/settings`}>설정 관리</HeaderLink>
+            <HeaderLink to={`/novels/${novelId}/graph`}>관계 그래프 · 타임라인</HeaderLink>
+          </nav>
+        )}
       </header>
-      <div className="app-body">
-        {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
-        <nav className={`app-sidebar${sidebarOpen ? " open" : ""}`} aria-label="주요 메뉴">
-          <SidebarLink to="/" end>
-            서비스 소개
-          </SidebarLink>
-          {signedIn ? (
-            <>
-              <SidebarLink to="/dashboard">대시보드</SidebarLink>
-              <SidebarLink to="/mypage">마이페이지</SidebarLink>
-            </>
-          ) : (
-            <SidebarLink to="/login">로그인 · 회원가입</SidebarLink>
-          )}
-          {novelId && (
-            <div className="sidebar-section">
-              <span className="sidebar-heading">{novelTitle ?? "현재 작품"}</span>
-              <SidebarLink to={`/novels/${novelId}/episodes`}>화 목록 · 원고</SidebarLink>
-              <SidebarLink to={`/novels/${novelId}/settings`}>설정 관리</SidebarLink>
-              <SidebarLink to={`/novels/${novelId}/graph`}>관계 그래프 · 타임라인</SidebarLink>
-            </div>
-          )}
-        </nav>
-        <main className="app-main">{children}</main>
-      </div>
+      <main className="app-main">{children}</main>
     </div>
   );
 }

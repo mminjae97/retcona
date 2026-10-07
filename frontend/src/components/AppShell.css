@@ -4,28 +4,53 @@
   height: 100%;
 }
 
-.app-topbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 56px;
+.app-header {
   flex: none;
-  padding: 0 16px;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
 }
 
-.sidebar-toggle {
-  padding: 4px 10px;
-  font-size: 18px;
-  line-height: 1;
+.app-topbar {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  height: 60px;
+  padding: 0 20px;
 }
 
-.app-brand {
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+.app-logo {
+  display: inline-flex;
+  flex: none;
+}
+
+.app-logo img {
+  display: block;
+  width: 36px;
+  height: 36px;
+}
+
+.app-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.header-link {
+  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 14px;
   text-decoration: none;
+  white-space: nowrap;
+}
+
+.header-link:hover {
+  background: var(--color-bg);
+}
+
+.header-link.active {
+  background: var(--color-primary);
+  font-weight: 600;
 }
 
 .app-topbar-end {
@@ -46,6 +71,25 @@
 
 .login-button:hover {
   background: var(--color-primary-hover);
+}
+
+.app-subnav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 20px 8px;
+  overflow-x: auto;
+}
+
+.subnav-title {
+  margin-right: 10px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-muted);
 }
 
 .profile-menu {
@@ -127,89 +171,21 @@
   background: var(--color-bg);
 }
 
-.app-body {
-  position: relative;
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.app-sidebar {
-  display: none;
-  flex-direction: column;
-  gap: 2px;
-  flex: none;
-  width: 232px;
-  padding: 12px;
-  overflow-y: auto;
-  background: var(--color-surface);
-  border-right: 1px solid var(--color-border);
-}
-
-.app-sidebar.open {
-  display: flex;
-}
-
-.sidebar-link {
-  display: block;
-  padding: 9px 12px;
-  border-radius: 6px;
-  font-size: 14px;
-  text-decoration: none;
-}
-
-.sidebar-link:hover {
-  background: var(--color-bg);
-}
-
-.sidebar-link.active {
-  background: var(--color-primary);
-  font-weight: 600;
-}
-
-.sidebar-section {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--color-border);
-}
-
-.sidebar-heading {
-  padding: 4px 12px 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-  overflow-wrap: anywhere;
-}
-
 .app-main {
   flex: 1;
+  min-height: 0;
   min-width: 0;
   overflow: auto;
 }
 
-.sidebar-backdrop {
-  display: none;
-}
-
-@media (max-width: 860px) {
-  .app-sidebar.open {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 20;
-    box-shadow: 0 6px 20px rgba(47, 42, 37, 0.18);
+@media (max-width: 640px) {
+  .app-topbar {
+    gap: 8px;
+    padding: 0 12px;
   }
 
-  .sidebar-backdrop {
-    display: block;
-    position: absolute;
-    inset: 0;
-    z-index: 10;
-    background: rgba(47, 42, 37, 0.3);
+  .app-subnav {
+    padding: 0 12px 8px;
   }
 
   .profile-name {
