@@ -313,6 +313,7 @@ interface CharacterForm {
   name: string;
   gender: Gender;
   pronoun: Pronoun | ""; // "": follows gender
+  appears_after_death: boolean;
   aliases: string; // comma-separated, as typed
   fixed_attrs: SectionForm<typeof FIXED_ATTR_FIELDS>;
   mutable_attrs: SectionForm<typeof MUTABLE_ATTR_FIELDS>;
@@ -333,6 +334,7 @@ function characterForm(character?: CharacterPublic): CharacterForm {
     name: character?.name ?? "",
     gender: character?.gender ?? "unspecified",
     pronoun: character?.pronoun ?? "",
+    appears_after_death: character?.appears_after_death ?? false,
     aliases: character?.aliases.join(", ") ?? "",
     fixed_attrs: sectionForm(FIXED_ATTR_FIELDS, character?.fixed_attrs),
     mutable_attrs: sectionForm(MUTABLE_ATTR_FIELDS, character?.mutable_attrs),
@@ -532,6 +534,18 @@ function CharactersSection({ novelId }: { novelId: string }) {
                   <span className="alias-hint">
                     원고가 이 캐릭터를 성별과 다른 대명사로 부르는 경우(예: 남장한 여성을 서술에서 "그"로 부름)에만
                     지정하세요. "그"나 "그녀"만 쓰인 문장이 누구를 가리키는지 연결할 때 사용합니다.
+                  </span>
+                </label>
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={form.appears_after_death}
+                    onChange={(e) => setForm({ ...form, appears_after_death: e.target.checked })}
+                  />
+                  죽은 뒤에도 등장해요
+                  <span className="alias-hint">
+                    회상·유령·부활처럼 이 캐릭터가 죽은 뒤에도 나오는 것이 정상이라면 켜두세요. 죽은 인물의 재등장
+                    검사에서 이 캐릭터를 제외합니다.
                   </span>
                 </label>
                 <label>

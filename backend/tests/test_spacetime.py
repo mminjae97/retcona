@@ -318,3 +318,37 @@ def test_a_presence_or_state_flag_has_no_value_the_card_could_take():
     claim = SimpleNamespace(attributes={"presence": "일어섰다", "eye_color": "푸른색"})
     assert _flag_value(SimpleNamespace(attribute="presence"), claim) is None
     assert _flag_value(SimpleNamespace(attribute="eye_color"), claim) == "푸른색"
+
+
+# --- the author lets a character be shown after dying -----------------------------
+
+
+def test_a_character_the_author_lets_appear_after_dying_is_not_looked_for_among_the_dead(monkeypatch):
+    from pipeline import validate_episode
+
+    allowed, other = uuid.uuid4(), uuid.uuid4()
+    rows = [(allowed, "레온", [], "male", None, True), (other, "세린", [], "female", None, False)]
+    db = MagicMock()
+    db.execute.return_value.one_or_none.return_value = SimpleNamespace(content="본문", updated_at=None, episode_index=5)
+    db.execute.return_value.all.return_value = rows
+    db.scalars.return_value = []
+    asked = []
+
+    def fake_deaths(_db, _novel, _index, ids):
+        asked.extend(ids)
+        return {i: "3화: 숨을 거두었다" for i in ids}
+
+    monkeypatch.setattr(validate_episode, "SessionLocal", lambda: MagicMock(__enter__=lambda s: db, __exit__=lambda *a: None))
+    monkeypatch.setattr(validate_episode, "deaths_before", fake_deaths)
+    result = validate_episode._read_input(uuid.uuid4(), uuid.uuid4())
+    assert asked == [other]
+    assert [c["died"] for c in result.characters] == [None, "3화: 숨을 거두었다"]
+
+
+def test_the_setting_is_off_by_default_and_saved_with_the_card():
+    from api.settings import CharacterInput, _apply
+
+    assert CharacterInput(name="레온").appears_after_death is False
+    character = Character()
+    _apply(character, CharacterInput(name="레온", appears_after_death=True))
+    assert character.appears_after_death is True

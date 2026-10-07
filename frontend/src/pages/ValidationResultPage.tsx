@@ -800,6 +800,12 @@ function FlagCard({
         <dt>{isState ? "이전 화의 상태" : "설정"}</dt>
         <dd>{flag.reference_text}</dd>
       </dl>
+      {flag.status === "open" && flag.attribute === "presence" && (
+        <p className="flag-hint">
+          회상·유령·부활처럼 이후에도 계속 나와도 정상인 인물이라면, 설정 화면에서 이 캐릭터의 "죽은 뒤에도 등장해요"를
+          켜두세요. 이후 화에서 다시 지적하지 않습니다.
+        </p>
+      )}
       {flag.status === "open" && (
         <div className="flag-actions">
           <button
