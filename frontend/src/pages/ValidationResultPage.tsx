@@ -36,7 +36,7 @@ const ERROR_TYPES: Record<string, string> = {
   spacetime: "시공간 모순",
 };
 
-const ATTRIBUTES: Record<string, string> = { ...FIXED_ATTR_FIELDS, features: "특징", state: "상태" };
+const ATTRIBUTES: Record<string, string> = { ...FIXED_ATTR_FIELDS, features: "특징", state: "상태", presence: "등장" };
 
 // How often the page checks on revalidations in progress.
 const REVALIDATION_POLL_MS = 2000;
@@ -723,8 +723,9 @@ function FlagCard({
   const revalidation = flag.revalidation;
   // Only a flag on a card that's still there, and not while a run is going
   // (it replaces this run's flags when it finishes).
-  // A state flag is held against what an earlier episode says, not a card value to supplement.
-  const isState = flag.attribute === "state";
+  // A state or presence flag is held against what an earlier episode says (a place's state, a
+  // character's death), not a card value to supplement.
+  const isState = flag.attribute === "state" || flag.attribute === "presence";
   const canRevalidate =
     flag.status === "open" && flag.subject_id !== null && !!flag.attribute && !isState && !runActive;
 
@@ -764,7 +765,10 @@ function FlagCard({
             </span>
           )
         ) : (
-          <span className="flag-confidence" title="판정 모델이 모순이라고 본 확률">
+          <span
+            className="flag-confidence"
+            title={flag.error_type === "spacetime" ? "규칙으로 찾은 항목이라 고정된 값입니다" : "판정 모델이 모순이라고 본 확률"}
+          >
             모순 가능성 {Math.round(flag.confidence * 100)}%
           </span>
         )}
@@ -822,7 +826,7 @@ function FlagCard({
                   : flag.subject_id === null
                     ? "설정 카드가 삭제되어 재검증할 수 없습니다."
                     : isState
-                      ? "이전 화의 상태와 어긋난 항목이라 설정을 보완해 재검증할 수 없습니다. 원고를 고치거나 오탐으로 해제해 주세요."
+                      ? "이전 화의 내용과 어긋난 항목이라 설정을 보완해 재검증할 수 없습니다. 원고를 고치거나 오탐으로 해제해 주세요."
                       : undefined
               }
             >
