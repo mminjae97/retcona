@@ -371,6 +371,8 @@ _NOT_ACTUAL = re.compile(r"마치|처럼|듯|척|꿈|악몽|만약|차라리")
 _NOT_PRESENT = re.compile(
     r"소식|소문|무덤|묘비|묘지|장례|유해|시신|유품|추모|애도|죽음|죽은|죽었|죽기|숨진|사망|전사|유령|영혼|망령|환영|제사"
     r"|예전|옛날|옛적|어릴\s?적|어린\s?시절|과거|지난|한때|당시|회상|떠올|기억|추억|그리워|그리움"
+    # ...and what is told or left of them afterwards.
+    r"|유언|전설|전해|[다라]고\s?한다|알려져|불렸|불린"
 )
 
 
@@ -383,6 +385,15 @@ def _said_of(sentence: Sentence, mention: Mention, others: list[Mention]) -> str
     if any(other.topic and other.start >= mention.end for other in others if other is not mention):
         return ""
     return " ".join(sentence.narration[mention.end + 1 :].split()).strip(_PREDICATE_EDGE)
+
+
+def _death_of_another(said: str) -> bool:
+    """Whether the death the predicate ends in is somebody else's: the word
+    before it is a subject of its own ("눈앞에서 동료가 죽었다", "그가 숨을 거두었다"),
+    where "피가 많이 나서 죽었다" has a verb between."""
+    found = _DEATH.search(said.strip(_PREDICATE_EDGE))
+    before = said.strip(_PREDICATE_EDGE)[: found.start()].split() if found else []
+    return bool(before) and re.search(r"[가-힣][이가]$", before[-1]) is not None
 
 
 def _revival_of_self(said: str) -> bool:
@@ -416,7 +427,7 @@ def condition_of(sentence: Sentence, mention: Mention, others: list[Mention]) ->
         return _revived_by_another(sentence, mention)
     if _NOT_ACTUAL.search(said):
         return ""
-    if is_death(said) or _revival_of_self(said):
+    if (is_death(said) and not _death_of_another(said)) or _revival_of_self(said):
         return said
     # Said of the character before its name: "언데드가 된 레온은 ...".
     undead = _UNDEAD_STATE.search(sentence.narration[: mention.start])

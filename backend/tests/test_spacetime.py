@@ -62,6 +62,23 @@ def test_a_sentence_that_only_speaks_of_death_is_not_one(text):
     assert _said(text)["레온"][0] == ""
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "레온은 눈앞에서 동료가 죽었다.",
+        "레온은 쓰러진 친구를 보고 그가 죽었다.",
+        "레온은 눈앞에서 동료가 숨을 거두었다.",
+    ],
+)
+def test_a_death_with_a_subject_of_its_own_is_not_the_sentences_subjects(text):
+    assert _said(text)["레온"][0] == ""
+
+
+def test_a_death_with_a_verb_between_is_still_the_subjects():
+    condition, _ = _said("레온은 피가 많이 나서 죽었다.")["레온"]
+    assert rules.is_death(condition)
+
+
 def test_another_subject_taking_over_leaves_the_death_to_it():
     said = _said("레온이 보는 앞에서 세린이 죽었다.")
     assert said["레온"] == ("", "")
@@ -114,6 +131,9 @@ def test_the_one_who_brings_another_back_is_not_brought_back():
         "레온은 세린의 무덤 앞에 섰다.",
         "세린은 죽은 레온을 기억했다.",
         "레온의 유령이 나타났다.",
+        "레온은 전설로 남았다.",
+        "레온은 유언장에 이렇게 적었다.",
+        "레온은 그날 밤 성을 지켰다고 한다.",
     ],
 )
 def test_the_dead_remembered_mourned_or_seen_as_a_ghost_do_not_appear(text):
