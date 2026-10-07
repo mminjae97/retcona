@@ -74,6 +74,16 @@ def test_a_claim_that_says_a_change_of_state_itself_is_not_held_against_the_old_
     assert not any(calls)  # no pair went to the model
 
 
+def test_features_around_a_change_of_state_the_episode_makes_are_not_held_against_the_old_one(nli):
+    calls = nli(0.9)
+    card, bundle = _bundle(state="폐허가 되었다")
+    # Two claims of one place: it is rebuilt, and then described as thriving.
+    bundle.claim_cards = [card, card]
+    claims = [_claim(state="재건되었다"), _claim(features="번화한 항구도시")]
+    assert judges.judge_location(claims, bundle) == []
+    assert not any(calls)
+
+
 def test_a_state_only_claim_is_held_against_nothing(nli):
     calls = nli(0.9)
     _, bundle = _bundle()

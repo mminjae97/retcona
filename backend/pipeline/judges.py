@@ -116,18 +116,24 @@ def _pairs(
 
 def _state_pairs(claims: list[ExtractedClaim], bundle: ContextBundle) -> list[_Pair]:
     """A place's features against the state an earlier episode left it in: a
-    city described as thriving after it fell. Not a claim that says a change of
-    state itself (the story changing the place back, or on, is not an error),
-    and not a place that has no state yet."""
+    city described as thriving after it fell. Not a place this episode itself
+    changes the state of (the story changing the place back, or on, is not an
+    error, and what it says around the change is of the state it leaves it in,
+    not the old one), and not a place that has no state yet."""
     subjects = {normalize_name(claim.subject) for claim in claims if claim.subject_kind == "location" and claim.subject}
+    changed = {
+        card.id
+        for index, claim in enumerate(claims)
+        if claim.subject_kind == "location"
+        and (card := bundle.card_for(index)) is not None
+        and any(key in claim.attributes for key in STATE_ATTR_KEYS)
+    }
     pairs = []
     for index, claim in enumerate(claims):
         card = bundle.card_for(index)
-        if claim.subject_kind != "location" or card is None or not card.state:
+        if claim.subject_kind != "location" or card is None or not card.state or card.id in changed:
             continue
-        if any(key in claim.attributes for key in STATE_ATTR_KEYS) or not any(
-            claim.attributes.get(key) for key in GEO_ATTR_KEYS
-        ):
+        if not any(claim.attributes.get(key) for key in GEO_ATTR_KEYS):
             continue
         evidence = claim.evidence or claim.text
         hypothesis = _hypothesis(normalize_name(claim.subject), evidence, claim.text, subjects)

@@ -6,10 +6,12 @@ assembles once (avoids context silos, 7.3).
 
 Today the bundle is the setting cards of the characters/locations the
 episode's claims are about, as entity matching found them
-(pipeline/entities.py resolve_subjects). The appearance and location judgments compare a
-claim with its card's attributes key by key, so the card is all they need.
-A location's card also carries its latest state before the episode, which the
-location judgment holds the episode's features against. Narrowing past settings and state history down by similarity (pgvector +
+(pipeline/entities.py resolve_subjects). The appearance and location judgments
+compare a claim with its card's attributes key by key, so the card is all they
+need. A location's card also carries its latest state before the episode, which
+the location judgment holds the episode's features against.
+
+Narrowing past settings and state history down by similarity (pgvector +
 reranker, chapter 5) comes with the modules that read free text: behavior
 (OOC) and spacetime.
 
