@@ -14,6 +14,7 @@ from fastapi import FastAPI
 
 from api.episodes import router as episodes_router
 from api.novels import router as novels_router
+from api.relations import router as relations_router
 from api.settings import router as settings_router
 from auth.email_verification import router as signup_verification_router
 from auth.jwe import validate_keys
@@ -99,5 +100,6 @@ app.include_router(signup_verification_router, prefix="/auth/signup", tags=["aut
 app.include_router(novels_router, prefix="/novels", tags=["novels"])
 app.include_router(episodes_router, prefix="/novels", tags=["episodes"])
 app.include_router(settings_router, prefix="/novels", tags=["settings"])
+app.include_router(relations_router, prefix="/novels", tags=["relations"])
 
 # TODO: register remaining routers (design doc 2.4 validation results, etc.)
