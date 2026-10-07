@@ -20,6 +20,12 @@ def test_an_event_needs_an_episode_and_a_summary():
     assert (event.summary, event.character_ids) == ("성으로 출발한다", [A, B])
 
 
+def test_an_episode_number_is_bounded_so_the_column_can_hold_it():
+    with pytest.raises(ValidationError):
+        EventInput(episode_index=3_000_000_000, summary="출발")
+    assert EventInput(episode_index=100_000, summary="출발").episode_index == 100_000
+
+
 def test_a_link_is_between_two_different_events_of_a_known_type():
     with pytest.raises(ValidationError):
         LinkInput(from_id=A, to_id=A)

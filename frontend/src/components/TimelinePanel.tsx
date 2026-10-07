@@ -6,6 +6,7 @@ import TimelineGraph from "./TimelineGraph";
 import { ApiError, describeError } from "../api/client";
 import {
   BRANCH_REASON_MAX_LENGTH,
+  EPISODE_MAX,
   LINK_TYPES,
   SUMMARY_MAX_LENGTH,
   createEvent,
@@ -119,8 +120,8 @@ export default function TimelinePanel({ novelId, characters }: Props) {
     e.preventDefault();
     if (busy) return;
     const input = { ...eventForm, summary: eventForm.summary.trim() };
-    if (!Number.isInteger(input.episode_index) || input.episode_index < 1) {
-      setEventError("화 번호는 1 이상의 정수로 입력해 주세요.");
+    if (!Number.isInteger(input.episode_index) || input.episode_index < 1 || input.episode_index > EPISODE_MAX) {
+      setEventError(`화 번호는 1 이상 ${EPISODE_MAX} 이하의 정수로 입력해 주세요.`);
       return;
     }
     if (!input.summary) {
@@ -160,6 +161,13 @@ export default function TimelinePanel({ novelId, characters }: Props) {
       if (editingEventId === event.id) stopEditingEvent();
       if (editingLinkId && links.some((link) => link.id === editingLinkId && (link.from_id === event.id || link.to_id === event.id))) {
         stopEditingLink();
+      } else if (linkForm.from_id === event.id || linkForm.to_id === event.id) {
+        // A link being drafted that names it: that end is gone.
+        setLinkForm((prev) => ({
+          ...prev,
+          from_id: prev.from_id === event.id ? "" : prev.from_id,
+          to_id: prev.to_id === event.id ? "" : prev.to_id,
+        }));
       }
     } catch (err) {
       setEventError(describeTimelineError(err));
@@ -259,6 +267,7 @@ export default function TimelinePanel({ novelId, characters }: Props) {
             <input
               type="number"
               min={1}
+              max={EPISODE_MAX}
               step={1}
               value={Number.isNaN(eventForm.episode_index) ? "" : eventForm.episode_index}
               onChange={(e) => setEventForm({ ...eventForm, episode_index: e.target.valueAsNumber })}

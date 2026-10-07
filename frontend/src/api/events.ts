@@ -18,6 +18,7 @@ export interface EventPublic extends EventInput {
 // the labels are this side's.
 export const LINK_TYPES = { sequential: "이어짐", branch: "갈라짐", merge: "합쳐짐" } as const;
 export type LinkType = keyof typeof LINK_TYPES;
+export const EPISODE_MAX = 100000;
 export const SUMMARY_MAX_LENGTH = 500;
 export const BRANCH_REASON_MAX_LENGTH = 200;
 

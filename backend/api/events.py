@@ -35,6 +35,7 @@ router = APIRouter()
 _DB = Depends(get_db)
 _USER = Depends(get_current_user)
 
+_EPISODE_MAX = 100_000  # the column is a 32-bit integer; no serial runs this long
 _SUMMARY_MAX_LENGTH = 500
 _REASON_MAX_LENGTH = 200
 _MEMBERS_MAX = 50
@@ -47,7 +48,7 @@ def _unique(ids: list[uuid.UUID]) -> list[uuid.UUID]:
 
 
 class EventInput(BaseModel):
-    episode_index: int = Field(ge=1)
+    episode_index: int = Field(ge=1, le=_EPISODE_MAX)
     summary: str = Field(min_length=1, max_length=_SUMMARY_MAX_LENGTH)
     character_ids: list[uuid.UUID] = Field(default_factory=list, max_length=_MEMBERS_MAX)
     location_ids: list[uuid.UUID] = Field(default_factory=list, max_length=_MEMBERS_MAX)
