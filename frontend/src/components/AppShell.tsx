@@ -102,11 +102,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
     let ignore = false;
     getMe()
       .then((me) => !ignore && setUser(me))
-      .catch(() => !ignore && setUser(null));
+      .catch(() => undefined);
     return () => {
       ignore = true;
     };
-  }, [signedIn]);
+    // Again at each page change: the author may have changed the nickname on My Page.
+  }, [signedIn, location.pathname]);
 
   // The novel's name, for the second row.
   useEffect(() => {
