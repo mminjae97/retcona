@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, useLocation, useMatch, useNavigate } from "react-router-dom";
-import { getMe } from "../api/auth";
+import { getMe, onProfileChanged } from "../api/auth";
 import type { UserPublic } from "../api/auth";
 import { signOut } from "../api/client";
 import { listNovels } from "../api/novels";
@@ -102,12 +102,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
     let ignore = false;
     getMe()
       .then((me) => !ignore && setUser(me))
-      .catch(() => undefined);
+      .catch(() => !ignore && setUser(null));
     return () => {
       ignore = true;
     };
-    // Again at each page change: the author may have changed the nickname on My Page.
-  }, [signedIn, location.pathname]);
+  }, [signedIn]);
+
+  // A nickname changed on My Page shows here at once.
+  useEffect(() => onProfileChanged(setUser), []);
 
   // The novel's name, for the second row.
   useEffect(() => {
