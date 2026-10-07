@@ -1,10 +1,11 @@
 // Per-novel relationship graph · timeline screen (design doc 2.6, 9)
 // Top tabs switch between the character relationship graph (9.2) and the story timeline graph (9.3).
-// The relationship graph is drawn by components/RelationGraph (d3-force); the timeline tab comes later.
-// The author enters relations here: nothing reads them out of the manuscript yet.
+// The relationship graph is drawn by components/RelationGraph (d3-force), the timeline by components/TimelinePanel.
+// The author enters relations and events here: nothing reads them out of the manuscript yet.
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import RelationGraph from "../components/RelationGraph";
+import TimelinePanel from "../components/TimelinePanel";
 import { ApiError, describeError } from "../api/client";
 import {
   RELATION_TYPE_MAX_LENGTH,
@@ -39,6 +40,7 @@ export default function GraphPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<"graph" | "timeline">("graph");
 
   function load() {
     if (!novelId) return;
@@ -138,10 +140,22 @@ export default function GraphPage() {
       <div className="section-header">
         <h1>관계 그래프 · 타임라인</h1>
         <div className="graph-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected className="active">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "graph"}
+            className={tab === "graph" ? "active" : undefined}
+            onClick={() => setTab("graph")}
+          >
             관계 그래프
           </button>
-          <button type="button" role="tab" aria-selected={false} disabled title="준비 중입니다.">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "timeline"}
+            className={tab === "timeline" ? "active" : undefined}
+            onClick={() => setTab("timeline")}
+          >
             타임라인
           </button>
         </div>
@@ -155,6 +169,8 @@ export default function GraphPage() {
 
       {characters === null ? (
         !loadError && <p>불러오는 중...</p>
+      ) : tab === "timeline" ? (
+        <TimelinePanel novelId={novelId ?? ""} characters={characters} />
       ) : characters.length < 2 ? (
         <p className="empty-state">
           관계를 그리려면 캐릭터가 두 명 이상 필요합니다.{" "}
