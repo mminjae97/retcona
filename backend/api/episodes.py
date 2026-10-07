@@ -51,6 +51,8 @@ router = APIRouter()
 # extraction takes.
 RUN_ABANDON_AFTER = timedelta(minutes=15)
 _ACTIVE_STATUSES = ("queued", "running")
+# Attributes a flag can carry that aren't a card's (pipeline/judges.py): what the story says happened before.
+_HISTORY_ATTR_KEYS = STATE_ATTR_KEYS + SPACETIME_ATTR_KEYS
 
 
 class EpisodeCreate(BaseModel):
@@ -435,8 +437,6 @@ class FlagAction(BaseModel):
 FLAG_HANDLED = "flag_handled"  # not open (accept/dismiss) or not dismissed (reopen)
 FLAG_NO_VALUE = "flag_no_value"  # the claim has no value for the attribute
 FLAG_NO_SETTING = "flag_no_setting"  # a state / presence flag: held against the story's history, not a card value
-# Attributes a flag can carry that aren't a card's (pipeline/judges.py): what the story says happened before.
-_HISTORY_ATTR_KEYS = STATE_ATTR_KEYS + SPACETIME_ATTR_KEYS
 FLAG_CARD_MISSING = "flag_card_missing"  # the setting card was deleted
 # accept while the episode is being validated: that run judged against the
 # card as it was, and would bring the flag back when it finishes

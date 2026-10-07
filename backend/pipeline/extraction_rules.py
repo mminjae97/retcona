@@ -344,11 +344,15 @@ _DEATH = re.compile(
 # Alive again, said of the character itself: "되살아났다", "부활했다". A plain "다시
 # 일어났다" is a fall and a getting up, not this.
 _REVIVAL = re.compile(r"(?:되살아났|되살아나|부활했|부활하였|다시\s?살아났|소생했)" + _ENDING)
-# Back as one of the undead ("언데드가 되어 일어났다", "좀비가 되었다"), however it was done.
+# Back as one of the undead ("언데드가 되어 일어났다", "좀비가 되었다", "언데드로 다시
+# 일어났다"), however it was done: becoming one, not an undead doing something
+# ("좀비가 일어섰다" is of the zombie).
 _UNDEAD = r"(?:언데드|좀비|강시|스켈레톤|구울)"
+_RISE = r"(?:일어났|일어섰|깨어났|움직였|걸어\s?나왔)"
 _UNDEAD_RISE = re.compile(
-    _UNDEAD + r"(?:이|가|로)?\s?(?:되어\s?|되어서\s?|변해\s?)?(?:다시\s?)?"
-    r"(?:되었|됐|변했|일어났|일어섰|깨어났|움직였|걸어\s?나왔)" + _ENDING
+    _UNDEAD
+    + rf"(?:(?:이|가|로)\s?(?:(?:되어서?|변해)\s?(?:다시\s?)?(?:되었|됐|변했|{_RISE})|되었|됐|변했)|로\s?(?:다시\s?)?{_RISE})"
+    + _ENDING
 )
 # ...or said right before the name ("언데드가 된 레온이 나타났다").
 _UNDEAD_STATE = re.compile(_UNDEAD + r"(?:이|가|로)?\s?(?:된|변한|되어\s?버린)\s?$")
@@ -365,6 +369,14 @@ _BODY = r"(?:시체|시신|유해|유골|뼈|영혼|혼)"
 _AFTER_NAME = re.compile(rf"^(?:(?P<object>[을를])|의\s?{_BODY}(?:(?P<body_object>[을를])|[이가은는]))\s?(?P<tail>.*)$")
 # Not something that happened: likened, pretended, dreamed.
 _NOT_ACTUAL = re.compile(r"마치|처럼|듯|척|꿈|악몽|만약|차라리")
+# Adverbs in -이 ("어이없이 죽었다"), not a subject of their own.
+_ADVERB_I = re.compile(r"(?:없이|같이|깊이|높이|일찍이|가까이|괴로이|외로이|쓸쓸이|헛되이|고이)$")
+
+
+def _not_actual(said: str) -> bool:
+    """Whether what the predicate ends in is likened, pretended or dreamed: said
+    in its last three words, so a "꿈을 이루지 못한 채 죽었다" isn't one."""
+    return _NOT_ACTUAL.search(" ".join(said.split()[-3:])) is not None
 # A sentence that is about the dead rather than showing them, or about the past or
 # a memory: a character who died is spoken of, remembered, mourned, or seen as a
 # ghost, and none of it is the character turning up again.
@@ -393,7 +405,7 @@ def _death_of_another(said: str) -> bool:
     where "피가 많이 나서 죽었다" has a verb between."""
     found = _DEATH.search(said.strip(_PREDICATE_EDGE))
     before = said.strip(_PREDICATE_EDGE)[: found.start()].split() if found else []
-    return bool(before) and re.search(r"[가-힣][이가]$", before[-1]) is not None
+    return bool(before) and re.search(r"[가-힣][이가]$", before[-1]) is not None and not _ADVERB_I.search(before[-1])
 
 
 def _revival_of_self(said: str) -> bool:
@@ -410,7 +422,7 @@ def _revived_by_another(sentence: Sentence, mention: Mention) -> str:
     if after is None:
         return ""
     tail = " ".join(after.group("tail").split()).strip(_PREDICATE_EDGE)
-    if not tail or _NOT_ACTUAL.search(tail):
+    if not tail or _not_actual(tail):
         return ""
     if after.group("object") or after.group("body_object"):
         return tail if _REVIVE_OBJECT.search(tail) else ""
@@ -425,7 +437,7 @@ def condition_of(sentence: Sentence, mention: Mention, others: list[Mention]) ->
     said = _said_of(sentence, mention, others)
     if not said:
         return _revived_by_another(sentence, mention)
-    if _NOT_ACTUAL.search(said):
+    if _not_actual(said):
         return ""
     if (is_death(said) and not _death_of_another(said)) or _revival_of_self(said):
         return said

@@ -74,9 +74,23 @@ def test_a_death_with_a_subject_of_its_own_is_not_the_sentences_subjects(text):
     assert _said(text)["레온"][0] == ""
 
 
-def test_a_death_with_a_verb_between_is_still_the_subjects():
-    condition, _ = _said("레온은 피가 많이 나서 죽었다.")["레온"]
+@pytest.mark.parametrize(
+    "text",
+    [
+        "레온은 피가 많이 나서 죽었다.",
+        "레온은 어이없이 죽었다.",  # an adverb in -이, not a subject
+        "레온은 일찍이 죽었다.",
+        "레온은 꿈을 이루지 못한 채 죽었다.",  # 꿈 is not what the death is likened to
+        "레온은 따듯한 품에서 숨을 거두었다.",
+    ],
+)
+def test_a_death_is_still_the_subjects_with_a_verb_an_adverb_or_an_unrelated_word_before_it(text):
+    condition, _ = _said(text)["레온"]
     assert rules.is_death(condition)
+
+
+def test_a_dream_or_a_likeness_right_before_the_death_is_not_one():
+    assert _said("레온은 꿈에서 죽었다.")["레온"][0] == ""
 
 
 def test_another_subject_taking_over_leaves_the_death_to_it():
@@ -95,6 +109,7 @@ def test_coming_back_is_found():
     [
         "레온은 언데드가 되어 일어났다.",
         "레온은 언데드가 되었다.",
+        "레온은 언데드로 다시 일어났다.",
         "네크로맨서가 레온을 되살렸다.",
         "마법사는 레온의 시체를 언데드로 만들었다.",
         "레온의 시체가 언데드가 되어 일어났다.",
@@ -113,6 +128,8 @@ def test_a_character_brought_back_as_the_undead_or_by_another_is_a_coming_back(t
         "의사는 레온을 살려냈다.",  # saved from dying
         "마법사는 레온을 되살리지 못했다.",
         "마법사는 레온을 되살리는 꿈을 꾸었다.",
+        "레온이 보는 앞에서 좀비가 일어섰다.",  # the zombie's, not 레온's
+        "레온은 병사를 언데드로 만들었다.",
     ],
 )
 def test_getting_up_again_or_a_failed_or_dreamed_revival_is_not_one(text):
