@@ -51,3 +51,5 @@
 {"id": "p51", "cast": "main", "tags": ["location", "location-state"], "text": "벨로스 성은 교역의 중심이 되었다.", "gold": [{"subject": "벨로스 성", "kind": "location", "attribute": "features", "values": ["중심"]}]}
 {"id": "p52", "cast": "main", "tags": ["location", "location-state"], "text": "벨로스 성은 오래전 몰락한 왕가의 거처였다.", "gold": [{"subject": "벨로스 성", "kind": "location", "attribute": "features", "values": ["거처"]}]}
 {"id": "p53", "cast": "main", "tags": ["location", "location-state"], "text": "몇 해 뒤 벨로스 성은 폐허였다.", "gold": [{"subject": "벨로스 성", "kind": "location", "attribute": "state", "values": ["폐허"]}]}
+{"id": "p54", "cast": "main", "tags": ["scene", "topic-body"], "text": "레온은 붉은 눈동자로 카엘을 노려보았다.", "gold": [{"subject": "레온", "attribute": "eye_color", "values": ["붉은"]}]}
+{"id": "p55", "cast": "main", "tags": ["other-possessor", "topic-body"], "text": "레온은 붉은 눈의 카엘을 노려보았다."}

@@ -228,7 +228,8 @@ ATTRIBUTES = (
         re.compile(r"(?<![가-힣])키(?=[가는도를])|신장(?=[이가은는을를의도])"),
         value=re.compile(r"\d|센티|미터|크|컸|큰|작|장신|단신|훤칠|건장|왜소|높|낮"),
     ),
-    Attribute("scars", "흉터는", re.compile(r"흉터|상흔|(?<![발손물퀴])자국")),
+    # The answer has to name the mark: "왼팔의 상흔" can be answered "왼팔".
+    Attribute("scars", "흉터는", re.compile(r"흉터|상흔|(?<![발손물퀴])자국"), value=re.compile(r"흉|상흔|자국")),
     Attribute(
         "origin",
         "출신은",
@@ -517,7 +518,10 @@ def _color_near(clause: str, noun: re.Match) -> bool:
     following = clause[noun.end() : noun.end() + 1]
     if noun.group() in _WEAK_NOUNS and following and following in "을를에도":
         return False
-    after = " ".join(clause[noun.end() :].split()[:_WORDS_AFTER])
+    # The words after the noun's own (its particle, "눈이", is not one of them).
+    rest = clause[noun.end() :]
+    rest = rest[len(rest.split(maxsplit=1)[0]) :] if rest and not rest[0].isspace() else rest
+    after = " ".join(rest.split()[:_WORDS_AFTER])
     return COLOR_RE.search(after) is not None
 
 
@@ -654,7 +658,7 @@ _CUE_FIRST_CHARS = 12
 _PRONOUN_WINDOW = 20
 _BODY_ATTRIBUTES = ("eye_color", "hair_color", "scars", "height")
 # How many sentences back a pronoun's name is looked for.
-CONTEXT_SENTENCES = 2
+CONTEXT_SENTENCES = 3
 
 _MALE_NOUNS = ("사내", "남자", "소년", "청년", "남성")
 _FEMALE_NOUNS = ("소녀", "여자", "아가씨", "여인", "여성")
@@ -676,10 +680,42 @@ def _pronoun_kind(text: str) -> str:
 
 
 _GENITIVE = re.compile(r"([가-힣A-Za-z0-9]+)의\s+(?:\S+\s+){0,2}$")
+# A body part ahead of the cue ("오른손의 흉터") is where the cue is, not whose it is.
+# A whole word only: "후손의", "선배의" end in one but are people.
+_BODY_PART = re.compile(
+    r"(?:오른|왼|양)?(?:손|팔|다리|발|얼굴|목|어깨|가슴|등|배|뺨|볼|이마|턱|허리|무릎|옆구리|허벅지|종아리)"
+    r"(?:등|목|바닥|가락|덜미)?"
+)
+# What marks a name in a sentence as somebody the topic acts on, not a co-subject
+# ("레온과 세린은 ..."): an object, or "에게/한테".
+_ACTED_ON = re.compile(r"^(?:을|를|에게서|에게|한테서|한테)")
 
 
 def _characters(mentions: list[Mention]) -> dict[tuple[str, str], Subject]:
     return {m.subject.key: m.subject for m in mentions if m.subject.kind == "character"}
+
+
+def _topic_of_two(narration: str, mentions: list[Mention], hit: CueHit) -> Subject | None:
+    """The owner of a cue in a sentence with several characters and no possessor in
+    front of it, where one is the topic and the cue comes before the others, who
+    are acted on ("레온은 붉은 눈동자로 카엘을 노려보았다": 레온's). None otherwise:
+    "레온과 세린은 눈이 푸르렀다" is both, "레온은 붉은 눈의 카엘을 ..." is the other's."""
+    characters = [m for m in mentions if m.subject.kind == "character"]
+    topics = [m for m in characters if m.topic]
+    if len(topics) != 1 or topics[0].end > hit.start:
+        return None
+    if len({m.subject.key for m in characters}) != len(characters):
+        return None
+    for other in characters:
+        if other is topics[0]:
+            continue
+        # After the cue, and marked as acted on.
+        if other.start < hit.start or not _ACTED_ON.match(narration[other.end :]):
+            return None
+        # "붉은 눈의 세린을": the cue is a mark of the other.
+        if narration[hit.start : other.start].rstrip().endswith("의"):
+            return None
+    return topics[0].subject
 
 
 @dataclass(frozen=True)
@@ -714,7 +750,9 @@ def owner(
         person_after_that = genitive.group(1) in _PERSON_NOUNS.split("|") and re.search(
             r"(?<![가-힣])그\s?$", before[: genitive.start(1)]
         )
-        if genitive.group(1) in _PRONOUNS or person_after_that:
+        if _BODY_PART.fullmatch(genitive.group(1)):
+            pass  # "오른손의 흉터": no possessor, so the sentence's own subject
+        elif genitive.group(1) in _PRONOUNS or person_after_that:
             # "세린은 그의 푸른 눈을 보았다": 그의 is somebody the sentence doesn't
             # name, not its subject (자신의 would be).
             if here and genitive.group(1) != "자신":
@@ -727,7 +765,7 @@ def owner(
     if len(here) == 1:
         return next(iter(here.values()))
     if len(here) > 1:
-        return None
+        return _topic_of_two(narration, mentions[index], hit)
 
     # No name in the sentence: a pronoun or a dropped subject.
     if _PLURAL_PRONOUN.match(narration):
