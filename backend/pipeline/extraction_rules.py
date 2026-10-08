@@ -12,7 +12,7 @@ Whose it is: a possessor in front of the cue ("레온의 푸른 눈") says; a po
 that isn't a known name ("노인의 눈") means someone else's, and the cue is
 skipped; otherwise the one character the sentence names. A sentence naming no
 character ("그의 눈이 붉게 빛났다", "붉은 눈동자가 번뜩였다") goes to the one
-character the two sentences before it name, if there's exactly one — missing a
+character the three sentences before it name, if there's exactly one — missing a
 claim does less harm than holding it against the wrong card.
 """
 
@@ -196,10 +196,33 @@ class Attribute:
     needs_color: bool = False
     # what an answer has to look like
     value: re.Pattern | None = None
+    # what an answer must not be
+    reject: re.Pattern | None = None
     # Rules a clause out where the noun is the weak kind (not the named group
     # "strong"): 눈 is an eye, or snow.
     unless: re.Pattern | None = None
 
+
+# A body part, as a whole word: the words whose usual meaning is the body. They tell, in
+# front of a cue, that the cue is where it is ("오른손의 흉터"), not whose it is.
+_BODY_PART_WORD = (
+    r"(?:(?:오른|왼|양)?(?:손|팔|다리|얼굴|어깨|가슴|뺨|이마|턱|허리|무릎|옆구리|허벅지|종아리|정강이)(?:등|목|바닥|가락|덜미|뚝)?"
+    r"|눈가|눈썹|머리|코|콧등|입술|귀|발목|발바닥|발등|목덜미|관자놀이|미간|쇄골)"
+)
+_BODY_PART_WORD_RE = re.compile(_BODY_PART_WORD)
+# Words that mean something else as often (a ship, "and so on", snow): not a sign of a
+# possessor, but in an answer, the place of a mark all the same.
+_BODY_PART_AMBIGUOUS = r"(?:눈|입|발|목|배|등|볼)"
+
+# An answer that is nothing but body parts, listed or placed: "왼팔", "왼팔은", "왼팔과
+# 오른팔", "왼쪽 뺨과 이마", "뺨 위에". Not a value. Every body word counts, the ambiguous
+# ones too.
+_BODY_ITEM = (
+    rf"(?:(?:오른|왼|양)쪽\s)?(?:{_BODY_PART_WORD}|{_BODY_PART_AMBIGUOUS})(?:에서|에는|에도|으로|[에의이가을를은는도로와과만])?"
+)
+_ONLY_BODY_PARTS = re.compile(
+    rf"^{_BODY_ITEM}(?:,?\s{_BODY_ITEM})*(?:\s(?:위|아래|근처|부근|한가운데|가운데|옆|끝|뒤|밑|사이)(?:에서|에|의)?)?[.!?…]?$"
+)
 
 ATTRIBUTES = (
     Attribute(
@@ -228,7 +251,14 @@ ATTRIBUTES = (
         re.compile(r"(?<![가-힣])키(?=[가는도를])|신장(?=[이가은는을를의도])"),
         value=re.compile(r"\d|센티|미터|크|컸|큰|작|장신|단신|훤칠|건장|왜소|높|낮"),
     ),
-    Attribute("scars", "흉터는", re.compile(r"흉터|상흔|(?<![발손물퀴])자국")),
+    # An answer that is only a body part is the place of the mark, not the mark
+    # ("왼팔의 상흔" answered "왼팔"); every body word counts here, the ambiguous ones too.
+    Attribute(
+        "scars",
+        "흉터는",
+        re.compile(r"흉터|상흔|(?<![발손물퀴])자국"),
+        reject=_ONLY_BODY_PARTS,
+    ),
     Attribute(
         "origin",
         "출신은",
@@ -517,8 +547,17 @@ def _color_near(clause: str, noun: re.Match) -> bool:
     following = clause[noun.end() : noun.end() + 1]
     if noun.group() in _WEAK_NOUNS and following and following in "을를에도":
         return False
-    after = " ".join(clause[noun.end() :].split()[:_WORDS_AFTER])
-    return COLOR_RE.search(after) is not None
+    # The words after the noun's own (its particle, "눈이", is not one of them).
+    # The rest of the noun's token is dropped whole.
+    rest = re.sub(r"^\S+", "", clause[noun.end() :])
+    words = rest.split()[:_WORDS_AFTER]
+    # The last word of the window only as a predicate ("눈은 어둠 속에서도 붉게"), not as the
+    # modifier of another noun ("눈이 마주친 순간 붉은 노을이").
+    # A color noun ending in ㄹ ("은발") is not one.
+    last = words[-1].rstrip(".,!?…") if words else ""
+    if len(words) == _WORDS_AFTER and _adnominal(last) and not re.search(r"(?:발|색|빛)$", last):
+        words = words[:-1]
+    return COLOR_RE.search(" ".join(words)) is not None
 
 
 def cue_hits(narration: str) -> list[CueHit]:
@@ -565,6 +604,8 @@ def value_of(attribute: Attribute, answer: str, context: str) -> str:
         value = trimmed if COLOR_RE.search(trimmed) else whole
     if value and attribute.value is not None and not attribute.value.search(value):
         return ""
+    if value and attribute.reject is not None and attribute.reject.search(value):
+        return ""
     return value
 
 
@@ -598,7 +639,7 @@ def with_particle(name: str, particle: str) -> str:
     if forms is None:
         return name + particle
     last = name[-1:]
-    vowel_final = "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 == 0
+    vowel_final = _final_consonant(last) == ""
     return name + forms[1 if vowel_final else 0]
 
 
@@ -654,7 +695,8 @@ _CUE_FIRST_CHARS = 12
 _PRONOUN_WINDOW = 20
 _BODY_ATTRIBUTES = ("eye_color", "hair_color", "scars", "height")
 # How many sentences back a pronoun's name is looked for.
-CONTEXT_SENTENCES = 2
+CONTEXT_SENTENCES = 3
+_NEAR_SENTENCES = 2
 
 _MALE_NOUNS = ("사내", "남자", "소년", "청년", "남성")
 _FEMALE_NOUNS = ("소녀", "여자", "아가씨", "여인", "여성")
@@ -676,10 +718,180 @@ def _pronoun_kind(text: str) -> str:
 
 
 _GENITIVE = re.compile(r"([가-힣A-Za-z0-9]+)의\s+(?:\S+\s+){0,2}$")
+# "그 손의", "이 오른쪽 어깨의": a body part of somebody already mentioned.
+_DEMONSTRATIVE_BEFORE = re.compile(r"(?<![가-힣])[그이저]\s(?:(?:오른|왼|양)쪽\s)?$")
+# What marks a name in a sentence as somebody the topic acts on, not a co-subject
+# ("레온과 세린은 ..."): an object, or "에게/한테".
+_ACTED_ON = re.compile(r"^(?:을|를|에게서|에게|한테서|한테)")
+# A person as an object, a possessor or a recipient: a word for a person ("노인을", "사내의",
+# "아이들에게"), or anybody with 에게/한테 ("카일에게").
+_OTHER_PERSON = re.compile(rf"(?:(?:{_PERSON_NOUNS})들?(?:을|를|의)|\S+(?:에게|한테)(?:서)?)[,.]?")
 
 
 def _characters(mentions: list[Mention]) -> dict[tuple[str, str], Subject]:
     return {m.subject.key: m.subject for m in mentions if m.subject.kind == "character"}
+
+
+_FINALS = ("", "ㄱ", "ㄲ", "ㄳ", "ㄴ", "ㄵ", "ㄶ", "ㄷ", "ㄹ", "ㄺ", "ㄻ", "ㄼ", "ㄽ", "ㄾ", "ㄿ", "ㅀ",
+           "ㅁ", "ㅂ", "ㅄ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ")
+
+
+def _final_consonant(syllable: str) -> str | None:
+    """The final consonant of a Hangul syllable ("" for none), None for anything else."""
+    if len(syllable) != 1 or not "가" <= syllable <= "힣":
+        return None
+    return _FINALS[(ord(syllable) - ord("가")) % 28]
+
+
+# Adverbs with a final ㄴ/ㄹ, which modify the verb, not the name after them ("온 힘을",
+# "얼른 세린을").
+_ADVERBS = frozenset(("온", "얼른", "순식간", "가만", "일순"))
+
+
+def _adnominal(word: str) -> bool:
+    """Whether a word modifies the word after it: an adnominal ending (-는, -던, -ㄴ/-ㄹ
+    as the final consonant of 푸른, 한, 갈). 의 is the caller's to look at."""
+    # Not the object particles, 만, or an adverb that ends in a final consonant.
+    if not word or word in _ADVERBS or word.endswith(("을", "를", "만", "번", "순간", "잠깐", "동안")):
+        return False
+    last = word[-1]
+    if last in "는던":
+        return True
+    return _final_consonant(last) in ("ㄴ", "ㄹ")
+
+
+# The end of a phrase of its own, as the last word before a name: a particle that doesn't
+# modify what follows. Not 와/과/도: they end "소녀들과", "사과" too, and hide a modifier.
+_PHRASE_END = ("에서", "에", "으로", "로", "까지", "부터", "에게", "한테", "의")
+
+
+# What an adnominal can modify without the name after it: a number of times, a time.
+_BOUND_NOUNS = frozenset(("번", "뒤", "후", "때", "채", "듯", "사이", "직후", "적"))
+
+
+def _describes_next(span: str) -> bool:
+    """Whether the cue at the start of span (its noun and what follows, up to the next
+    name) is said of that name: a word that modifies what follows, "눈이 푸른 소녀 세린을",
+    "붉은 눈의 마녀 세린을". 의 counts only on the cue's own word ("눈의")."""
+    words = span.split()
+    # A modifier stands in the same phrase as what it modifies: only the words after the last
+    # one with a particle of its own are looked at ("눈이 푸른 소녀 세린을"; not the 문 of
+    # "문 앞에서 세린을", which is its own phrase).
+    start = 1 + max((i for i, word in enumerate(words[1:]) if word.endswith(_PHRASE_END)), default=-1) + 1
+    first = words[0].endswith("의") if words else False
+    return first or any(
+        # "한 번" is a number of times, and "노려본 뒤" a time: not a "한", "본" of the name.
+        # A later "앞의", "안의" is a place, not the cue's.
+        _adnominal(word) and not word.endswith("의") and (words[i + 1] if i + 1 < len(words) else "") not in _BOUND_NOUNS
+        for i, word in enumerate(words)
+        if i >= start
+    )
+
+
+# Words that end like a subject's particle and are no subject: the connective of a verb
+# ("웃었지만", "웃어도"), a conjunction ("그래도", "다만"), a time ("이번에도", "그날도");
+# the adverbs in -이 are _ADVERB_I's ("말없이", "가까이").
+_NOT_SUBJECT_ENDINGS = (
+    "지만", "어도", "아도", "해도", "라도", "데도", "면서도", "고도", "그래도", "다만", "에도", "날도",
+)
+_NOT_SUBJECT_WORDS = frozenset(("오늘도", "지금도", "아직도", "이제도", "그만", "작은", "많은"))
+
+
+# The final consonants an adjective stem has in front of -은 ("깊은", "높은", "짧은",
+# "젊은", "낮은", "짙은", "좋은"), and that a person's word seldom ends in.
+_ADJECTIVE_FINALS = ("ㄲ", "ㄺ", "ㄻ", "ㄼ", "ㅂ", "ㅆ", "ㅈ", "ㅌ", "ㅍ", "ㅎ")
+
+
+def _modifier_of_noun(word: str) -> bool:
+    """Whether a word that ends -은/-는 is the adnominal of a verb or an adjective ("떨리는",
+    "하는", "깊은", "붉은", "짧은"), which is no person to be a subject. Names are the
+    risk ("마리는"), so only the stems that don't end one: 하/되/있/없, a stem with ㄹ in
+    front of 리, and the final consonants an adjective stem has in front of 은. A noun that
+    ends alike is no loss here; it only goes unseen as a subject. A color is never a
+    person ("검은", "붉은")."""
+    if COLOR_RE.match(word):
+        return True
+    if word.endswith("는"):
+        if re.search(r"(?:하|되|있|없)는$", word):
+            return True
+        return len(word) >= 3 and word.endswith("리는") and _final_consonant(word[-3]) == "ㄹ"
+    if word.endswith("은") and len(word) >= 2:
+        return _final_consonant(word[-2]) in _ADJECTIVE_FINALS
+    return False
+
+
+def _subject_word(word: str) -> bool:
+    """Whether a word looks like a subject with its particle: 은/는/이/가, 도 ("노인도"),
+    만 ("노인만"), 께서; a one-syllable word may be 이 "this". Not a verb's connective,
+    an adverb or a modifier ("웃었지만", "오늘도", "말없이", "깊은 숨을", "떨리는 손으로")."""
+    return (
+        len(word) >= 2
+        and (word[-1] in "은는이가" or word.endswith(("께서", "도", "만")))
+        and word not in _NOT_SUBJECT_WORDS
+        and not word.endswith(_NOT_SUBJECT_ENDINGS)
+        and not _ADVERB_I.search(word)
+        and not _modifier_of_noun(word)
+    )
+
+
+def _clear_topic(narration: str, mention: Mention, end: int) -> bool:
+    """Whether a character's mention is the topic of the sentence up to end: marked as
+    one, with no other subject between ("레온이 다가가자 노인은 오른손의 흉터를": 노인 is),
+    and, where it's marked 이/가, no topic in front of it that it's the subject of a clause
+    under ("노인은 레온이 오자 오른손의 흉터를": 노인 is)."""
+    if mention.subject.kind != "character" or not mention.topic or mention.end >= end:
+        return False
+    # After the rest of the topic's word (its particle, "은").
+    if any(_subject_word(word) for word in narration[mention.end : end].split()[1:]):
+        return False
+    if narration[mention.end : mention.end + 1] in "이가":
+        before = narration[: mention.start].split()
+        if any(_subject_word(word) and word[-1] in "은는" for word in before):
+            return False
+    return True
+
+
+def _topic_before(narration: str, mentions: list[Mention], end: int) -> bool:
+    """Whether a character is the clear topic of the sentence up to end."""
+    return any(_clear_topic(narration, mention, end) for mention in mentions)
+
+
+_OWN_CUE_PARTICLES = ("로", "으로", "이", "가", "은", "는", "도", "만", "에", "에서")
+
+
+def _topic_of_two(narration: str, mentions: list[Mention], hit: CueHit) -> Subject | None:
+    """The owner of a cue in a sentence with several characters and no possessor in
+    front of it, where one is the topic and the cue comes before the others, who
+    are acted on ("레온은 붉은 눈동자로 카엘을 노려보았다": 레온's). None otherwise:
+    "레온과 세린은 눈이 푸르렀다" is both, "레온은 붉은 눈의 카엘을 ..." is the other's."""
+    if hit.attribute.key not in _BODY_ATTRIBUTES:
+        return None  # "레온은 스무 살 때 세린을 만났다": not a thing of the body
+    characters = [m for m in mentions if m.subject.kind == "character"]
+    topics = [m for m in characters if m.topic]
+    # The topic, with no other subject between it and the cue: "레온은 웃었고 노인은 붉은
+    # 눈동자로 세린을" is the old man's eyes.
+    if len(topics) != 1 or not _clear_topic(narration, topics[0], hit.start):
+        return None
+    # The cue's noun with a particle of the topic's: what it does something with ("붉은
+    # 눈동자로"), or its subject ("눈이 붉은"). Not an object ("은빛 머리카락을 쓰다듬으며
+    # 세린에게", "흉터를 치료해 주며": it may be the other's), nor a bare noun or a compound
+    # that describes the next one ("은발 소녀 세린을", "흉터투성이 사내 세린을").
+    noun = hit.attribute.noun.match(narration, hit.start)
+    rest = re.split(r"\s", narration[noun.end() if noun else hit.start :], maxsplit=1)[0]
+    if rest.rstrip(".,!?…") not in _OWN_CUE_PARTICLES:
+        return None
+    if len({m.subject.key for m in characters}) != len(characters):
+        return None
+    for other in characters:
+        if other is topics[0]:
+            continue
+        # After the cue, and marked as acted on.
+        if other.start < hit.start or not _ACTED_ON.match(narration[other.end :]):
+            return None
+        # "붉은 눈의 세린을", "눈이 푸른 세린을": the cue describes the other.
+        if _describes_next(narration[hit.start : other.start]):
+            return None
+    return topics[0].subject
 
 
 @dataclass(frozen=True)
@@ -704,6 +916,7 @@ def owner(
     before = narration[: hit.start]
     genitive = _GENITIVE.search(before)
     pronoun_possessor = False
+    body_part_possessor = False
     possessor_kind = "any"
     if genitive:
         possessor_end = genitive.start(1) + len(genitive.group(1))
@@ -714,7 +927,21 @@ def owner(
         person_after_that = genitive.group(1) in _PERSON_NOUNS.split("|") and re.search(
             r"(?<![가-힣])그\s?$", before[: genitive.start(1)]
         )
-        if genitive.group(1) in _PRONOUNS or person_after_that:
+        if _BODY_PART_WORD_RE.fullmatch(genitive.group(1)):
+            # "오른손의 흉터": no possessor, so the sentence's own subject; but "그 손의
+            # 흉터" is the hand of somebody already mentioned, not this sentence's.
+            if _DEMONSTRATIVE_BEFORE.search(before[: genitive.start(1)]):
+                return None
+            # The sentence's own subject, which is the topic: "노인은 레온에게 오른손의
+            # 흉터를 보여주었다" is the old man's hand, shown to 레온.
+            if here and not _topic_before(narration, mentions[index], genitive.start(1)):
+                return None
+            # Somebody else the sentence acts on ahead of it: "레온은 노인을 부축하며 어깨의
+            # 흉터를 살폈다", "노인의 손을 잡고 오른손의 흉터를" are the old man's.
+            if any(_OTHER_PERSON.fullmatch(word) for word in before[: genitive.start(1)].split()):
+                return None
+            body_part_possessor = True
+        elif genitive.group(1) in _PRONOUNS or person_after_that:
             # "세린은 그의 푸른 눈을 보았다": 그의 is somebody the sentence doesn't
             # name, not its subject (자신의 would be).
             if here and genitive.group(1) != "자신":
@@ -727,7 +954,7 @@ def owner(
     if len(here) == 1:
         return next(iter(here.values()))
     if len(here) > 1:
-        return None
+        return _topic_of_two(narration, mentions[index], hit)
 
     # No name in the sentence: a pronoun or a dropped subject.
     if _PLURAL_PRONOUN.match(narration):
@@ -735,7 +962,11 @@ def owner(
     lead = len(narration) - len(narration.lstrip())
     # A dropped subject only for what the sentence's subject can be a body part
     # of ("붉은 눈동자가 번뜩였다"); "여섯 살 때의 일이었다" isn't about anyone.
-    dropped_subject = hit.attribute.key in _BODY_ATTRIBUTES and hit.start - lead <= _CUE_FIRST_CHARS
+    # Not where a body part has its "X의" ("노인은 오른손의 흉터를 보였다"): the subject
+    # may be somebody the text doesn't register, so only a pronoun links it.
+    dropped_subject = (
+        hit.attribute.key in _BODY_ATTRIBUTES and hit.start - lead <= _CUE_FIRST_CHARS and not body_part_possessor
+    )
     # Found in the whole sentence, then kept to the window: cut at its end, "그녀들은"
     # would read as "그녀".
     early = _EARLY_PRONOUN.search(narration)
@@ -743,8 +974,12 @@ def owner(
         early = None
     if not (pronoun_possessor or early or dropped_subject):
         return None
+    # The nearest sentences first: the third one back is looked at only where the two
+    # before it name nobody, so it can't turn a clear owner into a choice.
     candidates: dict[tuple[str, str], Subject] = {}
     for back in range(1, CONTEXT_SENTENCES + 1):
+        if back > _NEAR_SENTENCES and candidates:
+            break
         if index - back >= 0:
             candidates.update(_characters(mentions[index - back]))
     if len(candidates) > 1:
