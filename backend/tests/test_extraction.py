@@ -331,6 +331,11 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
     assert claim.subject == "세린"
     # Only for the body: an age in such a sentence is nobody's.
     assert _run("레온은 스무 살 때 세린을 만났다.", {"레온의 나이는?": "스무 살", "세린의 나이는?": "스무 살"}).claims == []
+    # Only the words right before the name can modify it: an ordinary word ending in ㄴ/ㄹ
+    # earlier in the sentence does not.
+    for text in ("레온은 붉은 눈동자로 문 앞에서 세린을 노려보았다.", "레온은 붉은 눈동자로 오랜 침묵 끝에 세린을 노려보았다."):
+        [claim] = _run(text, answers).claims
+        assert claim.subject == "레온"
     # A place or possession of the other name is not a description of it.
     [claim] = _run("레온은 붉은 눈동자로 탑 위의 세린을 노려보았다.", answers).claims
     assert claim.subject == "레온"
@@ -363,6 +368,9 @@ def test_a_body_part_is_no_possessor():
     shown = {"레온의 흉터는?": "흉터"}
     assert _run("레온은 노인에게 다가갔다. 노인은 오른손의 흉터를 보였다.", shown).claims == []
     assert _run("레온은 노인을 보았다. 오른손의 흉터가 선명했다.", shown).claims == []
+    # The registered topic of an earlier clause is not the subject of this one.
+    assert _run("레온이 다가가자 노인은 오른손의 흉터를 보였다.", shown).claims == []
+    assert _run("레온은 문을 열었고 노인은 오른손의 흉터를 보였다.", shown).claims == []
     # ... unless a pronoun names the subject.
     assert _run("레온은 문을 열었다. 그는 오른손의 흉터를 문질렀다.", shown).claims != []
     # The one named character is the one shown the hand, not its owner.

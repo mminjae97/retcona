@@ -711,8 +711,7 @@ def _pronoun_kind(text: str) -> str:
 
 _GENITIVE = re.compile(r"([가-힣A-Za-z0-9]+)의\s+(?:\S+\s+){0,2}$")
 # A body part ahead of the cue ("오른손의 흉터") is where the cue is, not whose it is.
-# A whole word only: "후손의", "선배의" end in one but are people.
-_BODY_PART = re.compile(_BODY_PART_WORD)
+# A whole word only (fullmatch): "후손의", "선배의" end in one but are people.
 # What marks a name in a sentence as somebody the topic acts on, not a co-subject
 # ("레온과 세린은 ..."): an object, or "에게/한테".
 _ACTED_ON = re.compile(r"^(?:을|를|에게서|에게|한테서|한테)")
@@ -734,17 +733,41 @@ def _adnominal(word: str) -> bool:
     return "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 in (4, 8)
 
 
+# The end of a phrase of its own, as the last word before a name: a particle that doesn't
+# modify what follows.
+_PHRASE_END = ("에서", "에", "으로", "로", "와", "과", "까지", "부터", "에게", "한테", "도", "의")
+
+
 def _describes_next(span: str) -> bool:
     """Whether the cue at the start of span (its noun and what follows, up to the next
     name) is said of that name: a word that modifies what follows, "눈이 푸른 소녀 세린을",
     "붉은 눈의 마녀 세린을". 의 counts only on the cue's own word ("눈의")."""
     words = span.split()
-    return any(
+    # A modifier stands in the same phrase as what it modifies: only the words after the last
+    # one with a particle of its own are looked at ("눈이 푸른 소녀 세린을"; not the 문 of
+    # "문 앞에서 세린을", which is its own phrase).
+    start = 1 + max((i for i, word in enumerate(words[1:]) if word.endswith(_PHRASE_END)), default=-1) + 1
+    first = words[0].endswith("의") if words else False
+    return first or any(
         # "한 번" is a number of times, not a "한" of the name.
         # A later "앞의", "안의" is a place, not the cue's.
-        word.endswith("의") if i == 0 else _adnominal(word) and not word.endswith("의") and words[i + 1 : i + 2] != ["번"]
+        _adnominal(word) and not word.endswith("의") and words[i + 1 : i + 2] != ["번"]
         for i, word in enumerate(words)
+        if i >= start
     )
+
+
+def _topic_before(narration: str, mentions: list[Mention], end: int) -> bool:
+    """Whether a character is the topic of the sentence up to end, with no other subject
+    between ("레온이 다가가자 노인은 오른손의 흉터를": 노인 is, and he isn't registered)."""
+    for mention in mentions:
+        if mention.subject.kind != "character" or not mention.topic or mention.end >= end:
+            continue
+        # After the topic's particle; a one-syllable word may be 이 "this".
+        between = narration[mention.end + 1 : end].split()
+        if not any(len(word) >= 2 and word[-1] in "은는이가" for word in between):
+            return True
+    return False
 
 
 def _topic_of_two(narration: str, mentions: list[Mention], hit: CueHit) -> Subject | None:
@@ -805,14 +828,14 @@ def owner(
         person_after_that = genitive.group(1) in _PERSON_NOUNS.split("|") and re.search(
             r"(?<![가-힣])그\s?$", before[: genitive.start(1)]
         )
-        if _BODY_PART.fullmatch(genitive.group(1)):
+        if re.fullmatch(_BODY_PART_WORD, genitive.group(1)):
             # "오른손의 흉터": no possessor, so the sentence's own subject; but "그 손의
             # 흉터" is the hand of somebody already mentioned, not this sentence's.
             if re.search(r"(?<![가-힣])[그이저]\s(?:(?:오른|왼|양)쪽\s)?$", before[: genitive.start(1)]):
                 return None
             # The sentence's own subject, which is the topic: "노인은 레온에게 오른손의
             # 흉터를 보여주었다" is the old man's hand, shown to 레온.
-            if here and not any(m.topic for m in mentions[index] if m.subject.kind == "character"):
+            if here and not _topic_before(narration, mentions[index], genitive.start(1)):
                 return None
             body_part_possessor = True
         elif genitive.group(1) in _PRONOUNS or person_after_that:
