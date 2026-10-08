@@ -727,11 +727,16 @@ def _characters(mentions: list[Mention]) -> dict[tuple[str, str], Subject]:
     return {m.subject.key: m.subject for m in mentions if m.subject.kind == "character"}
 
 
+# Adverbs with a final ㄴ/ㄹ, which modify the verb, not the name after them ("온 힘을",
+# "얼른 세린을").
+_ADVERBS = frozenset(("온", "얼른", "순식간", "가만", "일순"))
+
+
 def _adnominal(word: str) -> bool:
     """Whether a word modifies the word after it: an adnominal ending (-는, -던, -ㄴ/-ㄹ
     as the final consonant of 푸른, 한, 갈). 의 is the caller's to look at."""
     # Not the object particles, 만, or an adverb that ends in a final consonant.
-    if not word or word == "온" or word.endswith(("을", "를", "만", "번", "순간", "잠깐", "동안")):
+    if not word or word in _ADVERBS or word.endswith(("을", "를", "만", "번", "순간", "잠깐", "동안")):
         return False
     last = word[-1]
     if last in "는던":
@@ -745,7 +750,7 @@ _PHRASE_END = ("에서", "에", "으로", "로", "까지", "부터", "에게", "
 
 
 # What an adnominal can modify without the name after it: a number of times, a time.
-_BOUND_NOUNS = [[word] for word in ("번", "뒤", "후", "때", "채", "듯", "사이", "직후", "적")]
+_BOUND_NOUNS = frozenset(("번", "뒤", "후", "때", "채", "듯", "사이", "직후", "적"))
 
 
 def _describes_next(span: str) -> bool:
@@ -761,15 +766,20 @@ def _describes_next(span: str) -> bool:
     return first or any(
         # "한 번" is a number of times, and "노려본 뒤" a time: not a "한", "본" of the name.
         # A later "앞의", "안의" is a place, not the cue's.
-        _adnominal(word) and not word.endswith("의") and words[i + 1 : i + 2] not in _BOUND_NOUNS
+        _adnominal(word) and not word.endswith("의") and (words[i + 1] if i + 1 < len(words) else "") not in _BOUND_NOUNS
         for i, word in enumerate(words)
         if i >= start
     )
 
 
-# Words that end in 도/만 and are no subject: the connective of a verb ("웃었지만", "웃어도"),
-# a conjunction ("그래도", "다만").
-_NOT_SUBJECT_ENDINGS = ("지만", "어도", "아도", "해도", "라도", "데도", "면서도", "고도", "그래도", "다만")
+# Words that end like a subject's particle and are no subject: the connective of a verb
+# ("웃었지만", "웃어도"), a conjunction ("그래도", "다만"), an adverb or a time ("이번에도",
+# "말없이", "깊이", "같이", "그날도").
+_NOT_SUBJECT_ENDINGS = (
+    "지만", "어도", "아도", "해도", "라도", "데도", "면서도", "고도", "그래도", "다만",
+    "에도", "없이", "깊이", "같이", "날도",
+)
+_NOT_SUBJECT_WORDS = frozenset(("오늘도", "지금도", "아직도", "이제도", "그만", "작은", "적은"))
 
 
 def _modifier_of_noun(word: str) -> bool:
@@ -783,32 +793,45 @@ def _modifier_of_noun(word: str) -> bool:
             return True
         return len(word) >= 3 and word.endswith("리는") and (ord(word[-3]) - ord("가")) % 28 == 8
     if word.endswith("은") and len(word) >= 2:
-        # The final consonant of the syllable before 은: ㅂ ㅍ ㄲ ㅆ ㄺ ㄻ ㄼ.
+        # The final consonant of the syllable before 은: ㄲ ㄺ ㄻ ㄼ ㅂ ㅆ ㅈ ㅌ ㅍ ㅎ.
         before = word[-2]
-        return "가" <= before <= "힣" and (ord(before) - ord("가")) % 28 in (17, 26, 20, 2, 9, 10, 11)
+        return "가" <= before <= "힣" and (ord(before) - ord("가")) % 28 in (2, 9, 10, 11, 17, 20, 22, 25, 26, 27)
     return False
+
+
+def _subject_word(word: str) -> bool:
+    """Whether a word looks like a subject with its particle: 은/는/이/가, 도 ("노인도"),
+    만 ("노인만"), 께서; a one-syllable word may be 이 "this". Not a verb's connective,
+    an adverb or a modifier ("웃었지만", "오늘도", "말없이", "깊은 숨을", "떨리는 손으로")."""
+    return (
+        len(word) >= 2
+        and (word[-1] in "은는이가" or word.endswith(("께서", "도", "만")))
+        and word not in _NOT_SUBJECT_WORDS
+        and not word.endswith(_NOT_SUBJECT_ENDINGS)
+        and not _modifier_of_noun(word)
+    )
+
+
+def _clear_topic(narration: str, mention: Mention, end: int) -> bool:
+    """Whether a character's mention is the topic of the sentence up to end: marked as
+    one, with no other subject between ("레온이 다가가자 노인은 오른손의 흉터를": 노인 is),
+    and, where it's marked 이/가, no topic in front of it that it's the subject of a clause
+    under ("노인은 레온이 오자 오른손의 흉터를": 노인 is)."""
+    if mention.subject.kind != "character" or not mention.topic or mention.end >= end:
+        return False
+    # After the rest of the topic's word (its particle, "은").
+    if any(_subject_word(word) for word in narration[mention.end : end].split()[1:]):
+        return False
+    if narration[mention.end : mention.end + 1] in "이가":
+        before = narration[: mention.start].split()
+        if any(_subject_word(word) and word[-1] in "은는" for word in before):
+            return False
+    return True
 
 
 def _topic_before(narration: str, mentions: list[Mention], end: int) -> bool:
-    """Whether a character is the topic of the sentence up to end, with no other subject
-    between ("레온이 다가가자 노인은 오른손의 흉터를": 노인 is, and he isn't registered)."""
-    for mention in mentions:
-        if mention.subject.kind != "character" or not mention.topic or mention.end >= end:
-            continue
-        # After the rest of the topic's word (its particle, "은"); a one-syllable
-        # word may be 이 "this". Another subject: 은/는/이/가, 도 ("노인도"), 만 ("노인만"),
-        # 께서; not a verb's connective or a conjunction ("웃었지만", "하지만"), nor a
-        # modifier ("깊은 숨을", "떨리는 손으로").
-        between = narration[mention.end : end].split()[1:]
-        if not any(
-            len(word) >= 2
-            and (word[-1] in "은는이가" or word.endswith(("께서", "도", "만")))
-            and not word.endswith(_NOT_SUBJECT_ENDINGS)
-            and not _modifier_of_noun(word)
-            for word in between
-        ):
-            return True
-    return False
+    """Whether a character is the clear topic of the sentence up to end."""
+    return any(_clear_topic(narration, mention, end) for mention in mentions)
 
 
 def _topic_of_two(narration: str, mentions: list[Mention], hit: CueHit) -> Subject | None:
@@ -820,7 +843,9 @@ def _topic_of_two(narration: str, mentions: list[Mention], hit: CueHit) -> Subje
         return None  # "레온은 스무 살 때 세린을 만났다": not a thing of the body
     characters = [m for m in mentions if m.subject.kind == "character"]
     topics = [m for m in characters if m.topic]
-    if len(topics) != 1 or topics[0].end > hit.start:
+    # The topic, with no other subject between it and the cue: "레온은 웃었고 노인은 붉은
+    # 눈동자로 세린을" is the old man's eyes.
+    if len(topics) != 1 or not _clear_topic(narration, topics[0], hit.start):
         return None
     if len({m.subject.key for m in characters}) != len(characters):
         return None

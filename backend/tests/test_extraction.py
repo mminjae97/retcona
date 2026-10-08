@@ -320,11 +320,22 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
     # where two names are the same character.
     assert _run("레온은 세린을 붉은 눈동자로 노려보았다.", answers).claims == []
     assert _run("레온과 세린은 붉은 눈동자를 가졌다.", answers).claims == []
+    # Another subject between the topic and the cue: the eyes are that one's.
+    for text in (
+        "레온은 웃었고 노인은 붉은 눈동자로 세린을 노려보았다.",
+        "레온이 웃자 노인은 붉은 눈동자로 세린을 노려보았다.",
+        "레온은 노인에게 다가갔고 사내가 붉은 눈동자로 세린을 노려보았다.",
+    ):
+        assert _run(text, answers).claims == []
     assert _run("레온은 붉은 눈의 세린을 노려보았다.", answers).claims == []
     # A parallel 와/과 or 도 does not end the phrase of the modifier: "눈이 붉은 소녀들과 세린을".
     assert _run("레온은 눈이 붉은 소녀들과 세린을 바라보았다.", answers).claims == []
     # A bound noun or an adverb after an adnominal-looking word is not a modifier of the name.
-    for text in ("레온은 붉은 눈동자로 온 힘을 다해 세린을 노려보았다.", "레온은 붉은 눈동자로 노려본 뒤 세린을 보았다."):
+    for text in (
+        "레온은 붉은 눈동자로 온 힘을 다해 세린을 노려보았다.",
+        "레온은 붉은 눈동자로 노려본 뒤 세린을 보았다.",
+        "레온은 붉은 눈동자로 얼른 세린을 노려보았다.",
+    ):
         [claim] = _run(text, answers).claims
         assert claim.subject == "레온"
     assert _run("레온은 눈이 붉은 사과 장수 세린을 바라보았다.", answers).claims == []
@@ -380,6 +391,9 @@ def test_a_body_part_is_no_possessor():
     assert _run("레온은 문을 열었고 노인은 오른손의 흉터를 보였다.", shown).claims == []
     # ... unless a pronoun names the subject.
     assert _run("레온은 문을 열었다. 그는 오른손의 흉터를 문질렀다.", shown).claims != []
+    # The registered name is the subject of a clause under an unregistered topic.
+    for text in ("노인은 레온이 오자 오른손의 흉터를 보였다.", "노인은 레온이 묻자 오른손의 흉터를 보였다."):
+        assert _run(text, shown).claims == []
     # The one named character is the one shown the hand, not its owner.
     assert _run("노인은 레온에게 오른손의 흉터를 보여주었다.", {"레온의 흉터는?": "흉터"}).claims == []
     # "그 손의", "그 오른쪽 어깨의": somebody else's, mentioned before.
@@ -395,10 +409,14 @@ def test_a_body_part_is_no_possessor():
     for text in ("레온은 웃었지만 오른손의 흉터를 숨겼다.", "레온은 그래도 오른손의 흉터를 숨겼다."):
         [claim] = _run(text, shown).claims
         assert (claim.subject, set(claim.attributes)) == ("레온", {"scars"})
-    # ... nor a modifier ("깊은", "떨리는").
+    # ... nor a modifier ("깊은", "떨리는"), an adverb or a time.
     for text in (
         "레온은 깊은 숨을 쉬며 오른손의 흉터를 문질렀다.",
         "레온은 떨리는 손으로 오른손의 흉터를 문질렀다.",
+        "레온은 오늘도 오른손의 흉터를 문질렀다.",
+        "레온은 이번에도 오른손의 흉터를 문질렀다.",
+        "레온은 말없이 오른손의 흉터를 문질렀다.",
+        "레온은 작은 한숨과 함께 오른손의 흉터를 문질렀다.",
     ):
         [claim] = _run(text, shown).claims
         assert claim.subject == "레온"
@@ -425,6 +443,8 @@ def test_a_scar_s_value_names_the_mark_not_the_body_part():
 def test_the_color_after_the_noun_is_counted_from_the_word_after_its_particle():
     assert _attributes("그의 눈이 어둠 속에서 붉게 번뜩였다.") == {"eye_color"}
     assert _attributes("그의 눈이 어둠 속에서 한참 붉게 번뜩였다.") == set()
+    # The last word of the window only as a predicate, not the modifier of another noun.
+    assert _attributes("그의 눈이 마주친 순간 붉은 노을이 졌다.") == set()
 
 
 def test_a_pronoun_looks_back_three_sentences():
@@ -438,11 +458,6 @@ def test_the_third_sentence_back_is_looked_at_only_where_the_nearer_two_name_nob
     answers = {"레온의 눈 색깔은?": "붉은", "세린의 눈 색깔은?": "붉은"}
     [claim] = _run("레온은 문을 열었다. 바람이 불었다. 세린은 웃었다. 붉은 눈동자가 번뜩였다.", answers).claims
     assert claim.subject == "세린"
-
-
-def test_a_color_in_another_noun_s_phrase_is_no_cue():
-    assert _attributes("그의 눈이 마주친 순간 붉은 노을이 졌다.") == set()
-    assert _attributes("그의 눈이 어둠 속에서 붉게 번뜩였다.") == {"eye_color"}
 
 
 def test_one_claim_per_sentence_and_subject_holds_all_it_says():
