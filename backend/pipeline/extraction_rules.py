@@ -737,11 +737,12 @@ def _adnominal(word: str) -> bool:
 def _describes_next(span: str) -> bool:
     """Whether the cue at the start of span (its noun and what follows, up to the next
     name) is said of that name: a word that modifies what follows, "눈이 푸른 소녀 세린을",
-    "붉은 눈의 마녀 세린을". The cue's own word only counts as 의 ("눈의")."""
+    "붉은 눈의 마녀 세린을". 의 counts only on the cue's own word ("눈의")."""
     words = span.split()
     return any(
         # "한 번" is a number of times, not a "한" of the name.
-        word.endswith("의") if i == 0 else _adnominal(word) and words[i + 1 : i + 2] != ["번"]
+        # A later "앞의", "안의" is a place, not the cue's.
+        word.endswith("의") if i == 0 else _adnominal(word) and not word.endswith("의") and words[i + 1 : i + 2] != ["번"]
         for i, word in enumerate(words)
     )
 
@@ -793,6 +794,7 @@ def owner(
     before = narration[: hit.start]
     genitive = _GENITIVE.search(before)
     pronoun_possessor = False
+    body_part_possessor = False
     possessor_kind = "any"
     if genitive:
         possessor_end = genitive.start(1) + len(genitive.group(1))
@@ -812,6 +814,7 @@ def owner(
             # 흉터를 보여주었다" is the old man's hand, shown to 레온.
             if here and not any(m.topic for m in mentions[index] if m.subject.kind == "character"):
                 return None
+            body_part_possessor = True
         elif genitive.group(1) in _PRONOUNS or person_after_that:
             # "세린은 그의 푸른 눈을 보았다": 그의 is somebody the sentence doesn't
             # name, not its subject (자신의 would be).
@@ -833,7 +836,11 @@ def owner(
     lead = len(narration) - len(narration.lstrip())
     # A dropped subject only for what the sentence's subject can be a body part
     # of ("붉은 눈동자가 번뜩였다"); "여섯 살 때의 일이었다" isn't about anyone.
-    dropped_subject = hit.attribute.key in _BODY_ATTRIBUTES and hit.start - lead <= _CUE_FIRST_CHARS
+    # Not where a body part has its "X의" ("노인은 오른손의 흉터를 보였다"): the subject
+    # may be somebody the text doesn't register, so only a pronoun links it.
+    dropped_subject = (
+        hit.attribute.key in _BODY_ATTRIBUTES and hit.start - lead <= _CUE_FIRST_CHARS and not body_part_possessor
+    )
     # Found in the whole sentence, then kept to the window: cut at its end, "그녀들은"
     # would read as "그녀".
     early = _EARLY_PRONOUN.search(narration)
