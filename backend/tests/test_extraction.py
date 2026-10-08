@@ -321,6 +321,9 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
     assert _run("레온은 세린을 붉은 눈동자로 노려보았다.", answers).claims == []
     assert _run("레온과 세린은 붉은 눈동자를 가졌다.", answers).claims == []
     assert _run("레온은 붉은 눈의 세린을 노려보았다.", answers).claims == []
+    # A parallel 와/과 or 도 does not end the phrase of the modifier: "눈이 붉은 소녀들과 세린을".
+    assert _run("레온은 눈이 붉은 소녀들과 세린을 바라보았다.", answers).claims == []
+    assert _run("레온은 눈이 붉은 사과 장수 세린을 바라보았다.", answers).claims == []
     # "한 번", "순간" are adverbs, not an adnominal of the other.
     for text in ("레온은 붉은 눈동자로 한 번 세린을 노려보았다.", "레온은 붉은 눈동자로 순간 세린을 노려보았다."):
         [claim] = _run(text, answers).claims
@@ -381,6 +384,12 @@ def test_a_body_part_is_no_possessor():
     assert _run("레온은 노인의 손을 잡고 그 손의 흉터를 보았다.", {"레온의 흉터는?": "흉터"}).claims == []
     # A word that is a body part as often as something else is not one.
     assert _run("레온은 배의 선체에 난 상흔을 만졌다.", {"레온의 흉터는?": "상흔"}).claims == []
+    # Another subject marked by 도, 만, 께서 is not 레온.
+    for subject in ("노인도", "노인만", "노인께서"):
+        assert _run(f"레온은 웃었고 {subject} 오른손의 흉터를 보였다.", shown).claims == []
+    # ... but a conjunction that ends in one is no subject.
+    assert _run("레온은 웃었지만 오른손의 흉터를 숨겼다.", shown).claims != []
+    assert _run("레온은 그래도 오른손의 흉터를 숨겼다.", shown).claims != []
 
 
 def test_a_scar_s_value_names_the_mark_not_the_body_part():
@@ -389,6 +398,8 @@ def test_a_scar_s_value_names_the_mark_not_the_body_part():
     assert rules.value_of(scars, "작은 흉터", "작은 흉터가 있었다") == "작은 흉터"
     assert rules.value_of(scars, "길게 그어진", "뺨에 길게 그어진 상흔") == "길게 그어진"
     assert rules.value_of(scars, "오른쪽 어깨", "오른쪽 어깨의 상흔") == ""
+    for part in ("발바닥", "정강이", "관자놀이", "이마 한가운데", "왼쪽 뺨 옆"):
+        assert rules.value_of(scars, part, f"{part}의 상흔") == ""
     assert rules.value_of(scars, "목", "목의 상흔") == ""
     for answer in ("왼쪽 눈 아래", "머리", "발목", "눈가", "입술"):
         assert rules.value_of(scars, answer, f"{answer}의 상흔") == "", answer

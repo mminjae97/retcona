@@ -206,9 +206,10 @@ class Attribute:
 # A body part, as a whole word: the words whose usual meaning is the body. They tell, in
 # front of a cue, that the cue is where it is ("오른손의 흉터"), not whose it is.
 _BODY_PART_WORD = (
-    r"(?:(?:오른|왼|양)?(?:손|팔|다리|얼굴|어깨|가슴|뺨|이마|턱|허리|무릎|옆구리|허벅지|종아리)(?:등|목|바닥|가락|덜미|뚝)?"
-    r"|눈가|눈썹|머리|코|입술|귀|발목|목덜미)"
+    r"(?:(?:오른|왼|양)?(?:손|팔|다리|얼굴|어깨|가슴|뺨|이마|턱|허리|무릎|옆구리|허벅지|종아리|정강이)(?:등|목|바닥|가락|덜미|뚝)?"
+    r"|눈가|눈썹|머리|코|입술|귀|발목|발바닥|발등|목덜미|관자놀이)"
 )
+_BODY_PART_WORD_RE = re.compile(_BODY_PART_WORD)
 # Words that mean something else as often (a ship, "and so on", snow): not a sign of a
 # possessor, but in an answer, the place of a mark all the same.
 _BODY_PART_AMBIGUOUS = r"(?:눈|입|발|목|배|등|볼)"
@@ -220,7 +221,7 @@ _BODY_ITEM = (
     rf"(?:(?:오른|왼|양)쪽\s)?(?:{_BODY_PART_WORD}|{_BODY_PART_AMBIGUOUS})(?:에서|에는|에도|으로|[에의이가을를은는도로와과만])?"
 )
 _ONLY_BODY_PARTS = re.compile(
-    rf"^{_BODY_ITEM}(?:,?\s{_BODY_ITEM})*(?:\s(?:위|아래|근처|부근)(?:에서|에|의)?)?[.!?…]?$"
+    rf"^{_BODY_ITEM}(?:,?\s{_BODY_ITEM})*(?:\s(?:위|아래|근처|부근|한가운데|가운데|옆|끝)(?:에서|에|의)?)?[.!?…]?$"
 )
 
 ATTRIBUTES = (
@@ -710,8 +711,8 @@ def _pronoun_kind(text: str) -> str:
 
 
 _GENITIVE = re.compile(r"([가-힣A-Za-z0-9]+)의\s+(?:\S+\s+){0,2}$")
-# A body part ahead of the cue ("오른손의 흉터") is where the cue is, not whose it is.
-# A whole word only (fullmatch): "후손의", "선배의" end in one but are people.
+# "그 손의", "이 오른쪽 어깨의": a body part of somebody already mentioned.
+_DEMONSTRATIVE_BEFORE = re.compile(r"(?<![가-힣])[그이저]\s(?:(?:오른|왼|양)쪽\s)?$")
 # What marks a name in a sentence as somebody the topic acts on, not a co-subject
 # ("레온과 세린은 ..."): an object, or "에게/한테".
 _ACTED_ON = re.compile(r"^(?:을|를|에게서|에게|한테서|한테)")
@@ -722,20 +723,20 @@ def _characters(mentions: list[Mention]) -> dict[tuple[str, str], Subject]:
 
 
 def _adnominal(word: str) -> bool:
-    """Whether a word modifies the word after it: 의, or an adnominal ending (-는,
-    -던, -ㄴ/-ㄹ as the final consonant of 푸른, 한, 갈)."""
+    """Whether a word modifies the word after it: an adnominal ending (-는, -던, -ㄴ/-ㄹ
+    as the final consonant of 푸른, 한, 갈). 의 is the caller's to look at."""
     # Not the object particles, 만, or an adverb that ends in a final consonant.
     if not word or word.endswith(("을", "를", "만", "번", "순간", "잠깐", "동안")):
         return False
     last = word[-1]
-    if last in "의는던":
+    if last in "는던":
         return True
     return "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 in (4, 8)
 
 
 # The end of a phrase of its own, as the last word before a name: a particle that doesn't
-# modify what follows.
-_PHRASE_END = ("에서", "에", "으로", "로", "와", "과", "까지", "부터", "에게", "한테", "도", "의")
+# modify what follows. Not 와/과/도: they end "소녀들과", "사과" too, and hide a modifier.
+_PHRASE_END = ("에서", "에", "으로", "로", "까지", "부터", "에게", "한테", "의")
 
 
 def _describes_next(span: str) -> bool:
@@ -757,15 +758,25 @@ def _describes_next(span: str) -> bool:
     )
 
 
+# Words that end in 도/만 and are no subject: the connective of a verb ("웃었지만", "웃어도"),
+# a conjunction ("그래도", "다만").
+_NOT_SUBJECT_ENDINGS = ("지만", "어도", "아도", "해도", "라도", "데도", "면서도", "고도", "그래도", "다만")
+
+
 def _topic_before(narration: str, mentions: list[Mention], end: int) -> bool:
     """Whether a character is the topic of the sentence up to end, with no other subject
     between ("레온이 다가가자 노인은 오른손의 흉터를": 노인 is, and he isn't registered)."""
     for mention in mentions:
         if mention.subject.kind != "character" or not mention.topic or mention.end >= end:
             continue
-        # After the topic's particle; a one-syllable word may be 이 "this".
+        # After the topic's particle; a one-syllable word may be 이 "this". Another subject:
+        # 은/는/이/가, 도 ("노인도"), 만 ("노인만"), 께서; not a verb's connective or a conjunction ("웃었지만", "하지만").
         between = narration[mention.end + 1 : end].split()
-        if not any(len(word) >= 2 and word[-1] in "은는이가" for word in between):
+        if not any(
+            len(word) >= 2 and (word[-1] in "은는이가" or word.endswith(("께서", "도", "만")))
+            and not word.endswith(_NOT_SUBJECT_ENDINGS)
+            for word in between
+        ):
             return True
     return False
 
@@ -828,10 +839,10 @@ def owner(
         person_after_that = genitive.group(1) in _PERSON_NOUNS.split("|") and re.search(
             r"(?<![가-힣])그\s?$", before[: genitive.start(1)]
         )
-        if re.fullmatch(_BODY_PART_WORD, genitive.group(1)):
+        if _BODY_PART_WORD_RE.fullmatch(genitive.group(1)):
             # "오른손의 흉터": no possessor, so the sentence's own subject; but "그 손의
             # 흉터" is the hand of somebody already mentioned, not this sentence's.
-            if re.search(r"(?<![가-힣])[그이저]\s(?:(?:오른|왼|양)쪽\s)?$", before[: genitive.start(1)]):
+            if _DEMONSTRATIVE_BEFORE.search(before[: genitive.start(1)]):
                 return None
             # The sentence's own subject, which is the topic: "노인은 레온에게 오른손의
             # 흉터를 보여주었다" is the old man's hand, shown to 레온.
