@@ -321,6 +321,8 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
     assert _run("레온은 세린을 붉은 눈동자로 노려보았다.", answers).claims == []
     assert _run("레온과 세린은 붉은 눈동자를 가졌다.", answers).claims == []
     assert _run("레온은 붉은 눈의 세린을 노려보았다.", answers).claims == []
+    # "한 번" is an adverb, not an adnominal of the other.
+    assert _run("레온은 붉은 눈동자로 한 번 세린을 노려보았다.", answers).claims != []
     # The cue as a relative clause or an adnominal of the other.
     assert _run("레온은 눈이 푸른 세린을 바라보았다.", {"레온의 눈 색깔은?": "푸른"}).claims == []
     assert _run("레온은 붉은 눈을 한 세린을 바라보았다.", answers).claims == []
@@ -343,6 +345,8 @@ def test_a_scar_s_value_names_the_mark_not_the_body_part():
     assert rules.value_of(scars, "작은 흉터", "작은 흉터가 있었다") == "작은 흉터"
     assert rules.value_of(scars, "길게 그어진", "뺨에 길게 그어진 상흔") == "길게 그어진"
     assert rules.value_of(scars, "오른쪽 어깨", "오른쪽 어깨의 상흔") == ""
+    assert rules.value_of(scars, "목", "목의 상흔") == ""
+    assert rules.value_of(scars, "양쪽 뺨", "양쪽 뺨의 상흔") == ""
 
 
 def test_the_color_after_the_noun_is_counted_from_the_word_after_its_particle():

@@ -234,14 +234,13 @@ ATTRIBUTES = (
         re.compile(r"(?<![가-힣])키(?=[가는도를])|신장(?=[이가은는을를의도])"),
         value=re.compile(r"\d|센티|미터|크|컸|큰|작|장신|단신|훤칠|건장|왜소|높|낮"),
     ),
-    # The answer has to name the mark: "왼팔의 상흔" can be answered "왼팔".
     # An answer that is only a body part is the place of the mark, not the mark
-    # ("왼팔의 상흔" answered "왼팔").
+    # ("왼팔의 상흔" answered "왼팔"); every body word counts here, the ambiguous ones too.
     Attribute(
         "scars",
         "흉터는",
         re.compile(r"흉터|상흔|(?<![발손물퀴])자국"),
-        value=re.compile(rf"^(?!(?:(?:오른|왼)쪽\s)?{_BODY_PART_WORD}(?:에|의|이|가|을|를|에서)?$)"),
+        value=re.compile(rf"^(?!(?:(?:오른|왼|양)쪽\s)?(?:{_BODY_PART_WORD}|배|등|목|볼|발)(?:에|의|이|가|을|를|에서)?$)"),
     ),
     Attribute(
         "origin",
@@ -707,8 +706,11 @@ def _characters(mentions: list[Mention]) -> dict[tuple[str, str], Subject]:
 
 def _adnominal(text: str) -> bool:
     """Whether the last word of text modifies the word after it: 의, or an
-    adnominal ending (-는, -던, -ㄴ/-ㄹ as the final consonant of 푸른, 한, 갈)."""
+    adnominal ending (-는, -던, -ㄴ/-ㄹ as the final consonant of 푸른, 한, 갈; not
+    the adverb 번 of "한 번")."""
     last = text[-1:]
+    if not last or last == "번":
+        return False
     if last in "의는던":
         return True
     return "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 in (4, 8)
