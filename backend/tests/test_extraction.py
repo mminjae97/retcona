@@ -321,6 +321,10 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
     assert _run("레온은 세린을 붉은 눈동자로 노려보았다.", answers).claims == []
     assert _run("레온과 세린은 붉은 눈동자를 가졌다.", answers).claims == []
     assert _run("레온은 붉은 눈의 세린을 노려보았다.", answers).claims == []
+    # The cue as a relative clause or an adnominal of the other.
+    assert _run("레온은 눈이 푸른 세린을 바라보았다.", {"레온의 눈 색깔은?": "푸른"}).claims == []
+    assert _run("레온은 붉은 눈을 한 세린을 바라보았다.", answers).claims == []
+    assert _run("레온은 붉은 눈의 젊은 세린을 바라보았다.", answers).claims == []
 
 
 def test_a_body_part_is_no_possessor():
@@ -329,12 +333,16 @@ def test_a_body_part_is_no_possessor():
     # A person who happens to end in a body part's syllable is still somebody else.
     assert _run("레온은 후손의 흉터를 보았다.", {"레온의 흉터는?": "흉터"}).claims == []
     assert _run("레온은 노인의 오른손의 흉터를 보았다.", {"레온의 흉터는?": "흉터"}).claims == []
+    # A word that is a body part as often as something else is not one.
+    assert _run("레온은 배의 선체에 난 상흔을 만졌다.", {"레온의 흉터는?": "상흔"}).claims == []
 
 
 def test_a_scar_s_value_names_the_mark_not_the_body_part():
     scars = next(a for a in rules.ATTRIBUTES if a.key == "scars")
     assert rules.value_of(scars, "왼팔", "왼팔의 상흔을 가렸다") == ""
     assert rules.value_of(scars, "작은 흉터", "작은 흉터가 있었다") == "작은 흉터"
+    assert rules.value_of(scars, "길게 그어진", "뺨에 길게 그어진 상흔") == "길게 그어진"
+    assert rules.value_of(scars, "오른쪽 어깨", "오른쪽 어깨의 상흔") == ""
 
 
 def test_the_color_after_the_noun_is_counted_from_the_word_after_its_particle():
