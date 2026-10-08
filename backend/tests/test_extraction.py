@@ -338,15 +338,25 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
     ):
         [claim] = _run(text, answers).claims
         assert claim.subject == "레온"
+    # A color word is no second subject.
+    [claim] = _run("레온은 검은 눈동자로 세린을 노려보았다.", {"레온의 눈 색깔은?": "검은"}).claims
+    assert claim.subject == "레온"
+    # The cue as what the topic does something to may be the other's.
+    for text in (
+        "레온은 붉은 머리카락을 쓰다듬으며 세린에게 속삭였다.",
+        "레온은 붉은 눈동자를 가만히 들여다보다 세린을 끌어안았다.",
+    ):
+        assert _run(text, {"레온의 머리 색깔은?": "붉은", **answers}).claims == []
     assert _run("레온은 눈이 붉은 사과 장수 세린을 바라보았다.", answers).claims == []
     # "한 번", "순간" are adverbs, not an adnominal of the other.
     for text in ("레온은 붉은 눈동자로 한 번 세린을 노려보았다.", "레온은 붉은 눈동자로 순간 세린을 노려보았다."):
         [claim] = _run(text, answers).claims
         assert claim.subject == "레온"
-    # The object particle of the cue itself is not one either.
+    # Shown or treated, the scar may be either one's: "세린은 오른손의 흉터를 레온에게
+    # 보여주었다" reads like "흉터를 치료해 주며 레온에게".
     scar = {"레온의 흉터는?": "흉터", "세린의 흉터는?": "흉터"}
-    [claim] = _run("세린은 오른손의 흉터를 레온에게 보여주었다.", scar).claims
-    assert claim.subject == "세린"
+    assert _run("세린은 오른손의 흉터를 레온에게 보여주었다.", scar).claims == []
+    assert _run("레온은 흉터를 조심스레 치료해 주며 세린에게 말했다.", scar).claims == []
     # Only for the body: an age in such a sentence is nobody's.
     assert _run("레온은 스무 살 때 세린을 만났다.", {"레온의 나이는?": "스무 살", "세린의 나이는?": "스무 살"}).claims == []
     # Only the words right before the name can modify it: an ordinary word ending in ㄴ/ㄹ
@@ -417,6 +427,8 @@ def test_a_body_part_is_no_possessor():
         "레온은 이번에도 오른손의 흉터를 문질렀다.",
         "레온은 말없이 오른손의 흉터를 문질렀다.",
         "레온은 작은 한숨과 함께 오른손의 흉터를 문질렀다.",
+        "레온은 가까이 다가와 오른손의 흉터를 보였다.",
+        "레온은 많은 사람들 앞에서 오른손의 흉터를 보였다.",
     ):
         [claim] = _run(text, shown).claims
         assert claim.subject == "레온"
@@ -428,7 +440,7 @@ def test_a_scar_s_value_names_the_mark_not_the_body_part():
     assert rules.value_of(scars, "작은 흉터", "작은 흉터가 있었다") == "작은 흉터"
     assert rules.value_of(scars, "길게 그어진", "뺨에 길게 그어진 상흔") == "길게 그어진"
     assert rules.value_of(scars, "오른쪽 어깨", "오른쪽 어깨의 상흔") == ""
-    for part in ("발바닥", "정강이", "관자놀이", "이마 한가운데", "왼쪽 뺨 옆"):
+    for part in ("발바닥", "정강이", "관자놀이", "이마 한가운데", "왼쪽 뺨 옆", "목 뒤", "미간", "귀 밑", "콧등"):
         assert rules.value_of(scars, part, f"{part}의 상흔") == ""
     assert rules.value_of(scars, "목", "목의 상흔") == ""
     for answer in ("왼쪽 눈 아래", "머리", "발목", "눈가", "입술"):
@@ -445,6 +457,8 @@ def test_the_color_after_the_noun_is_counted_from_the_word_after_its_particle():
     assert _attributes("그의 눈이 어둠 속에서 한참 붉게 번뜩였다.") == set()
     # The last word of the window only as a predicate, not the modifier of another noun.
     assert _attributes("그의 눈이 마주친 순간 붉은 노을이 졌다.") == set()
+    # ... but a color noun in ㄹ ("은발") is no modifier.
+    assert "hair_color" in _attributes("세린의 머리카락은 길고 탐스러운 은발")
 
 
 def test_a_pronoun_looks_back_three_sentences():

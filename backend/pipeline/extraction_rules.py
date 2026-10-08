@@ -207,7 +207,7 @@ class Attribute:
 # front of a cue, that the cue is where it is ("오른손의 흉터"), not whose it is.
 _BODY_PART_WORD = (
     r"(?:(?:오른|왼|양)?(?:손|팔|다리|얼굴|어깨|가슴|뺨|이마|턱|허리|무릎|옆구리|허벅지|종아리|정강이)(?:등|목|바닥|가락|덜미|뚝)?"
-    r"|눈가|눈썹|머리|코|입술|귀|발목|발바닥|발등|목덜미|관자놀이)"
+    r"|눈가|눈썹|머리|코|콧등|입술|귀|발목|발바닥|발등|목덜미|관자놀이|미간|쇄골)"
 )
 _BODY_PART_WORD_RE = re.compile(_BODY_PART_WORD)
 # Words that mean something else as often (a ship, "and so on", snow): not a sign of a
@@ -221,7 +221,7 @@ _BODY_ITEM = (
     rf"(?:(?:오른|왼|양)쪽\s)?(?:{_BODY_PART_WORD}|{_BODY_PART_AMBIGUOUS})(?:에서|에는|에도|으로|[에의이가을를은는도로와과만])?"
 )
 _ONLY_BODY_PARTS = re.compile(
-    rf"^{_BODY_ITEM}(?:,?\s{_BODY_ITEM})*(?:\s(?:위|아래|근처|부근|한가운데|가운데|옆|끝)(?:에서|에|의)?)?[.!?…]?$"
+    rf"^{_BODY_ITEM}(?:,?\s{_BODY_ITEM})*(?:\s(?:위|아래|근처|부근|한가운데|가운데|옆|끝|뒤|밑|사이)(?:에서|에|의)?)?[.!?…]?$"
 )
 
 ATTRIBUTES = (
@@ -553,7 +553,9 @@ def _color_near(clause: str, noun: re.Match) -> bool:
     words = rest.split()[:_WORDS_AFTER]
     # The last word of the window only as a predicate ("눈은 어둠 속에서도 붉게"), not as the
     # modifier of another noun ("눈이 마주친 순간 붉은 노을이").
-    if len(words) == _WORDS_AFTER and _adnominal(words[-1]):
+    # A color noun ending in ㄹ ("은발") is not one.
+    last = words[-1].rstrip(".,!?…") if words else ""
+    if len(words) == _WORDS_AFTER and _adnominal(last) and not re.search(r"(?:발|색|빛)$", last):
         words = words[:-1]
     return COLOR_RE.search(" ".join(words)) is not None
 
@@ -637,7 +639,7 @@ def with_particle(name: str, particle: str) -> str:
     if forms is None:
         return name + particle
     last = name[-1:]
-    vowel_final = "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 == 0
+    vowel_final = _final_consonant(last) == ""
     return name + forms[1 if vowel_final else 0]
 
 
@@ -727,6 +729,17 @@ def _characters(mentions: list[Mention]) -> dict[tuple[str, str], Subject]:
     return {m.subject.key: m.subject for m in mentions if m.subject.kind == "character"}
 
 
+_FINALS = ("", "ㄱ", "ㄲ", "ㄳ", "ㄴ", "ㄵ", "ㄶ", "ㄷ", "ㄹ", "ㄺ", "ㄻ", "ㄼ", "ㄽ", "ㄾ", "ㄿ", "ㅀ",
+           "ㅁ", "ㅂ", "ㅄ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ")
+
+
+def _final_consonant(syllable: str) -> str | None:
+    """The final consonant of a Hangul syllable ("" for none), None for anything else."""
+    if len(syllable) != 1 or not "가" <= syllable <= "힣":
+        return None
+    return _FINALS[(ord(syllable) - ord("가")) % 28]
+
+
 # Adverbs with a final ㄴ/ㄹ, which modify the verb, not the name after them ("온 힘을",
 # "얼른 세린을").
 _ADVERBS = frozenset(("온", "얼른", "순식간", "가만", "일순"))
@@ -741,7 +754,7 @@ def _adnominal(word: str) -> bool:
     last = word[-1]
     if last in "는던":
         return True
-    return "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 in (4, 8)
+    return _final_consonant(last) in ("ㄴ", "ㄹ")
 
 
 # The end of a phrase of its own, as the last word before a name: a particle that doesn't
@@ -773,13 +786,17 @@ def _describes_next(span: str) -> bool:
 
 
 # Words that end like a subject's particle and are no subject: the connective of a verb
-# ("웃었지만", "웃어도"), a conjunction ("그래도", "다만"), an adverb or a time ("이번에도",
-# "말없이", "깊이", "같이", "그날도").
+# ("웃었지만", "웃어도"), a conjunction ("그래도", "다만"), a time ("이번에도", "그날도");
+# the adverbs in -이 are _ADVERB_I's ("말없이", "가까이").
 _NOT_SUBJECT_ENDINGS = (
-    "지만", "어도", "아도", "해도", "라도", "데도", "면서도", "고도", "그래도", "다만",
-    "에도", "없이", "깊이", "같이", "날도",
+    "지만", "어도", "아도", "해도", "라도", "데도", "면서도", "고도", "그래도", "다만", "에도", "날도",
 )
-_NOT_SUBJECT_WORDS = frozenset(("오늘도", "지금도", "아직도", "이제도", "그만", "작은", "적은"))
+_NOT_SUBJECT_WORDS = frozenset(("오늘도", "지금도", "아직도", "이제도", "그만", "작은", "적은", "많은"))
+
+
+# The final consonants an adjective stem has in front of -은 ("깊은", "높은", "짧은",
+# "젊은", "낮은", "짙은", "좋은"), and that a person's word seldom ends in.
+_ADJECTIVE_FINALS = ("ㄲ", "ㄺ", "ㄻ", "ㄼ", "ㅂ", "ㅆ", "ㅈ", "ㅌ", "ㅍ", "ㅎ")
 
 
 def _modifier_of_noun(word: str) -> bool:
@@ -787,15 +804,16 @@ def _modifier_of_noun(word: str) -> bool:
     "하는", "깊은", "붉은", "짧은"), which is no person to be a subject. Names are the
     risk ("마리는"), so only the stems that don't end one: 하/되/있/없, a stem with ㄹ in
     front of 리, and the final consonants an adjective stem has in front of 은. A noun that
-    ends alike is no loss here; it only goes unseen as a subject."""
+    ends alike is no loss here; it only goes unseen as a subject. A color is never a
+    person ("검은", "붉은")."""
+    if COLOR_RE.match(word):
+        return True
     if word.endswith("는"):
         if re.search(r"(?:하|되|있|없)는$", word):
             return True
-        return len(word) >= 3 and word.endswith("리는") and (ord(word[-3]) - ord("가")) % 28 == 8
+        return len(word) >= 3 and word.endswith("리는") and _final_consonant(word[-3]) == "ㄹ"
     if word.endswith("은") and len(word) >= 2:
-        # The final consonant of the syllable before 은: ㄲ ㄺ ㄻ ㄼ ㅂ ㅆ ㅈ ㅌ ㅍ ㅎ.
-        before = word[-2]
-        return "가" <= before <= "힣" and (ord(before) - ord("가")) % 28 in (2, 9, 10, 11, 17, 20, 22, 25, 26, 27)
+        return _final_consonant(word[-2]) in _ADJECTIVE_FINALS
     return False
 
 
@@ -808,6 +826,7 @@ def _subject_word(word: str) -> bool:
         and (word[-1] in "은는이가" or word.endswith(("께서", "도", "만")))
         and word not in _NOT_SUBJECT_WORDS
         and not word.endswith(_NOT_SUBJECT_ENDINGS)
+        and not _ADVERB_I.search(word)
         and not _modifier_of_noun(word)
     )
 
@@ -846,6 +865,12 @@ def _topic_of_two(narration: str, mentions: list[Mention], hit: CueHit) -> Subje
     # The topic, with no other subject between it and the cue: "레온은 웃었고 노인은 붉은
     # 눈동자로 세린을" is the old man's eyes.
     if len(topics) != 1 or not _clear_topic(narration, topics[0], hit.start):
+        return None
+    # The cue as what the topic does something to ("레온은 은빛 머리카락을 쓰다듬으며 세린에게",
+    # "흉터를 치료해 주며"): it may be the other's. Only what the topic does it with
+    # ("붉은 눈동자로") is the topic's.
+    cue_word = narration[hit.start :].split()[0] if narration[hit.start :].split() else ""
+    if cue_word.rstrip(".,!?…").endswith(("을", "를")):
         return None
     if len({m.subject.key for m in characters}) != len(characters):
         return None
