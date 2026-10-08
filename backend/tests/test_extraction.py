@@ -335,6 +335,8 @@ def test_a_body_part_is_no_possessor():
     # A person who happens to end in a body part's syllable is still somebody else.
     assert _run("레온은 후손의 흉터를 보았다.", {"레온의 흉터는?": "흉터"}).claims == []
     assert _run("레온은 노인의 오른손의 흉터를 보았다.", {"레온의 흉터는?": "흉터"}).claims == []
+    # "그 손의": somebody else's hand, mentioned before.
+    assert _run("레온은 노인의 손을 잡고 그 손의 흉터를 보았다.", {"레온의 흉터는?": "흉터"}).claims == []
     # A word that is a body part as often as something else is not one.
     assert _run("레온은 배의 선체에 난 상흔을 만졌다.", {"레온의 흉터는?": "상흔"}).claims == []
 
@@ -346,6 +348,8 @@ def test_a_scar_s_value_names_the_mark_not_the_body_part():
     assert rules.value_of(scars, "길게 그어진", "뺨에 길게 그어진 상흔") == "길게 그어진"
     assert rules.value_of(scars, "오른쪽 어깨", "오른쪽 어깨의 상흔") == ""
     assert rules.value_of(scars, "목", "목의 상흔") == ""
+    for answer in ("왼팔은", "왼팔로", "왼팔에도", "뺨과", "왼팔으로"):
+        assert rules.value_of(scars, answer, f"{answer} 상흔") == ""
     assert rules.value_of(scars, "양쪽 뺨", "양쪽 뺨의 상흔") == ""
 
 

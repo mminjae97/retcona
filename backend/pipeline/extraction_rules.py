@@ -12,7 +12,7 @@ Whose it is: a possessor in front of the cue ("레온의 푸른 눈") says; a po
 that isn't a known name ("노인의 눈") means someone else's, and the cue is
 skipped; otherwise the one character the sentence names. A sentence naming no
 character ("그의 눈이 붉게 빛났다", "붉은 눈동자가 번뜩였다") goes to the one
-character the two sentences before it name, if there's exactly one — missing a
+character the three sentences before it name, if there's exactly one — missing a
 claim does less harm than holding it against the wrong card.
 """
 
@@ -201,8 +201,8 @@ class Attribute:
     unless: re.Pattern | None = None
 
 
-# A body part, as a whole word. Left out: 배 (ship), 등 (and so on), 목, 볼, 발, which mean
-# something else as often.
+# A body part, as a whole word. Only words whose usual meaning is the body: 배 (ship), 등
+# (and so on), 목, 볼, 발 mean something else as often, and are left out.
 _BODY_PART_WORD = (
     r"(?:오른|왼|양)?(?:손|팔|다리|얼굴|어깨|가슴|뺨|이마|턱|허리|무릎|옆구리|허벅지|종아리)(?:등|목|바닥|가락|덜미)?"
 )
@@ -240,7 +240,7 @@ ATTRIBUTES = (
         "scars",
         "흉터는",
         re.compile(r"흉터|상흔|(?<![발손물퀴])자국"),
-        value=re.compile(rf"^(?!(?:(?:오른|왼|양)쪽\s)?(?:{_BODY_PART_WORD}|배|등|목|볼|발)(?:에|의|이|가|을|를|에서)?$)"),
+        value=re.compile(rf"^(?!(?:(?:오른|왼|양)쪽\s)?(?:{_BODY_PART_WORD}|배|등|목|볼|발)(?:에서|에는|에도|으로|[에의이가을를은는도로와과만])?$)"),
     ),
     Attribute(
         "origin",
@@ -772,7 +772,10 @@ def owner(
             r"(?<![가-힣])그\s?$", before[: genitive.start(1)]
         )
         if _BODY_PART.fullmatch(genitive.group(1)):
-            pass  # "오른손의 흉터": no possessor, so the sentence's own subject
+            # "오른손의 흉터": no possessor, so the sentence's own subject; but "그 손의
+            # 흉터" is the hand of somebody already mentioned, not this sentence's.
+            if re.search(r"(?<![가-힣])[그이저]\s?$", before[: genitive.start(1)]):
+                return None
         elif genitive.group(1) in _PRONOUNS or person_after_that:
             # "세린은 그의 푸른 눈을 보았다": 그의 is somebody the sentence doesn't
             # name, not its subject (자신의 would be).
