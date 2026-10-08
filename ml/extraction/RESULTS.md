@@ -138,3 +138,21 @@ Known limit of the "describes the other" guard: it reads every word between the 
 Still missed (6): a plural and a pair ("레온과 세린은 눈이 푸르렀다", p23/p29, by design), "그녀의" in a sentence that names someone else (p42, by design), a height said as a verb (p14); the 6 mutable ones, not extracted yet. A value that is a verb stem ("붉었다" -> '붉') is still cut at the stem, which the gold accepts but a card shows as it is.
 
 The set is small and these rules were written looking at its passages, so this says the rules do what they were made for, not how they do on other prose. Precision stays 1.000.
+
+## Round 6 — 2026-10-08: the eval set grows with the review's counterexamples
+
+No change to the extractor. PR #58 went through fourteen review rounds, and nearly every round found a sentence the rules got wrong; each was fixed one by one, and judged by itself. Those sentences are now passages (p56–p97, tag `review`), with gold as a reader would read them, so that the next changes (a morphological analyzer, another way to tell whose body part it is) are judged by numbers on all of them at once. p55 ("레온은 붉은 눈의 카엘을 노려보았다.") gets the gold a reader would give it, 카엘's red eyes; it had none.
+
+| | right | extra | missed | precision | recall | F1 |
+|---|---|---|---|---|---|---|
+| round 5, 55 passages | 60 | 0 | 6 | 1.000 | 0.909 | 0.952 |
+| **the same extractor, 97 passages** | **77** | **0** | **15** | **1.000** | **0.837** | **0.911** |
+| of which the `review` passages | 17 | 0 | 8 | 1.000 | 0.680 | 0.810 |
+
+The new tags: `other-subject` (an unregistered subject between the registered topic and the cue, or over it: "레온은 웃었고 노인은 붉은 눈동자로", "노인은 레온이 오자 오른손의 흉터를"), `acted-on` (a person the topic acts on: "노인을 부축하며 어깨의 흉터를"; stroked or treated, either one's), `describes-other` (the cue describes the name after it: "은발 소녀 세린을", "눈이 푸른 소녀 세린을"), `adverb` (an adverb, a modifier or a connective between the topic and the cue, which should not stop it: "웃다가", "떨리는 손으로"), `color-window`, `context-far`, `scar-value`.
+
+- **Precision holds** on every trap: no `other-subject` or `acted-on` passage gives a claim to the registered name. These are the sentences the rules were fixed for, so it says the fixes hold, not that there are no other traps.
+- **The 9 new misses** are recall, in two groups:
+  - **The described name gets nothing (5):** "붉은 눈의 카엘을" (p55), "은발 소녀 세린을", "흉터투성이 사내 카엘을", "눈이 붉은 사과 장수 세린을", "눈이 푸른 소녀 세린을" (p71–p74). The rules only refuse the topic there; they don't give the cue to the name it describes. A rule for that ("X의 / X인 / bare X + name" → that name's) is the cheapest gain left.
+  - **The topic's own, stopped by a word between (4):** "웃다가" (p86) and "돌리고는" (p87) read as subjects, "빛나는" (p92) read as another subject, and "세린은 오른손의 흉터를 레온에게 보여주었다" (p96), refused on purpose since #58 (shown or treated, either one's). The first three are the kind a part-of-speech tagger settles.
+

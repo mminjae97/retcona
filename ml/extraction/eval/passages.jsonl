@@ -52,4 +52,46 @@
 {"id": "p52", "cast": "main", "tags": ["location", "location-state"], "text": "벨로스 성은 오래전 몰락한 왕가의 거처였다.", "gold": [{"subject": "벨로스 성", "kind": "location", "attribute": "features", "values": ["거처"]}]}
 {"id": "p53", "cast": "main", "tags": ["location", "location-state"], "text": "몇 해 뒤 벨로스 성은 폐허였다.", "gold": [{"subject": "벨로스 성", "kind": "location", "attribute": "state", "values": ["폐허"]}]}
 {"id": "p54", "cast": "main", "tags": ["scene", "topic-body"], "text": "레온은 붉은 눈동자로 카엘을 노려보았다.", "gold": [{"subject": "레온", "attribute": "eye_color", "values": ["붉은"]}]}
-{"id": "p55", "cast": "main", "tags": ["other-possessor", "topic-body"], "text": "레온은 붉은 눈의 카엘을 노려보았다."}
+{"id": "p55", "cast": "main", "tags": ["other-possessor", "topic-body"], "text": "레온은 붉은 눈의 카엘을 노려보았다.", "gold": [{"subject": "카엘", "attribute": "eye_color", "values": ["붉은"]}]}
+{"id": "p56", "cast": "main", "tags": ["review", "other-subject", "body-part"], "text": "레온은 웃었고 노인도 오른손의 흉터를 보였다."}
+{"id": "p57", "cast": "main", "tags": ["review", "other-subject", "body-part"], "text": "레온은 웃었고 노인께서 오른손의 흉터를 보이셨다."}
+{"id": "p58", "cast": "main", "tags": ["review", "other-subject", "topic-body"], "text": "레온은 웃었고 노인은 붉은 눈동자로 세린을 노려보았다."}
+{"id": "p59", "cast": "main", "tags": ["review", "other-subject", "topic-body"], "text": "레온이 웃자 노인은 붉은 눈동자로 세린을 노려보았다."}
+{"id": "p60", "cast": "main", "tags": ["review", "other-subject", "topic-body"], "text": "레온은 노인에게 다가갔고 사내가 붉은 눈동자로 세린을 노려보았다."}
+{"id": "p61", "cast": "main", "tags": ["review", "other-subject", "topic-body"], "text": "레온은 물러섰고 적은 붉은 눈동자로 세린을 노려보았다."}
+{"id": "p62", "cast": "main", "tags": ["review", "other-subject", "body-part"], "text": "노인은 레온이 오자 오른손의 흉터를 보였다."}
+{"id": "p63", "cast": "main", "tags": ["review", "other-subject", "body-part"], "text": "노인은 레온에게 오른손의 흉터를 보여주었다."}
+{"id": "p64", "cast": "main", "tags": ["review", "other-subject", "body-part"], "text": "레온은 노인에게 다가갔다. 노인은 오른손의 흉터를 보였다."}
+{"id": "p65", "cast": "main", "tags": ["review", "other-subject", "body-part"], "text": "레온은 노인을 보았다. 그 오른쪽 어깨의 흉터가 선명했다."}
+{"id": "p66", "cast": "main", "tags": ["review", "acted-on", "body-part"], "text": "레온은 노인을 부축하며 어깨의 흉터를 살폈다."}
+{"id": "p67", "cast": "main", "tags": ["review", "acted-on", "body-part"], "text": "레온은 노인의 손을 잡고 오른손의 흉터를 살폈다."}
+{"id": "p68", "cast": "main", "tags": ["review", "acted-on", "body-part"], "text": "레온은 노인의 손을 잡고 그 손의 흉터를 보았다."}
+{"id": "p69", "cast": "main", "tags": ["review", "acted-on", "topic-body"], "text": "레온은 은빛 머리카락을 쓰다듬으며 세린에게 속삭였다."}
+{"id": "p70", "cast": "main", "tags": ["review", "acted-on", "topic-body"], "text": "레온은 흉터를 조심스레 치료해 주며 세린에게 말했다."}
+{"id": "p71", "cast": "main", "tags": ["review", "describes-other", "topic-body"], "text": "레온은 은발 소녀 세린을 바라보았다.", "gold": [{"subject": "세린", "attribute": "hair_color", "values": ["은발"]}]}
+{"id": "p72", "cast": "main", "tags": ["review", "describes-other", "topic-body"], "text": "레온은 흉터투성이 사내 카엘을 바라보았다.", "gold": [{"subject": "카엘", "attribute": "scars", "values": ["흉터투성이", "흉터"]}]}
+{"id": "p73", "cast": "main", "tags": ["review", "describes-other", "topic-body"], "text": "레온은 눈이 붉은 사과 장수 세린을 바라보았다.", "gold": [{"subject": "세린", "attribute": "eye_color", "values": ["붉은", "붉게", "붉"]}]}
+{"id": "p74", "cast": "main", "tags": ["review", "describes-other", "topic-body"], "text": "레온은 눈이 푸른 소녀 세린을 바라보았다.", "gold": [{"subject": "세린", "attribute": "eye_color", "values": ["푸른"]}]}
+{"id": "p75", "cast": "main", "tags": ["review", "describes-other", "topic-body"], "text": "레온은 눈이 붉은 소녀들과 세린을 바라보았다."}
+{"id": "p76", "cast": "main", "tags": ["review", "idiom"], "text": "레온은 배의 선체에 난 상흔을 만졌다."}
+{"id": "p77", "cast": "main", "tags": ["review", "color-window"], "text": "레온은 고개를 들었다. 그의 눈이 마주친 순간 붉은 노을이 졌다."}
+{"id": "p78", "cast": "main", "tags": ["review", "context-far", "dropped-subject"], "text": "레온은 문을 열었다. 바람이 불었다. 세린은 웃었다. 붉은 눈동자가 번뜩였다.", "gold": [{"subject": "세린", "attribute": "eye_color", "values": ["붉은", "붉게", "붉"]}]}
+{"id": "p79", "cast": "main", "tags": ["review", "scar-value"], "text": "레온의 목 뒤에는 흉터가 있었다.", "gold": [{"subject": "레온", "attribute": "scars", "values": ["흉터"]}]}
+{"id": "p80", "cast": "main", "tags": ["review", "scar-value"], "text": "레온의 미간에는 깊은 흉터가 있었다.", "gold": [{"subject": "레온", "attribute": "scars", "values": ["깊은 흉터", "흉터"]}]}
+{"id": "p81", "cast": "main", "tags": ["review", "adverb", "body-part"], "text": "레온은 깊은 숨을 쉬며 오른손의 흉터를 문질렀다.", "gold": [{"subject": "레온", "attribute": "scars", "values": ["흉터"]}]}
+{"id": "p82", "cast": "main", "tags": ["review", "adverb", "body-part"], "text": "레온은 떨리는 손으로 오른손의 흉터를 문질렀다.", "gold": [{"subject": "레온", "attribute": "scars", "values": ["흉터"]}]}
+{"id": "p83", "cast": "main", "tags": ["review", "adverb", "body-part"], "text": "레온은 오늘도 오른손의 흉터를 문질렀다.", "gold": [{"subject": "레온", "attribute": "scars", "values": ["흉터"]}]}
+{"id": "p84", "cast": "main", "tags": ["review", "adverb", "body-part"], "text": "레온은 이번에도 말없이 오른손의 흉터를 문질렀다.", "gold": [{"subject": "레온", "attribute": "scars", "values": ["흉터"]}]}
+{"id": "p85", "cast": "main", "tags": ["review", "adverb", "body-part"], "text": "레온은 웃었지만 오른손의 흉터를 숨겼다.", "gold": [{"subject": "레온", "attribute": "scars", "values": ["흉터"]}]}
+{"id": "p86", "cast": "main", "tags": ["review", "adverb", "body-part"], "text": "레온은 웃다가 오른손의 흉터를 숨겼다.", "gold": [{"subject": "레온", "attribute": "scars", "values": ["흉터"]}]}
+{"id": "p87", "cast": "main", "tags": ["review", "adverb", "body-part"], "text": "레온은 고개를 돌리고는 오른손의 흉터를 숨겼다.", "gold": [{"subject": "레온", "attribute": "scars", "values": ["흉터"]}]}
+{"id": "p88", "cast": "main", "tags": ["review", "adverb", "body-part"], "text": "레온은 가까이 다가와 오른손의 흉터를 보였다.", "gold": [{"subject": "레온", "attribute": "scars", "values": ["흉터"]}]}
+{"id": "p89", "cast": "main", "tags": ["review", "adverb", "body-part"], "text": "레온은 많은 사람들 앞에서 오른손의 흉터를 보였다.", "gold": [{"subject": "레온", "attribute": "scars", "values": ["흉터"]}]}
+{"id": "p90", "cast": "main", "tags": ["review", "adverb", "body-part"], "text": "레온은 그 순간 오른손의 흉터를 문질렀다.", "gold": [{"subject": "레온", "attribute": "scars", "values": ["흉터"]}]}
+{"id": "p91", "cast": "main", "tags": ["review", "adverb", "topic-body"], "text": "레온은 검은 눈동자로 세린을 노려보았다.", "gold": [{"subject": "레온", "attribute": "eye_color", "values": ["검은"]}]}
+{"id": "p92", "cast": "main", "tags": ["review", "adverb", "topic-body"], "text": "레온은 빛나는 붉은 눈동자로 카엘을 노려보았다.", "gold": [{"subject": "레온", "attribute": "eye_color", "values": ["붉은", "붉게", "붉"]}]}
+{"id": "p93", "cast": "main", "tags": ["review", "adverb", "topic-body"], "text": "레온은 붉은 눈동자로 얼른 세린을 노려보았다.", "gold": [{"subject": "레온", "attribute": "eye_color", "values": ["붉은", "붉게", "붉"]}]}
+{"id": "p94", "cast": "main", "tags": ["review", "adverb", "topic-body"], "text": "레온은 붉은 눈동자로 온 힘을 다해 세린을 노려보았다.", "gold": [{"subject": "레온", "attribute": "eye_color", "values": ["붉은", "붉게", "붉"]}]}
+{"id": "p95", "cast": "main", "tags": ["review", "adverb", "topic-body"], "text": "레온은 붉은 눈동자로 노려본 뒤 세린을 보았다.", "gold": [{"subject": "레온", "attribute": "eye_color", "values": ["붉은", "붉게", "붉"]}]}
+{"id": "p96", "cast": "main", "tags": ["review", "acted-on", "body-part"], "text": "세린은 오른손의 흉터를 레온에게 보여주었다.", "gold": [{"subject": "세린", "attribute": "scars", "values": ["흉터"]}]}
+{"id": "p97", "cast": "main", "tags": ["review", "color-window"], "text": "세린의 머리카락은 길고 탐스러운 은발, 눈은 푸르렀다.", "gold": [{"subject": "세린", "attribute": "hair_color", "values": ["은발"]}, {"subject": "세린", "attribute": "eye_color", "values": ["푸르렀", "푸른", "푸르"]}]}
