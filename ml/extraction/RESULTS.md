@@ -146,13 +146,25 @@ No change to the extractor. PR #58 went through fourteen review rounds, and near
 | | right | extra | missed | precision | recall | F1 |
 |---|---|---|---|---|---|---|
 | round 5, 55 passages | 60 | 0 | 6 | 1.000 | 0.909 | 0.952 |
-| **the same extractor, 97 passages** | **77** | **0** | **15** | **1.000** | **0.837** | **0.911** |
-| of which the `review` passages | 17 | 0 | 8 | 1.000 | 0.680 | 0.810 |
+| the same, p55's gold added | 60 | 0 | 7 | 1.000 | 0.896 | 0.945 |
+| **the same extractor, 97 passages** | **77** | **0** | **17** | **1.000** | **0.819** | **0.901** |
+| of which the `review` passages | 17 | 0 | 10 | 1.000 | 0.630 | 0.773 |
 
-The new tags: `other-subject` (an unregistered subject between the registered topic and the cue, or over it: "레온은 웃었고 노인은 붉은 눈동자로", "노인은 레온이 오자 오른손의 흉터를"), `acted-on` (a person the topic acts on: "노인을 부축하며 어깨의 흉터를"; stroked or treated, either one's), `describes-other` (the cue describes the name after it: "은발 소녀 세린을", "눈이 푸른 소녀 세린을"), `adverb` (an adverb, a modifier or a connective between the topic and the cue, which should not stop it: "웃다가", "떨리는 손으로"), `color-window`, `context-far`, `scar-value`.
+The tags of the new passages:
 
-- **Precision holds** on every trap: no `other-subject` or `acted-on` passage gives a claim to the registered name. These are the sentences the rules were fixed for, so it says the fixes hold, not that there are no other traps.
-- **The 9 new misses** are recall, in two groups:
-  - **The described name gets nothing (5):** "붉은 눈의 카엘을" (p55), "은발 소녀 세린을", "흉터투성이 사내 카엘을", "눈이 붉은 사과 장수 세린을", "눈이 푸른 소녀 세린을" (p71–p74). The rules only refuse the topic there; they don't give the cue to the name it describes. A rule for that ("X의 / X인 / bare X + name" → that name's) is the cheapest gain left.
-  - **The topic's own, stopped by a word between (4):** "웃다가" (p86) and "돌리고는" (p87) read as subjects, "빛나는" (p92) read as another subject, and "세린은 오른손의 흉터를 레온에게 보여주었다" (p96), refused on purpose since #58 (shown or treated, either one's). The first three are the kind a part-of-speech tagger settles.
+- `other-subject`: an unregistered subject between the registered topic and the cue, or over it ("레온은 웃었고 노인은 붉은 눈동자로", "노인은 레온이 오자 오른손의 흉터를"). No gold for the registered name.
+- `acted-on`: a person the topic acts on or does something for ("노인을 부축하며 어깨의 흉터를": the old man's; "은빛 머리카락을 쓰다듬으며 세린에게", "흉터를 치료해 주며 세린에게", "오른손의 흉터를 레온에게 보여주었다": a reader gives these to the one stroked or treated, and the shown scar to the one showing it).
+- `describes-other`: the cue describes the name after it ("붉은 눈의 카엘을", "은발 소녀 세린을", "눈이 푸른 소녀 세린을"): that name's.
+- `adverb`: an adverb, a modifier or a connective between the topic and the cue, which should not stop it ("웃다가", "떨리는 손으로", "오늘도"): the topic's.
+- `after-cue`: words after the cue and before the other name that look like a modifier of it and aren't ("얼른", "온 힘을 다해", "노려본 뒤"): the topic's.
+- `body-part`: the cue has a body part's "X의" in front of it ("오른손의 흉터"), which is no possessor.
+- `dropped-subject`: the sentence names nobody and has no pronoun; the owner is a character of the sentences before.
+- `color-window`, `context-far` (the nearest sentence's character, not one three back), `scar-value` (a scar's place is not its value).
 
+What it shows:
+
+- **Precision holds** on every trap: no `other-subject` or `acted-on` passage gives a claim to the wrong name. These are the sentences the rules were fixed for, so it says the fixes hold, not that there are no other traps.
+- **The 11 new misses** are recall, in three groups:
+  - **The described name gets nothing (5):** p55, p71–p74. The rules only refuse the topic there; they don't give the cue to the name it describes. A rule for that ("X의 / X인 / bare X + name" → that name's) is the cheapest gain left.
+  - **The one acted on gets nothing (3):** p69, p70 (stroked, treated: the other's) and p96 (shown: the topic's own), all refused on purpose in #58. Telling them apart takes knowing what the verb does, which the ownership experiment is for.
+  - **The topic's own, stopped by a word between (3):** "웃다가" (p86) and "돌리고는" (p87) read as subjects, "빛나는" (p92) read as another subject: the kind a part-of-speech tagger settles.
