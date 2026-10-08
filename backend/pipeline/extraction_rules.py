@@ -550,8 +550,12 @@ def _color_near(clause: str, noun: re.Match) -> bool:
     # The words after the noun's own (its particle, "눈이", is not one of them).
     # The rest of the noun's token is dropped whole.
     rest = re.sub(r"^\S+", "", clause[noun.end() :])
-    after = " ".join(rest.split()[:_WORDS_AFTER])
-    return COLOR_RE.search(after) is not None
+    words = rest.split()[:_WORDS_AFTER]
+    # The last word of the window only as a predicate ("눈은 어둠 속에서도 붉게"), not as the
+    # modifier of another noun ("눈이 마주친 순간 붉은 노을이").
+    if len(words) == _WORDS_AFTER and _adnominal(words[-1]):
+        words = words[:-1]
+    return COLOR_RE.search(" ".join(words)) is not None
 
 
 def cue_hits(narration: str) -> list[CueHit]:
@@ -690,6 +694,7 @@ _PRONOUN_WINDOW = 20
 _BODY_ATTRIBUTES = ("eye_color", "hair_color", "scars", "height")
 # How many sentences back a pronoun's name is looked for.
 CONTEXT_SENTENCES = 3
+_NEAR_SENTENCES = 2
 
 _MALE_NOUNS = ("사내", "남자", "소년", "청년", "남성")
 _FEMALE_NOUNS = ("소녀", "여자", "아가씨", "여인", "여성")
@@ -726,7 +731,7 @@ def _adnominal(word: str) -> bool:
     """Whether a word modifies the word after it: an adnominal ending (-는, -던, -ㄴ/-ㄹ
     as the final consonant of 푸른, 한, 갈). 의 is the caller's to look at."""
     # Not the object particles, 만, or an adverb that ends in a final consonant.
-    if not word or word.endswith(("을", "를", "만", "번", "순간", "잠깐", "동안")):
+    if not word or word == "온" or word.endswith(("을", "를", "만", "번", "순간", "잠깐", "동안")):
         return False
     last = word[-1]
     if last in "는던":
@@ -737,6 +742,10 @@ def _adnominal(word: str) -> bool:
 # The end of a phrase of its own, as the last word before a name: a particle that doesn't
 # modify what follows. Not 와/과/도: they end "소녀들과", "사과" too, and hide a modifier.
 _PHRASE_END = ("에서", "에", "으로", "로", "까지", "부터", "에게", "한테", "의")
+
+
+# What an adnominal can modify without the name after it: a number of times, a time.
+_BOUND_NOUNS = [[word] for word in ("번", "뒤", "후", "때", "채", "듯", "사이", "직후", "적")]
 
 
 def _describes_next(span: str) -> bool:
@@ -750,9 +759,9 @@ def _describes_next(span: str) -> bool:
     start = 1 + max((i for i, word in enumerate(words[1:]) if word.endswith(_PHRASE_END)), default=-1) + 1
     first = words[0].endswith("의") if words else False
     return first or any(
-        # "한 번" is a number of times, not a "한" of the name.
+        # "한 번" is a number of times, and "노려본 뒤" a time: not a "한", "본" of the name.
         # A later "앞의", "안의" is a place, not the cue's.
-        _adnominal(word) and not word.endswith("의") and words[i + 1 : i + 2] != ["번"]
+        _adnominal(word) and not word.endswith("의") and words[i + 1 : i + 2] not in _BOUND_NOUNS
         for i, word in enumerate(words)
         if i >= start
     )
@@ -763,18 +772,39 @@ def _describes_next(span: str) -> bool:
 _NOT_SUBJECT_ENDINGS = ("지만", "어도", "아도", "해도", "라도", "데도", "면서도", "고도", "그래도", "다만")
 
 
+def _modifier_of_noun(word: str) -> bool:
+    """Whether a word that ends -은/-는 is the adnominal of a verb or an adjective ("떨리는",
+    "하는", "깊은", "붉은", "짧은"), which is no person to be a subject. Names are the
+    risk ("마리는"), so only the stems that don't end one: 하/되/있/없, a stem with ㄹ in
+    front of 리, and the final consonants an adjective stem has in front of 은. A noun that
+    ends alike is no loss here; it only goes unseen as a subject."""
+    if word.endswith("는"):
+        if re.search(r"(?:하|되|있|없)는$", word):
+            return True
+        return len(word) >= 3 and word.endswith("리는") and (ord(word[-3]) - ord("가")) % 28 == 8
+    if word.endswith("은") and len(word) >= 2:
+        # The final consonant of the syllable before 은: ㅂ ㅍ ㄲ ㅆ ㄺ ㄻ ㄼ.
+        before = word[-2]
+        return "가" <= before <= "힣" and (ord(before) - ord("가")) % 28 in (17, 26, 20, 2, 9, 10, 11)
+    return False
+
+
 def _topic_before(narration: str, mentions: list[Mention], end: int) -> bool:
     """Whether a character is the topic of the sentence up to end, with no other subject
     between ("레온이 다가가자 노인은 오른손의 흉터를": 노인 is, and he isn't registered)."""
     for mention in mentions:
         if mention.subject.kind != "character" or not mention.topic or mention.end >= end:
             continue
-        # After the topic's particle; a one-syllable word may be 이 "this". Another subject:
-        # 은/는/이/가, 도 ("노인도"), 만 ("노인만"), 께서; not a verb's connective or a conjunction ("웃었지만", "하지만").
-        between = narration[mention.end + 1 : end].split()
+        # After the rest of the topic's word (its particle, "은"); a one-syllable
+        # word may be 이 "this". Another subject: 은/는/이/가, 도 ("노인도"), 만 ("노인만"),
+        # 께서; not a verb's connective or a conjunction ("웃었지만", "하지만"), nor a
+        # modifier ("깊은 숨을", "떨리는 손으로").
+        between = narration[mention.end : end].split()[1:]
         if not any(
-            len(word) >= 2 and (word[-1] in "은는이가" or word.endswith(("께서", "도", "만")))
+            len(word) >= 2
+            and (word[-1] in "은는이가" or word.endswith(("께서", "도", "만")))
             and not word.endswith(_NOT_SUBJECT_ENDINGS)
+            and not _modifier_of_noun(word)
             for word in between
         ):
             return True
@@ -882,8 +912,12 @@ def owner(
         early = None
     if not (pronoun_possessor or early or dropped_subject):
         return None
+    # The nearest sentences first: the third one back is looked at only where the two
+    # before it name nobody, so it can't turn a clear owner into a choice.
     candidates: dict[tuple[str, str], Subject] = {}
     for back in range(1, CONTEXT_SENTENCES + 1):
+        if back > _NEAR_SENTENCES and candidates:
+            break
         if index - back >= 0:
             candidates.update(_characters(mentions[index - back]))
     if len(candidates) > 1:

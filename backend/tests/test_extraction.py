@@ -323,6 +323,10 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
     assert _run("레온은 붉은 눈의 세린을 노려보았다.", answers).claims == []
     # A parallel 와/과 or 도 does not end the phrase of the modifier: "눈이 붉은 소녀들과 세린을".
     assert _run("레온은 눈이 붉은 소녀들과 세린을 바라보았다.", answers).claims == []
+    # A bound noun or an adverb after an adnominal-looking word is not a modifier of the name.
+    for text in ("레온은 붉은 눈동자로 온 힘을 다해 세린을 노려보았다.", "레온은 붉은 눈동자로 노려본 뒤 세린을 보았다."):
+        [claim] = _run(text, answers).claims
+        assert claim.subject == "레온"
     assert _run("레온은 눈이 붉은 사과 장수 세린을 바라보았다.", answers).claims == []
     # "한 번", "순간" are adverbs, not an adnominal of the other.
     for text in ("레온은 붉은 눈동자로 한 번 세린을 노려보았다.", "레온은 붉은 눈동자로 순간 세린을 노려보았다."):
@@ -388,8 +392,16 @@ def test_a_body_part_is_no_possessor():
     for subject in ("노인도", "노인만", "노인께서"):
         assert _run(f"레온은 웃었고 {subject} 오른손의 흉터를 보였다.", shown).claims == []
     # ... but a conjunction that ends in one is no subject.
-    assert _run("레온은 웃었지만 오른손의 흉터를 숨겼다.", shown).claims != []
-    assert _run("레온은 그래도 오른손의 흉터를 숨겼다.", shown).claims != []
+    for text in ("레온은 웃었지만 오른손의 흉터를 숨겼다.", "레온은 그래도 오른손의 흉터를 숨겼다."):
+        [claim] = _run(text, shown).claims
+        assert (claim.subject, set(claim.attributes)) == ("레온", {"scars"})
+    # ... nor a modifier ("깊은", "떨리는").
+    for text in (
+        "레온은 깊은 숨을 쉬며 오른손의 흉터를 문질렀다.",
+        "레온은 떨리는 손으로 오른손의 흉터를 문질렀다.",
+    ):
+        [claim] = _run(text, shown).claims
+        assert claim.subject == "레온"
 
 
 def test_a_scar_s_value_names_the_mark_not_the_body_part():
@@ -420,6 +432,17 @@ def test_a_pronoun_looks_back_three_sentences():
     [claim] = _run(text, {"레온의 눈 색깔은?": "붉게", "그의 눈 색깔은?": "붉게"}).claims
     assert claim.subject == "레온"
     assert _run("레온은 문을 열었다. 바람이 불었다. 방은 어두웠다. 비가 왔다. 그의 눈이 붉게 빛났다.").claims == []
+
+
+def test_the_third_sentence_back_is_looked_at_only_where_the_nearer_two_name_nobody():
+    answers = {"레온의 눈 색깔은?": "붉은", "세린의 눈 색깔은?": "붉은"}
+    [claim] = _run("레온은 문을 열었다. 바람이 불었다. 세린은 웃었다. 붉은 눈동자가 번뜩였다.", answers).claims
+    assert claim.subject == "세린"
+
+
+def test_a_color_in_another_noun_s_phrase_is_no_cue():
+    assert _attributes("그의 눈이 마주친 순간 붉은 노을이 졌다.") == set()
+    assert _attributes("그의 눈이 어둠 속에서 붉게 번뜩였다.") == {"eye_color"}
 
 
 def test_one_claim_per_sentence_and_subject_holds_all_it_says():
