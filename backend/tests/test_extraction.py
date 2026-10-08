@@ -321,8 +321,15 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
     assert _run("레온은 세린을 붉은 눈동자로 노려보았다.", answers).claims == []
     assert _run("레온과 세린은 붉은 눈동자를 가졌다.", answers).claims == []
     assert _run("레온은 붉은 눈의 세린을 노려보았다.", answers).claims == []
-    # "한 번" is an adverb, not an adnominal of the other.
+    # "한 번", "순간" are adverbs, not an adnominal of the other.
     assert _run("레온은 붉은 눈동자로 한 번 세린을 노려보았다.", answers).claims != []
+    assert _run("레온은 붉은 눈동자로 순간 세린을 노려보았다.", answers).claims != []
+    # The object particle of the cue itself is not one either.
+    scar = {"레온의 흉터는?": "흉터", "세린의 흉터는?": "흉터"}
+    [claim] = _run("세린은 오른손의 흉터를 레온에게 보여주었다.", scar).claims
+    assert claim.subject == "세린"
+    # Only for the body: an age in such a sentence is nobody's.
+    assert _run("레온은 스무 살 때 세린을 만났다.", {"레온의 나이는?": "스무 살", "세린의 나이는?": "스무 살"}).claims == []
     # The cue as a relative clause or an adnominal of the other.
     assert _run("레온은 눈이 푸른 세린을 바라보았다.", {"레온의 눈 색깔은?": "푸른"}).claims == []
     assert _run("레온은 붉은 눈을 한 세린을 바라보았다.", answers).claims == []
@@ -348,6 +355,8 @@ def test_a_scar_s_value_names_the_mark_not_the_body_part():
     assert rules.value_of(scars, "길게 그어진", "뺨에 길게 그어진 상흔") == "길게 그어진"
     assert rules.value_of(scars, "오른쪽 어깨", "오른쪽 어깨의 상흔") == ""
     assert rules.value_of(scars, "목", "목의 상흔") == ""
+    for answer in ("왼팔.", "왼팔과 오른팔", "왼쪽 뺨과 이마", "뺨 위", "뺨 위에"):
+        assert rules.value_of(scars, answer, f"{answer} 상흔") == "", answer
     for answer in ("왼팔은", "왼팔로", "왼팔에도", "뺨과", "왼팔으로"):
         assert rules.value_of(scars, answer, f"{answer} 상흔") == ""
     assert rules.value_of(scars, "양쪽 뺨", "양쪽 뺨의 상흔") == ""

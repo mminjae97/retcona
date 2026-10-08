@@ -207,6 +207,16 @@ _BODY_PART_WORD = (
     r"(?:오른|왼|양)?(?:손|팔|다리|얼굴|어깨|가슴|뺨|이마|턱|허리|무릎|옆구리|허벅지|종아리)(?:등|목|바닥|가락|덜미)?"
 )
 
+# An answer that is nothing but body parts, listed or placed: "왼팔", "왼팔은", "왼팔과
+# 오른팔", "왼쪽 뺨과 이마", "뺨 위에". Not a value. Every body word counts, the ambiguous
+# ones too.
+_BODY_ITEM = (
+    rf"(?:(?:오른|왼|양)쪽\s)?(?:{_BODY_PART_WORD}|배|등|목|볼|발)(?:에서|에는|에도|으로|[에의이가을를은는도로와과만])?"
+)
+_ONLY_BODY_PARTS = re.compile(
+    rf"^(?!{_BODY_ITEM}(?:,?\s{_BODY_ITEM})*(?:\s(?:위|아래|근처|부근)(?:에서|에|의)?)?[.!?…]?$)"
+)
+
 ATTRIBUTES = (
     Attribute(
         "eye_color",
@@ -240,7 +250,7 @@ ATTRIBUTES = (
         "scars",
         "흉터는",
         re.compile(r"흉터|상흔|(?<![발손물퀴])자국"),
-        value=re.compile(rf"^(?!(?:(?:오른|왼|양)쪽\s)?(?:{_BODY_PART_WORD}|배|등|목|볼|발)(?:에서|에는|에도|으로|[에의이가을를은는도로와과만])?$)"),
+        value=_ONLY_BODY_PARTS,
     ),
     Attribute(
         "origin",
@@ -706,11 +716,12 @@ def _characters(mentions: list[Mention]) -> dict[tuple[str, str], Subject]:
 
 def _adnominal(text: str) -> bool:
     """Whether the last word of text modifies the word after it: 의, or an
-    adnominal ending (-는, -던, -ㄴ/-ㄹ as the final consonant of 푸른, 한, 갈; not
-    the adverb 번 of "한 번")."""
-    last = text[-1:]
-    if not last or last == "번":
+    adnominal ending (-는, -던, -ㄴ/-ㄹ as the final consonant of 푸른, 한, 갈)."""
+    words = text.split()
+    # Not the object particles, 만, or an adverb that ends in a final consonant.
+    if not words or words[-1].endswith(("을", "를", "만", "번", "순간", "잠깐", "동안")):
         return False
+    last = words[-1][-1]
     if last in "의는던":
         return True
     return "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 in (4, 8)
@@ -721,6 +732,8 @@ def _topic_of_two(narration: str, mentions: list[Mention], hit: CueHit) -> Subje
     front of it, where one is the topic and the cue comes before the others, who
     are acted on ("레온은 붉은 눈동자로 카엘을 노려보았다": 레온's). None otherwise:
     "레온과 세린은 눈이 푸르렀다" is both, "레온은 붉은 눈의 카엘을 ..." is the other's."""
+    if hit.attribute.key not in _BODY_ATTRIBUTES:
+        return None  # "레온은 스무 살 때 세린을 만났다": not a thing of the body
     characters = [m for m in mentions if m.subject.kind == "character"]
     topics = [m for m in characters if m.topic]
     if len(topics) != 1 or topics[0].end > hit.start:
