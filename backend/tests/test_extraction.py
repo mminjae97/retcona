@@ -341,6 +341,12 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
     # A color word is no second subject.
     [claim] = _run("레온은 검은 눈동자로 세린을 노려보았다.", {"레온의 눈 색깔은?": "검은"}).claims
     assert claim.subject == "레온"
+    # A bare cue noun or a compound describes the name after it.
+    hair = {"레온의 머리색은?": "은발", "세린의 머리색은?": "은발", **answers}
+    for text in ("레온은 은발 소녀 세린을 바라보았다.", "레온은 붉은 눈동자 세린을 바라보았다."):
+        assert _run(text, hair).claims == []
+    assert _run("레온은 흉터투성이 사내 세린을 바라보았다.", {"레온의 흉터는?": "흉터투성이"}).claims == []
+    assert _run("레온은 물러섰고 적은 붉은 눈동자로 세린을 노려보았다.", answers).claims == []
     # The cue as what the topic does something to may be the other's.
     for text in (
         "레온은 붉은 머리카락을 쓰다듬으며 세린에게 속삭였다.",
@@ -401,6 +407,11 @@ def test_a_body_part_is_no_possessor():
     assert _run("레온은 문을 열었고 노인은 오른손의 흉터를 보였다.", shown).claims == []
     # ... unless a pronoun names the subject.
     assert _run("레온은 문을 열었다. 그는 오른손의 흉터를 문질렀다.", shown).claims != []
+    # Somebody else the topic acts on ahead of the body part: that one's.
+    for text in ("레온은 노인을 부축하며 어깨의 흉터를 살폈다.", "레온은 노인의 손을 잡고 오른손의 흉터를 살폈다."):
+        assert _run(text, shown).claims == []
+    # 적은 is often 적 "the enemy" with 은, another subject.
+    assert _run("레온은 물러섰고 적은 오른손의 흉터를 드러냈다.", shown).claims == []
     # The registered name is the subject of a clause under an unregistered topic.
     for text in ("노인은 레온이 오자 오른손의 흉터를 보였다.", "노인은 레온이 묻자 오른손의 흉터를 보였다."):
         assert _run(text, shown).claims == []

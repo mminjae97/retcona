@@ -723,6 +723,9 @@ _DEMONSTRATIVE_BEFORE = re.compile(r"(?<![가-힣])[그이저]\s(?:(?:오른|왼
 # What marks a name in a sentence as somebody the topic acts on, not a co-subject
 # ("레온과 세린은 ..."): an object, or "에게/한테".
 _ACTED_ON = re.compile(r"^(?:을|를|에게서|에게|한테서|한테)")
+# A person as an object, a possessor or a recipient: a word for a person ("노인을", "사내의",
+# "아이들에게"), or anybody with 에게/한테 ("카일에게").
+_OTHER_PERSON = re.compile(rf"(?:(?:{_PERSON_NOUNS})들?(?:을|를|의)|\S+(?:에게|한테)(?:서)?)[,.]?")
 
 
 def _characters(mentions: list[Mention]) -> dict[tuple[str, str], Subject]:
@@ -791,7 +794,7 @@ def _describes_next(span: str) -> bool:
 _NOT_SUBJECT_ENDINGS = (
     "지만", "어도", "아도", "해도", "라도", "데도", "면서도", "고도", "그래도", "다만", "에도", "날도",
 )
-_NOT_SUBJECT_WORDS = frozenset(("오늘도", "지금도", "아직도", "이제도", "그만", "작은", "적은", "많은"))
+_NOT_SUBJECT_WORDS = frozenset(("오늘도", "지금도", "아직도", "이제도", "그만", "작은", "많은"))
 
 
 # The final consonants an adjective stem has in front of -은 ("깊은", "높은", "짧은",
@@ -853,6 +856,9 @@ def _topic_before(narration: str, mentions: list[Mention], end: int) -> bool:
     return any(_clear_topic(narration, mention, end) for mention in mentions)
 
 
+_OWN_CUE_PARTICLES = ("로", "으로", "이", "가", "은", "는", "도", "만", "에", "에서")
+
+
 def _topic_of_two(narration: str, mentions: list[Mention], hit: CueHit) -> Subject | None:
     """The owner of a cue in a sentence with several characters and no possessor in
     front of it, where one is the topic and the cue comes before the others, who
@@ -866,11 +872,13 @@ def _topic_of_two(narration: str, mentions: list[Mention], hit: CueHit) -> Subje
     # 눈동자로 세린을" is the old man's eyes.
     if len(topics) != 1 or not _clear_topic(narration, topics[0], hit.start):
         return None
-    # The cue as what the topic does something to ("레온은 은빛 머리카락을 쓰다듬으며 세린에게",
-    # "흉터를 치료해 주며"): it may be the other's. Only what the topic does it with
-    # ("붉은 눈동자로") is the topic's.
-    cue_word = narration[hit.start :].split()[0] if narration[hit.start :].split() else ""
-    if cue_word.rstrip(".,!?…").endswith(("을", "를")):
+    # The cue's noun with a particle of the topic's: what it does something with ("붉은
+    # 눈동자로"), or its subject ("눈이 붉은"). Not an object ("은빛 머리카락을 쓰다듬으며
+    # 세린에게", "흉터를 치료해 주며": it may be the other's), nor a bare noun or a compound
+    # that describes the next one ("은발 소녀 세린을", "흉터투성이 사내 세린을").
+    noun = hit.attribute.noun.match(narration, hit.start)
+    rest = re.split(r"\s", narration[noun.end() if noun else hit.start :], maxsplit=1)[0]
+    if rest.rstrip(".,!?…") not in _OWN_CUE_PARTICLES:
         return None
     if len({m.subject.key for m in characters}) != len(characters):
         return None
@@ -927,6 +935,10 @@ def owner(
             # The sentence's own subject, which is the topic: "노인은 레온에게 오른손의
             # 흉터를 보여주었다" is the old man's hand, shown to 레온.
             if here and not _topic_before(narration, mentions[index], genitive.start(1)):
+                return None
+            # Somebody else the sentence acts on ahead of it: "레온은 노인을 부축하며 어깨의
+            # 흉터를 살폈다", "노인의 손을 잡고 오른손의 흉터를" are the old man's.
+            if any(_OTHER_PERSON.fullmatch(word) for word in before[: genitive.start(1)].split()):
                 return None
             body_part_possessor = True
         elif genitive.group(1) in _PRONOUNS or person_after_that:
