@@ -330,6 +330,9 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
     assert claim.subject == "세린"
     # Only for the body: an age in such a sentence is nobody's.
     assert _run("레온은 스무 살 때 세린을 만났다.", {"레온의 나이는?": "스무 살", "세린의 나이는?": "스무 살"}).claims == []
+    # A title or role between the modifier and the name.
+    assert _run("레온은 눈이 푸른 소녀 세린을 바라보았다.", {"레온의 눈 색깔은?": "푸른"}).claims == []
+    assert _run("레온은 붉은 눈의 마녀 세린을 바라보았다.", answers).claims == []
     # The cue as a relative clause or an adnominal of the other.
     assert _run("레온은 눈이 푸른 세린을 바라보았다.", {"레온의 눈 색깔은?": "푸른"}).claims == []
     assert _run("레온은 붉은 눈을 한 세린을 바라보았다.", answers).claims == []
@@ -342,6 +345,10 @@ def test_a_body_part_is_no_possessor():
     # A person who happens to end in a body part's syllable is still somebody else.
     assert _run("레온은 후손의 흉터를 보았다.", {"레온의 흉터는?": "흉터"}).claims == []
     assert _run("레온은 노인의 오른손의 흉터를 보았다.", {"레온의 흉터는?": "흉터"}).claims == []
+    # The one named character is the one shown the hand, not its owner.
+    assert _run("노인은 레온에게 오른손의 흉터를 보여주었다.", {"레온의 흉터는?": "흉터"}).claims == []
+    # "그 손의", "그 오른쪽 어깨의": somebody else's, mentioned before.
+    assert _run("레온은 노인을 보았다. 그 오른쪽 어깨의 흉터가 선명했다.", {"레온의 흉터는?": "흉터"}).claims == []
     # "그 손의": somebody else's hand, mentioned before.
     assert _run("레온은 노인의 손을 잡고 그 손의 흉터를 보았다.", {"레온의 흉터는?": "흉터"}).claims == []
     # A word that is a body part as often as something else is not one.
@@ -355,6 +362,8 @@ def test_a_scar_s_value_names_the_mark_not_the_body_part():
     assert rules.value_of(scars, "길게 그어진", "뺨에 길게 그어진 상흔") == "길게 그어진"
     assert rules.value_of(scars, "오른쪽 어깨", "오른쪽 어깨의 상흔") == ""
     assert rules.value_of(scars, "목", "목의 상흔") == ""
+    for answer in ("왼쪽 눈 아래", "머리", "발목", "눈가", "입술"):
+        assert rules.value_of(scars, answer, f"{answer}의 상흔") == "", answer
     for answer in ("왼팔.", "왼팔과 오른팔", "왼쪽 뺨과 이마", "뺨 위", "뺨 위에"):
         assert rules.value_of(scars, answer, f"{answer} 상흔") == "", answer
     for answer in ("왼팔은", "왼팔로", "왼팔에도", "뺨과", "왼팔으로"):

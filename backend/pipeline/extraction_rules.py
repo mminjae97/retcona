@@ -211,7 +211,7 @@ _BODY_PART_WORD = (
 # 오른팔", "왼쪽 뺨과 이마", "뺨 위에". Not a value. Every body word counts, the ambiguous
 # ones too.
 _BODY_ITEM = (
-    rf"(?:(?:오른|왼|양)쪽\s)?(?:{_BODY_PART_WORD}|배|등|목|볼|발)(?:에서|에는|에도|으로|[에의이가을를은는도로와과만])?"
+    rf"(?:(?:오른|왼|양)쪽\s)?(?:{_BODY_PART_WORD}|눈가|눈썹|눈|머리|코|입술|입|귀|발목|발|팔뚝|팔목|목덜미|목|배|등|볼)(?:에서|에는|에도|으로|[에의이가을를은는도로와과만])?"
 )
 _ONLY_BODY_PARTS = re.compile(
     rf"^(?!{_BODY_ITEM}(?:,?\s{_BODY_ITEM})*(?:\s(?:위|아래|근처|부근)(?:에서|에|의)?)?[.!?…]?$)"
@@ -714,17 +714,28 @@ def _characters(mentions: list[Mention]) -> dict[tuple[str, str], Subject]:
     return {m.subject.key: m.subject for m in mentions if m.subject.kind == "character"}
 
 
-def _adnominal(text: str) -> bool:
-    """Whether the last word of text modifies the word after it: 의, or an
-    adnominal ending (-는, -던, -ㄴ/-ㄹ as the final consonant of 푸른, 한, 갈)."""
-    words = text.split()
+def _adnominal(word: str) -> bool:
+    """Whether a word modifies the word after it: 의, or an adnominal ending (-는,
+    -던, -ㄴ/-ㄹ as the final consonant of 푸른, 한, 갈)."""
     # Not the object particles, 만, or an adverb that ends in a final consonant.
-    if not words or words[-1].endswith(("을", "를", "만", "번", "순간", "잠깐", "동안")):
+    if not word or word.endswith(("을", "를", "만", "번", "순간", "잠깐", "동안")):
         return False
-    last = words[-1][-1]
+    last = word[-1]
     if last in "의는던":
         return True
     return "가" <= last <= "힣" and (ord(last) - ord("가")) % 28 in (4, 8)
+
+
+def _describes_next(span: str) -> bool:
+    """Whether the cue at the start of span (its noun and what follows, up to the next
+    name) is said of that name: a word that modifies what follows, "눈이 푸른 소녀 세린을",
+    "붉은 눈의 마녀 세린을". The cue's own word only counts as 의 ("눈의")."""
+    words = span.split()
+    return any(
+        # "한 번" is a number of times, not a "한" of the name.
+        word.endswith("의") if i == 0 else _adnominal(word) and words[i + 1 : i + 2] != ["번"]
+        for i, word in enumerate(words)
+    )
 
 
 def _topic_of_two(narration: str, mentions: list[Mention], hit: CueHit) -> Subject | None:
@@ -747,7 +758,7 @@ def _topic_of_two(narration: str, mentions: list[Mention], hit: CueHit) -> Subje
         if other.start < hit.start or not _ACTED_ON.match(narration[other.end :]):
             return None
         # "붉은 눈의 세린을", "눈이 푸른 세린을": the cue describes the other.
-        if _adnominal(narration[hit.start : other.start].rstrip()):
+        if _describes_next(narration[hit.start : other.start]):
             return None
     return topics[0].subject
 
@@ -787,7 +798,11 @@ def owner(
         if _BODY_PART.fullmatch(genitive.group(1)):
             # "오른손의 흉터": no possessor, so the sentence's own subject; but "그 손의
             # 흉터" is the hand of somebody already mentioned, not this sentence's.
-            if re.search(r"(?<![가-힣])[그이저]\s?$", before[: genitive.start(1)]):
+            if re.search(r"(?<![가-힣])[그이저]\s?(?:\S+\s)?$", before[: genitive.start(1)]):
+                return None
+            # The sentence's own subject, which is the topic: "노인은 레온에게 오른손의
+            # 흉터를 보여주었다" is the old man's hand, shown to 레온.
+            if here and not any(m.topic for m in mentions[index] if m.subject.kind == "character"):
                 return None
         elif genitive.group(1) in _PRONOUNS or person_after_that:
             # "세린은 그의 푸른 눈을 보았다": 그의 is somebody the sentence doesn't
