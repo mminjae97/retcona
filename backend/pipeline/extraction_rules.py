@@ -203,17 +203,21 @@ class Attribute:
     unless: re.Pattern | None = None
 
 
-# A body part, as a whole word. Only words whose usual meaning is the body: 배 (ship), 등
-# (and so on), 목, 볼, 발 mean something else as often, and are left out.
+# A body part, as a whole word: the words whose usual meaning is the body. They tell, in
+# front of a cue, that the cue is where it is ("오른손의 흉터"), not whose it is.
 _BODY_PART_WORD = (
-    r"(?:오른|왼|양)?(?:손|팔|다리|얼굴|어깨|가슴|뺨|이마|턱|허리|무릎|옆구리|허벅지|종아리)(?:등|목|바닥|가락|덜미)?"
+    r"(?:(?:오른|왼|양)?(?:손|팔|다리|얼굴|어깨|가슴|뺨|이마|턱|허리|무릎|옆구리|허벅지|종아리)(?:등|목|바닥|가락|덜미|뚝)?"
+    r"|눈가|눈썹|머리|코|입술|귀|발목|목덜미)"
 )
+# Words that mean something else as often (a ship, "and so on", snow): not a sign of a
+# possessor, but in an answer, the place of a mark all the same.
+_BODY_PART_AMBIGUOUS = r"(?:눈|입|발|목|배|등|볼)"
 
 # An answer that is nothing but body parts, listed or placed: "왼팔", "왼팔은", "왼팔과
 # 오른팔", "왼쪽 뺨과 이마", "뺨 위에". Not a value. Every body word counts, the ambiguous
 # ones too.
 _BODY_ITEM = (
-    rf"(?:(?:오른|왼|양)쪽\s)?(?:{_BODY_PART_WORD}|눈가|눈썹|눈|머리|코|입술|입|귀|발목|발|팔뚝|팔목|목덜미|목|배|등|볼)(?:에서|에는|에도|으로|[에의이가을를은는도로와과만])?"
+    rf"(?:(?:오른|왼|양)쪽\s)?(?:{_BODY_PART_WORD}|{_BODY_PART_AMBIGUOUS})(?:에서|에는|에도|으로|[에의이가을를은는도로와과만])?"
 )
 _ONLY_BODY_PARTS = re.compile(
     rf"^{_BODY_ITEM}(?:,?\s{_BODY_ITEM})*(?:\s(?:위|아래|근처|부근)(?:에서|에|의)?)?[.!?…]?$"
@@ -802,7 +806,7 @@ def owner(
         if _BODY_PART.fullmatch(genitive.group(1)):
             # "오른손의 흉터": no possessor, so the sentence's own subject; but "그 손의
             # 흉터" is the hand of somebody already mentioned, not this sentence's.
-            if re.search(r"(?<![가-힣])[그이저]\s(?:\S+\s)?$", before[: genitive.start(1)]):
+            if re.search(r"(?<![가-힣])[그이저]\s(?:(?:오른|왼|양)쪽\s)?$", before[: genitive.start(1)]):
                 return None
             # The sentence's own subject, which is the topic: "노인은 레온에게 오른손의
             # 흉터를 보여주었다" is the old man's hand, shown to 레온.

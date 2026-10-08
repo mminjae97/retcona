@@ -349,6 +349,13 @@ def test_a_body_part_is_no_possessor():
     # A pronoun subject is not a "그 + noun".
     [claim] = _run("레온은 문을 열었다. 그는 오른손의 흉터를 문질렀다.", {"레온의 흉터는?": "흉터"}).claims
     assert claim.subject == "레온"
+    # Body words that are not on the short list of hands and arms.
+    for part in ("눈가", "머리", "입술", "발목"):
+        [claim] = _run(f"레온은 {part}의 흉터를 문질렀다.", {"레온의 흉터는?": "흉터"}).claims
+        assert claim.subject == "레온"
+    # "그 순간" is not a "그 + body part".
+    [claim] = _run("레온은 문을 열었다. 그 순간 오른손의 흉터가 욱신거렸다.", {"레온의 흉터는?": "흉터"}).claims
+    assert claim.subject == "레온"
     # The one named character is the one shown the hand, not its owner.
     assert _run("노인은 레온에게 오른손의 흉터를 보여주었다.", {"레온의 흉터는?": "흉터"}).claims == []
     # "그 손의", "그 오른쪽 어깨의": somebody else's, mentioned before.
