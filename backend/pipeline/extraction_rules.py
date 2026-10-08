@@ -196,6 +196,8 @@ class Attribute:
     needs_color: bool = False
     # what an answer has to look like
     value: re.Pattern | None = None
+    # what an answer must not be
+    reject: re.Pattern | None = None
     # Rules a clause out where the noun is the weak kind (not the named group
     # "strong"): 눈 is an eye, or snow.
     unless: re.Pattern | None = None
@@ -214,7 +216,7 @@ _BODY_ITEM = (
     rf"(?:(?:오른|왼|양)쪽\s)?(?:{_BODY_PART_WORD}|눈가|눈썹|눈|머리|코|입술|입|귀|발목|발|팔뚝|팔목|목덜미|목|배|등|볼)(?:에서|에는|에도|으로|[에의이가을를은는도로와과만])?"
 )
 _ONLY_BODY_PARTS = re.compile(
-    rf"^(?!{_BODY_ITEM}(?:,?\s{_BODY_ITEM})*(?:\s(?:위|아래|근처|부근)(?:에서|에|의)?)?[.!?…]?$)"
+    rf"^{_BODY_ITEM}(?:,?\s{_BODY_ITEM})*(?:\s(?:위|아래|근처|부근)(?:에서|에|의)?)?[.!?…]?$"
 )
 
 ATTRIBUTES = (
@@ -250,7 +252,7 @@ ATTRIBUTES = (
         "scars",
         "흉터는",
         re.compile(r"흉터|상흔|(?<![발손물퀴])자국"),
-        value=_ONLY_BODY_PARTS,
+        reject=_ONLY_BODY_PARTS,
     ),
     Attribute(
         "origin",
@@ -591,6 +593,8 @@ def value_of(attribute: Attribute, answer: str, context: str) -> str:
         value = trimmed if COLOR_RE.search(trimmed) else whole
     if value and attribute.value is not None and not attribute.value.search(value):
         return ""
+    if value and attribute.reject is not None and attribute.reject.search(value):
+        return ""
     return value
 
 
@@ -798,7 +802,7 @@ def owner(
         if _BODY_PART.fullmatch(genitive.group(1)):
             # "오른손의 흉터": no possessor, so the sentence's own subject; but "그 손의
             # 흉터" is the hand of somebody already mentioned, not this sentence's.
-            if re.search(r"(?<![가-힣])[그이저]\s?(?:\S+\s)?$", before[: genitive.start(1)]):
+            if re.search(r"(?<![가-힣])[그이저]\s(?:\S+\s)?$", before[: genitive.start(1)]):
                 return None
             # The sentence's own subject, which is the topic: "노인은 레온에게 오른손의
             # 흉터를 보여주었다" is the old man's hand, shown to 레온.

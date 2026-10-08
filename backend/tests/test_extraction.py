@@ -322,8 +322,9 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
     assert _run("레온과 세린은 붉은 눈동자를 가졌다.", answers).claims == []
     assert _run("레온은 붉은 눈의 세린을 노려보았다.", answers).claims == []
     # "한 번", "순간" are adverbs, not an adnominal of the other.
-    assert _run("레온은 붉은 눈동자로 한 번 세린을 노려보았다.", answers).claims != []
-    assert _run("레온은 붉은 눈동자로 순간 세린을 노려보았다.", answers).claims != []
+    for text in ("레온은 붉은 눈동자로 한 번 세린을 노려보았다.", "레온은 붉은 눈동자로 순간 세린을 노려보았다."):
+        [claim] = _run(text, answers).claims
+        assert claim.subject == "레온"
     # The object particle of the cue itself is not one either.
     scar = {"레온의 흉터는?": "흉터", "세린의 흉터는?": "흉터"}
     [claim] = _run("세린은 오른손의 흉터를 레온에게 보여주었다.", scar).claims
@@ -345,6 +346,9 @@ def test_a_body_part_is_no_possessor():
     # A person who happens to end in a body part's syllable is still somebody else.
     assert _run("레온은 후손의 흉터를 보았다.", {"레온의 흉터는?": "흉터"}).claims == []
     assert _run("레온은 노인의 오른손의 흉터를 보았다.", {"레온의 흉터는?": "흉터"}).claims == []
+    # A pronoun subject is not a "그 + noun".
+    [claim] = _run("레온은 문을 열었다. 그는 오른손의 흉터를 문질렀다.", {"레온의 흉터는?": "흉터"}).claims
+    assert claim.subject == "레온"
     # The one named character is the one shown the hand, not its owner.
     assert _run("노인은 레온에게 오른손의 흉터를 보여주었다.", {"레온의 흉터는?": "흉터"}).claims == []
     # "그 손의", "그 오른쪽 어깨의": somebody else's, mentioned before.
