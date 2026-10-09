@@ -874,8 +874,9 @@ def _topic_of_two(narration: str, mentions: list[Mention], hit: CueHit) -> Subje
         return None
     # The cue's noun with a particle of the topic's: what it does something with ("붉은
     # 눈동자로"), or its subject ("눈이 붉은"). Not an object ("은빛 머리카락을 쓰다듬으며
-    # 세린에게", "흉터를 치료해 주며": it may be the other's), nor a bare noun or a compound
-    # that describes the next one ("은발 소녀 세린을", "흉터투성이 사내 세린을").
+    # 세린에게", "흉터를 치료해 주며": the rules can't tell whose without the verb's meaning),
+    # nor a bare noun or a compound that describes the next one ("은발 소녀 세린을",
+    # "흉터투성이 사내 세린을").
     noun = hit.attribute.noun.match(narration, hit.start)
     rest = re.split(r"\s", narration[noun.end() if noun else hit.start :], maxsplit=1)[0]
     if rest.rstrip(".,!?…") not in _OWN_CUE_PARTICLES:
