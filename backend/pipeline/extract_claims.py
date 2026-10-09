@@ -320,7 +320,7 @@ def _is_a_name(value: str, sentences: list[Sentence], mentions: list[list[rules.
     particle. A place's name is a value, of an origin ("부산 출신")."""
     narration = sentences[question.sentence].narration
     return any(
-        re.fullmatch(rf"{re.escape(narration[m.start : m.end])}(?:은|는|이|가|을|를|의|에게|한테)?", value)
+        rules.is_name_with_particle(value, narration[m.start : m.end])
         for m in mentions[question.sentence]
         if m.subject.kind == "character"
     )

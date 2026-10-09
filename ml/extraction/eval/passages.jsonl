@@ -102,3 +102,11 @@
 {"id": "p102", "cast": "main", "tags": ["describes-noun", "age"], "text": "레온은 스무 살의 청년을 만났다."}
 {"id": "p103", "cast": "main", "tags": ["describes-self", "topic-body"], "text": "세린은 은발 소녀였다.", "gold": [{"subject": "세린", "attribute": "hair_color", "values": ["은발"]}]}
 {"id": "p104", "cast": "main", "tags": ["describes-self", "topic-body"], "text": "레온은 은발 머리카락을 쓸어 넘겼다.", "gold": [{"subject": "레온", "attribute": "hair_color", "values": ["은발"]}]}
+{"id": "p105", "cast": "main", "tags": ["describes-noun", "clause"], "text": "세린은 은발, 레온은 흑발이었다.", "gold": [{"subject": "세린", "attribute": "hair_color", "values": ["은발"]}, {"subject": "레온", "attribute": "hair_color", "values": ["흑발"]}]}
+{"id": "p106", "cast": "main", "tags": ["describes-self", "topic-body"], "text": "세린은 눈이 붉은 탓에 놀림을 받았다.", "gold": [{"subject": "세린", "attribute": "eye_color", "values": ["붉은"]}]}
+{"id": "p107", "cast": "main", "tags": ["describes-self", "age"], "text": "레온은 스무 살의 나이에 기사가 되었다.", "gold": [{"subject": "레온", "attribute": "age", "values": ["스무 살"]}]}
+{"id": "p108", "cast": "main", "tags": ["describes-self", "topic-body"], "text": "레온은 흑발 장발을 휘날렸다.", "gold": [{"subject": "레온", "attribute": "hair_color", "values": ["흑발"]}]}
+{"id": "p109", "cast": "main", "tags": ["describes-self", "topic-body"], "text": "세린은 은발이 아름다운 여인이 되었다.", "gold": [{"subject": "세린", "attribute": "hair_color", "values": ["은발"]}]}
+{"id": "p110", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 눈이 유난히 붉은 소녀를 바라보았다."}
+{"id": "p111", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 붉은 눈을 한 노인을 노려보았다."}
+{"id": "p112", "cast": "main", "tags": ["describes-other", "topic-body"], "text": "레온은 붉은 눈을 한 세린을 바라보았다.", "gold": [{"subject": "세린", "attribute": "eye_color", "values": ["붉은"]}]}

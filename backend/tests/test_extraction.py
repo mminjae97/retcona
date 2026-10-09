@@ -370,7 +370,26 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
         [claim] = _run(text, hair).claims
         assert claim.subject == "세린"
     # The QA model's answer is no value where it is a name: "세린의 흉터는?" answered "레온".
-    assert _run("레온은 흉터투성이 사내 세린을 바라보았다.", {"세린의 흉터는?": "레온"}).claims == []
+    for value in ("레온", "레온과", "레온에게서"):
+        assert _run("레온은 흉터투성이 사내 세린을 바라보았다.", {"세린의 흉터는?": value}).claims == []
+    # Only in the cue's clause: "세린은 은발, 레온은 흑발이었다" is two.
+    two = {"세린의 머리색은?": "은발", "레온의 머리색은?": "흑발"}
+    claims = _run("세린은 은발, 레온은 흑발이었다.", two).claims
+    assert all((c.subject, c.attributes.get("hair_color")) != ("레온", "은발") for c in claims)
+    # A reason, a time, a hair word, or what the subject becomes is the topic's.
+    for text, asked in (
+        ("세린은 눈이 붉은 탓에 놀림을 받았다.", {"세린의 눈 색깔은?": "붉은"}),
+        ("레온은 흉터 때문에 고생했다.", {"레온의 흉터는?": "흉터"}),
+        ("레온은 스무 살의 나이에 기사가 되었다.", {"레온의 나이는?": "스무 살"}),
+        ("레온은 열여섯 살의 봄에 집을 떠났다.", {"레온의 나이는?": "열여섯 살"}),
+        ("레온은 흑발 장발을 휘날렸다.", {"레온의 머리색은?": "흑발"}),
+        ("세린은 은발이 아름다운 여인이 되었다.", {"세린의 머리색은?": "은발"}),
+    ):
+        [claim] = _run(text, asked).claims
+        assert claim.subject == text[:2]
+    # An adverb or a connective in the adnominal clause: still the other's.
+    for text in ("레온은 눈이 유난히 붉은 소녀를 바라보았다.", "레온은 눈이 크고 붉은 소녀를 바라보았다.", "레온은 붉은 눈을 한 노인을 노려보았다."):
+        assert _run(text, answers).claims == []
     assert _run("레온은 물러섰고 적은 붉은 눈동자로 세린을 노려보았다.", answers).claims == []
     # The cue as what the topic does something to: the rules can't tell whose it is.
     for text in (
@@ -410,8 +429,9 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
         both = {"레온의 눈 색깔은?": "푸른" if "푸른" in text else "붉은", "세린의 눈 색깔은?": "푸른" if "푸른" in text else "붉은"}
         [claim] = _run(text, both).claims
         assert claim.subject == "세린"
-    # The cue as a relative clause's object ("붉은 눈을 한 세린을"): the rules don't read it.
-    assert _run("레온은 붉은 눈을 한 세린을 바라보았다.", answers).claims == []
+    # "붉은 눈을 한 세린을": the one who has the eyes.
+    [claim] = _run("레온은 붉은 눈을 한 세린을 바라보았다.", answers).claims
+    assert claim.subject == "세린"
 
 
 def test_a_body_part_is_no_possessor():

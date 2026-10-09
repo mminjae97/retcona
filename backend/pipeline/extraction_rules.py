@@ -944,37 +944,61 @@ def _topic_of_two(narration: str, mentions: list[Mention], hit: CueHit) -> Subje
 # What a person described by a cue is marked with when it is the sentence's own subject
 # after all: a predicate ("세린은 은발 소녀였다"), or a role ("은발의 소녀로 자랐다").
 _DESCRIBED_AS_ROLE = ("로", "으로", "처럼", "같이", "답게")
+# Nouns a modifier makes a reason, a time or a look of, not a person: "눈이 붉은 탓에", "키가
+# 큰 덕분에", "스무 살의 나이에", "열여섯 살의 봄에". The topic's, by the rules before.
+_NOT_PERSON_HEADS = frozenset((
+    "탓", "덕분", "때문", "것", "나이", "때", "무렵", "시절", "봄", "여름", "가을", "겨울", "해", "날", "적",
+    "뒤", "후", "전", "채", "듯", "모습", "얼굴", "외모", "생김새",
+))
+# Hair words that are no cue noun: "흑발 장발을".
+_HAIR_HEAD = re.compile(r"(?:장발|단발|머리칼|머릿결|생머리|곱슬머리|갈기)")
+# How many adverbs or connectives an adnominal clause can have before its adnominal: "눈이
+# 유난히 붉은 소녀", "눈이 크고 붉은 소녀".
+_CLAUSE_WORDS = 2
+
+
+def is_name_with_particle(value: str, name: str) -> bool:
+    """Whether value is name, alone or with a particle ("레온", "레온과", "레온에게서")."""
+    return re.fullmatch(rf"{re.escape(name)}(?:{_AFTER_NAME_PARTICLES})?", value) is not None
 
 
 def _described_person(narration: str, mentions: list[Mention], hit: CueHit) -> tuple[bool, Subject | None]:
     """Whether the cue describes a person after it, and whom: "붉은 눈의 카엘을", "은발 소녀
     세린을", "눈이 푸른 소녀 세린을" are 카엘's and 세린's, and "붉은 눈의 노인을", "은발
     소녀를" somebody's not registered (None). (False, None) where the cue doesn't describe
-    a person after it ("붉은 눈동자로 세린을", "은발 머리카락을"), or the person is the
-    sentence's own subject ("세린은 은발 소녀였다").
+    a person after it ("붉은 눈동자로 세린을", "은발 머리카락을", "눈이 붉은 탓에"), or the
+    person is the sentence's own subject ("세린은 은발 소녀였다").
 
     The cue's word is the start of a noun phrase: a bare noun ("은발 소녀"), the noun with
-    의 ("붉은 눈의 노인"), or the subject of an adnominal clause ("눈이 푸른 소녀"). Bare
-    nouns and modifiers after it ("사과 장수", "푸른") are skipped up to the phrase's head,
-    the first word with a particle; a head joined by 와/과 ("소녀들과 세린을") is not the
-    name after it. A head that is no registered name is nobody's of the registered unless it
-    is a body part ("은발 머리카락을": the topic's)."""
-    words = _words(narration)
+    의 ("붉은 눈의 노인"), or the subject of an adnominal clause ("눈이 (유난히) 푸른 소녀",
+    "붉은 눈을 한 노인"). Bare nouns and modifiers after it ("사과 장수", "푸른") are skipped
+    up to the phrase's head, the first word with a particle, in the cue's clause ("세린은
+    은발, 레온은 흑발이었다" is two). A head joined by 와/과 ("소녀들과 세린을") is not the
+    name after it. A head that is no registered name is nobody's of the registered, unless it
+    is a body part, a reason or a time ("은발 머리카락을", "눈이 붉은 탓에": the topic's)."""
+    words = [word for word in _words(narration) if hit.clause[0] <= word.start < hit.clause[1]]
     # The cue's last word: "스무 살의" is a cue of two.
     noun = hit.attribute.noun.match(narration, hit.start)
     last_char = noun.end() - 1 if noun else hit.start
     i = next((k for k, word in enumerate(words) if word.start <= last_char < word.end), None)
     if i is None or not words[i].tags:
         return False, None
+    body = hit.attribute.key in _BODY_ATTRIBUTES
     last = words[i].tags[-1]
     # Not the body (an age): only with 의 ("열여섯 살의 공주는"); "스무 살 때 세린을" is a time.
-    if hit.attribute.key not in _BODY_ATTRIBUTES and last != "JKG":
+    if not body and last != "JKG":
         return False, None
     j = i + 1
-    if last == "JKS":
-        if j >= len(words) or words[j].tags[-1:] != ("ETM",):
+    if last in ("JKS", "JKO"):
+        # An adnominal clause: "눈이 푸른", "눈이 유난히 붉은", "붉은 눈을 한".
+        k = j
+        while k < len(words) and k - j < _CLAUSE_WORDS and words[k].tags[-1:] in (("MAG",), ("EC",)):
+            k += 1
+        if k >= len(words) or words[k].tags[-1:] != ("ETM",):
             return False, None
-        j += 1
+        if last == "JKO" and words[k].text != "한":
+            return False, None
+        j = k + 1
     elif last != "JKG" and last not in _NOUN_TAGS:
         return False, None
     while j < len(words) and words[j].tags and words[j].tags[-1] in (*_NOUN_TAGS, "ETM", "MM"):
@@ -985,22 +1009,38 @@ def _described_person(narration: str, mentions: list[Mention], hit: CueHit) -> t
         return False, None
     head = words[j]
     text = head.text.rstrip(".,!?…")
-    if "VCP" in head.tags or text.endswith(_DESCRIBED_AS_ROLE):
+    # "은발 소녀였다", "은발의 소녀로", "은발이 아름다운 여인이 되었다": the subject itself.
+    becomes = head.tags[-1:] == ("JKC",) or (
+        head.tags[-1:] == ("JKS",) and j + 1 < len(words) and words[j + 1].text.startswith("되")
+    )
+    if "VCP" in head.tags or text.endswith(_DESCRIBED_AS_ROLE) or becomes:
         return False, None
     named = [m for m in mentions if head.start <= m.start < head.end and m.subject.kind == "character"]
     if named:
         return True, named[0].subject
-    # A body part or a cue's own noun is what the cue is of ("은발 머리카락을", "붉은 눈의
-    # 눈동자가"); a verb is no head ("은발 휘날리며"). Any other noun is somebody or something
-    # else, a person the lists can't all name ("여관 주인에게"), so nobody's of the registered.
+    # A verb is no head ("은발 휘날리며").
     if not head.tags or head.tags[0] not in _NOUN_TAGS:
         return False, None
     # A pronoun or "그 사내" is somebody already mentioned, for the pronoun rules ("스물세
     # 살의 그녀는").
     if head.tags[0] == "NP" or any(word.text in ("그", "이", "저") for word in words[i + 1 : j]):
         return False, None
-    if _BODY_PART_WORD_RE.match(text) or any(attribute.noun.match(text) for attribute in ATTRIBUTES):
+    stem = re.sub(rf"(?:{_AFTER_NAME_PARTICLES})$", "", text)
+    # A body part, a cue's own noun, a reason or a time is what the cue is of.
+    if (
+        head.tags[0] == "NNB"
+        or stem in _NOT_PERSON_HEADS
+        or _HAIR_HEAD.match(text)
+        or _BODY_PART_WORD_RE.match(text)
+        or any(attribute.noun.match(text) for attribute in ATTRIBUTES)
+    ):
         return False, None
+    # An age only of a word for a person ("스무 살의 청년을"); "스무 살의 어린 나이에" may be
+    # any noun of a time, which no list holds.
+    if not body and not re.match(rf"(?:{_PERSON_NOUNS})", stem):
+        return False, None
+    # Any other noun is somebody or something else, a person the lists can't all name
+    # ("여관 주인에게"), so nobody's of the registered.
     return True, None
 
 
