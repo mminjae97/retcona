@@ -31,6 +31,7 @@ import uuid
 from ai.nli_rerank import load_models
 from infra.queue_client import get_queue_client
 from models.db import check_database
+from pipeline.extraction_rules import load_tagger
 from pipeline.judge_linked_claim import judge_linked_claim
 from pipeline.revalidate_flag import revalidate_flag
 from pipeline.validate_episode import validate_episode
@@ -57,7 +58,8 @@ def run() -> None:
     # The same startup check as the API server's, minus the nickname column
     # (see workers/purge.py). Logging needs no setup: workers/__init__.py did it.
     check_database(nickname_column=False)
-    # The models (NLI, NER, QA) now, not inside the first job: loading takes a
+    # The models (NLI, NER, QA, and the extraction rules' part-of-speech tagger) now, not
+    # inside the first job: loading takes a
     # while (a ~440 MB download, for a Hugging Face checkpoint not cached yet),
     # and runs queued behind it would wait on it (and could be given up on,
     # api/episodes.py). If it fails, the worker still starts; the first job
@@ -67,6 +69,10 @@ def run() -> None:
         logger.info("Loaded %s", load_models())
     except Exception:
         logger.exception("Could not load the models; runs will try again when they need them")
+    try:
+        load_tagger()
+    except Exception:
+        logger.exception("Could not load the part-of-speech tagger; runs will try again when they need it")
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())  # finish the current job, then exit

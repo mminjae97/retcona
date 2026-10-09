@@ -16,9 +16,13 @@ character the three sentences before it name, if there's exactly one — missing
 claim does less harm than holding it against the wrong card.
 """
 
+import bisect
+import functools
 import re
 import unicodedata
 from dataclasses import dataclass, field
+
+from kiwipiepy import Kiwi
 
 from pipeline.sentences import Sentence
 
@@ -548,16 +552,12 @@ def _color_near(clause: str, noun: re.Match) -> bool:
     if noun.group() in _WEAK_NOUNS and following and following in "을를에도":
         return False
     # The words after the noun's own (its particle, "눈이", is not one of them).
-    # The rest of the noun's token is dropped whole.
-    rest = re.sub(r"^\S+", "", clause[noun.end() :])
-    words = rest.split()[:_WORDS_AFTER]
+    words = [word for word in _words(clause) if word.start > noun.start()][:_WORDS_AFTER]
     # The last word of the window only as a predicate ("눈은 어둠 속에서도 붉게"), not as the
     # modifier of another noun ("눈이 마주친 순간 붉은 노을이").
-    # A color noun ending in ㄹ ("은발") is not one.
-    last = words[-1].rstrip(".,!?…") if words else ""
-    if len(words) == _WORDS_AFTER and _adnominal(last) and not re.search(r"(?:발|색|빛)$", last):
+    if len(words) == _WORDS_AFTER and _adnominal(words[-1]):
         words = words[:-1]
-    return COLOR_RE.search(" ".join(words)) is not None
+    return COLOR_RE.search(" ".join(word.text for word in words)) is not None
 
 
 def cue_hits(narration: str) -> list[CueHit]:
@@ -743,21 +743,58 @@ def _final_consonant(syllable: str) -> str | None:
     return _FINALS[(ord(syllable) - ord("가")) % 28]
 
 
-# Adverbs with a final ㄴ/ㄹ, which modify the verb, not the name after them ("온 힘을",
-# "얼른 세린을").
-_ADVERBS = frozenset(("온", "얼른", "순식간", "가만", "일순"))
+@functools.cache
+def _kiwi() -> Kiwi:
+    return Kiwi()  # ~2.5 s to load, once
 
 
-def _adnominal(word: str) -> bool:
-    """Whether a word modifies the word after it: an adnominal ending (-는, -던, -ㄴ/-ㄹ
-    as the final consonant of 푸른, 한, 갈). 의 is the caller's to look at."""
-    # Not the object particles, 만, or an adverb that ends in a final consonant.
-    if not word or word in _ADVERBS or word.endswith(("을", "를", "만", "번", "순간", "잠깐", "동안")):
-        return False
-    last = word[-1]
-    if last in "는던":
-        return True
-    return _final_consonant(last) in ("ㄴ", "ㄹ")
+def load_tagger() -> None:
+    """Loads the part-of-speech tagger now rather than on first use (worker startup)."""
+    _kiwi()
+
+
+# Punctuation and symbols, which say nothing of what a word is.
+_SYMBOL_TAGS = ("SF", "SP", "SS", "SE", "SO", "SW")
+
+
+@dataclass(frozen=True)
+class _Word:
+    start: int
+    end: int
+    text: str
+    # The part-of-speech tags of its morphemes (Sejong tags, kiwipiepy), without
+    # punctuation: "푸른" -> VA, ETM; "세린을" -> NNP, JKO.
+    tags: tuple[str, ...]
+
+
+@functools.lru_cache(maxsize=1024)
+def _words(text: str) -> tuple[_Word, ...]:
+    """The words of a text (split at spaces) with their tags, read in context: "온 힘을"
+    is a determiner, "온" by itself the verb 오다. A name the tagger doesn't know may come
+    apart as anything, a verb too ("보라는" -> VX, ETM; "누군가는" -> NP, VCP, EC, JX): the
+    rules find names by the cast and the NER model, and _subject_word allows for it."""
+    spans = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
+    tags: list[list[str]] = [[] for _ in spans]
+    starts = [start for start, _ in spans]
+    for token in _kiwi().tokenize(text):
+        tag = token.tag.split("-")[0]  # "VV-R" -> "VV"
+        if tag.startswith(_SYMBOL_TAGS) or not spans:
+            continue
+        i = max(bisect.bisect_right(starts, token.start) - 1, 0)
+        tags[i].append(tag)
+    return tuple(_Word(start, end, text[start:end], tuple(t)) for (start, end), t in zip(spans, tags))
+
+
+def _words_in(text: str, start: int, end: int) -> list[_Word]:
+    """The words of text that start in [start, end), read in the context of all of it."""
+    return [word for word in _words(text) if start <= word.start < end]
+
+
+def _adnominal(word: _Word) -> bool:
+    """Whether a word modifies the word after it: a verb or an adjective with an adnominal
+    ending (-는, -던, -ㄴ/-ㄹ: 푸른, 노려본, 갈). Not an adverb ("얼른"), a determiner ("온 힘을",
+    "한 번") or a noun ("문"). 의 is the caller's to look at."""
+    return bool(word.tags) and word.tags[-1] == "ETM"
 
 
 # The end of a phrase of its own, as the last word before a name: a particle that doesn't
@@ -769,32 +806,30 @@ _PHRASE_END = ("에서", "에", "으로", "로", "까지", "부터", "에게", "
 _BOUND_NOUNS = frozenset(("번", "뒤", "후", "때", "채", "듯", "사이", "직후", "적"))
 
 
-def _describes_next(span: str) -> bool:
-    """Whether the cue at the start of span (its noun and what follows, up to the next
-    name) is said of that name: a word that modifies what follows, "눈이 푸른 소녀 세린을",
-    "붉은 눈의 마녀 세린을". 의 counts only on the cue's own word ("눈의")."""
-    words = span.split()
+def _describes_next(narration: str, start: int, end: int) -> bool:
+    """Whether the cue at start (its noun and what follows, up to the next name at end) is
+    said of that name: a word that modifies what follows, "눈이 푸른 소녀 세린을", "붉은
+    눈의 마녀 세린을". 의 counts only on the cue's own word ("눈의")."""
+    words = [word for word in _words(narration) if word.end > start and word.start < end]
+    texts = [word.text for word in words]
     # A modifier stands in the same phrase as what it modifies: only the words after the last
     # one with a particle of its own are looked at ("눈이 푸른 소녀 세린을"; not the 문 of
     # "문 앞에서 세린을", which is its own phrase).
-    start = 1 + max((i for i, word in enumerate(words[1:]) if word.endswith(_PHRASE_END)), default=-1) + 1
-    first = words[0].endswith("의") if words else False
+    phrase = 1 + max((i for i, text in enumerate(texts[1:]) if text.endswith(_PHRASE_END)), default=-1) + 1
+    first = texts[0].endswith("의") if texts else False
     return first or any(
-        # "한 번" is a number of times, and "노려본 뒤" a time: not a "한", "본" of the name.
-        # A later "앞의", "안의" is a place, not the cue's.
-        _adnominal(word) and not word.endswith("의") and (words[i + 1] if i + 1 < len(words) else "") not in _BOUND_NOUNS
+        # "노려본 뒤" is a time: not a "본" of the name. A later "앞의", "안의" is a place,
+        # not the cue's.
+        _adnominal(word) and not word.text.endswith("의") and (texts[i + 1] if i + 1 < len(texts) else "") not in _BOUND_NOUNS
         for i, word in enumerate(words)
-        if i >= start
+        if i >= phrase
     )
 
 
-# Words that end like a subject's particle and are no subject: the connective of a verb
-# ("웃었지만", "웃어도"), a conjunction ("그래도", "다만"), a time ("이번에도", "그날도");
-# the adverbs in -이 are _ADVERB_I's ("말없이", "가까이").
-_NOT_SUBJECT_ENDINGS = (
-    "지만", "어도", "아도", "해도", "라도", "데도", "면서도", "고도", "그래도", "다만", "에도", "날도",
-)
-_NOT_SUBJECT_WORDS = frozenset(("오늘도", "지금도", "아직도", "이제도", "그만", "작은", "많은"))
+# A noun, a pronoun, a number, or a noun's suffix ("노인들"): what a subject's particle follows.
+_NOUN_TAGS = ("NNG", "NNP", "NNB", "NR", "NP", "XSN")
+# Nouns of a time, which are no subject with 도/은/는 ("오늘도", "그날은").
+_TIME_NOUNS = frozenset(("오늘", "지금", "이제", "아직", "그날", "어제", "내일", "그때", "이때", "요즘", "이번"))
 
 
 # The final consonants an adjective stem has in front of -은 ("깊은", "높은", "짧은",
@@ -802,36 +837,47 @@ _NOT_SUBJECT_WORDS = frozenset(("오늘도", "지금도", "아직도", "이제�
 _ADJECTIVE_FINALS = ("ㄲ", "ㄺ", "ㄻ", "ㄼ", "ㅂ", "ㅆ", "ㅈ", "ㅌ", "ㅍ", "ㅎ")
 
 
-def _modifier_of_noun(word: str) -> bool:
-    """Whether a word that ends -은/-는 is the adnominal of a verb or an adjective ("떨리는",
-    "하는", "깊은", "붉은", "짧은"), which is no person to be a subject. Names are the
-    risk ("마리는"), so only the stems that don't end one: 하/되/있/없, a stem with ㄹ in
-    front of 리, and the final consonants an adjective stem has in front of 은. A noun that
-    ends alike is no loss here; it only goes unseen as a subject. A color is never a
-    person ("검은", "붉은")."""
-    if COLOR_RE.match(word):
-        return True
-    if word.endswith("는"):
-        if re.search(r"(?:하|되|있|없)는$", word):
-            return True
-        return len(word) >= 3 and word.endswith("리는") and _final_consonant(word[-3]) == "ㄹ"
-    if word.endswith("은") and len(word) >= 2:
-        return _final_consonant(word[-2]) in _ADJECTIVE_FINALS
-    return False
-
-
-def _subject_word(word: str) -> bool:
-    """Whether a word looks like a subject with its particle: 은/는/이/가, 도 ("노인도"),
-    만 ("노인만"), 께서; a one-syllable word may be 이 "this". Not a verb's connective,
-    an adverb or a modifier ("웃었지만", "오늘도", "말없이", "깊은 숨을", "떨리는 손으로")."""
-    return (
-        len(word) >= 2
-        and (word[-1] in "은는이가" or word.endswith(("께서", "도", "만")))
-        and word not in _NOT_SUBJECT_WORDS
-        and not word.endswith(_NOT_SUBJECT_ENDINGS)
-        and not _ADVERB_I.search(word)
-        and not _modifier_of_noun(word)
+def _adjective_in_eun(text: str) -> bool:
+    """Whether a word in -은 is an adjective's adnominal by its stem: a color ("검은"), or a
+    final consonant a person's word seldom ends in ("깊은", "짧은"), or "작은", "많은"."""
+    return bool(COLOR_RE.match(text)) or text in ("작은", "많은") or (
+        len(text) >= 2 and _final_consonant(text[-2]) in _ADJECTIVE_FINALS
     )
+
+
+# A verb's or an adjective's stem, or the suffix that makes one of a noun (경멸하다, 의미있다).
+_VERB_TAGS = ("VV", "VA", "VX", "XSV", "XSA")
+# What a subject's particle can end a word in.
+_SUBJECT_PARTICLES = ("은", "는", "이", "가", "도", "만", "께서")
+
+
+def _subject_word(word: _Word) -> bool:
+    """Whether a word is a subject with its particle: a noun with 이/가, 께서 (JKS), or 은/는,
+    도, 만 (JX) right after it ("노인도", "노인만", "마리는"); a one-syllable word may be 이
+    "this". Not a verb's connective ("웃다가", "돌리고는", "웃었지만"), an adverb ("말없이"),
+    a modifier ("떨리는", "빛나는", "깊은") or a time ("오늘도", "이번에도").
+
+    A name the tagger doesn't know may be read as anything ("누군가는" -> 누구 + 이다,
+    "한결만" -> an adverb), and a subject missed here gives its body part to the topic: so
+    a word in a subject's particle that starts as a noun, or is one adverb with 은/는/도/만,
+    counts too, unless it has a verb's or an adjective's stem in it ("경멸하는", "미소짓다가")."""
+    tags = word.tags
+    text = word.text.rstrip(".,!?…")
+    if len(text) < 2 or not tags or not text.endswith(_SUBJECT_PARTICLES):
+        return False
+    if tags[-1] == "ETM" and text.endswith("은"):
+        # "적은 붉은 눈동자로": the tagger reads 적다 "few", where 적 "enemy" + 은 is as
+        # likely; only the stem says it's an adjective.
+        return not _adjective_in_eun(text)
+    if re.sub(r"(?:은|는|도|만|이|가|께서)$", "", text) in _TIME_NOUNS:
+        return False
+    if len(tags) >= 2 and tags[-2] in _NOUN_TAGS:
+        return tags[-1] == "JKS" or (tags[-1] == "JX" and text.endswith(("은", "는", "도", "만")))
+    # Not a noun with another case first ("이번에도", "앞에서는"), nor a verb or an adjective
+    # made of a noun ("경멸하는", "힘없는", "당황했지만"); 이다 is let through ("누군가는").
+    if any(tag.startswith("JK") or tag in _VERB_TAGS for tag in tags[:-1]):
+        return False
+    return tags[0] in _NOUN_TAGS or (tags == ("MAG", "JX") and text.endswith(("은", "는", "도", "만")))
 
 
 def _clear_topic(narration: str, mention: Mention, end: int) -> bool:
@@ -842,11 +888,11 @@ def _clear_topic(narration: str, mention: Mention, end: int) -> bool:
     if mention.subject.kind != "character" or not mention.topic or mention.end >= end:
         return False
     # After the rest of the topic's word (its particle, "은").
-    if any(_subject_word(word) for word in narration[mention.end : end].split()[1:]):
+    if any(_subject_word(word) for word in _words_in(narration, mention.end + 1, end)):
         return False
     if narration[mention.end : mention.end + 1] in "이가":
-        before = narration[: mention.start].split()
-        if any(_subject_word(word) and word[-1] in "은는" for word in before):
+        before = [word for word in _words(narration) if word.end <= mention.start]
+        if any(_subject_word(word) and word.text.rstrip(".,!?…")[-1] in "은는" for word in before):
             return False
     return True
 
@@ -890,7 +936,7 @@ def _topic_of_two(narration: str, mentions: list[Mention], hit: CueHit) -> Subje
         if other.start < hit.start or not _ACTED_ON.match(narration[other.end :]):
             return None
         # "붉은 눈의 세린을", "눈이 푸른 세린을": the cue describes the other.
-        if _describes_next(narration[hit.start : other.start]):
+        if _describes_next(narration, hit.start, other.start):
             return None
     return topics[0].subject
 

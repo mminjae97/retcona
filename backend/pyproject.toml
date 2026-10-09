@@ -21,6 +21,7 @@ dependencies = [
     "rank-bm25>=0.2",       # BM25 hybrid search (chapter 5)
     "sentence-transformers>=5.2",  # KURE-v1 embedding, bge-reranker (chapter 5); 5.2 is the first to allow transformers 5
     "transformers>=5.17,<6",  # NLI model (7.2); same major version as ml/nli, which saves it
+    "kiwipiepy>=0.24,<0.25",  # Korean part-of-speech tags for the extraction rules (Apache-2.0, model included)
     "tzdata>=2024.1",       # IANA time zones for the purge schedule on platforms without a system copy
 ]
 
