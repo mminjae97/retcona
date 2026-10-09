@@ -358,8 +358,10 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
     for text in ("레온은 붉은 눈동자로 한 번 세린을 노려보았다.", "레온은 붉은 눈동자로 순간 세린을 노려보았다."):
         [claim] = _run(text, answers).claims
         assert claim.subject == "레온"
-    # Shown or treated, the scar may be either one's: "세린은 오른손의 흉터를 레온에게
-    # 보여주었다" reads like "흉터를 치료해 주며 레온에게".
+    # Shown or treated, the rules can't tell whose scar it is: "세린은 오른손의 흉터를 레온에게
+    # 보여주었다" (the one showing it) reads like "흉터를 치료해 주며 세린에게" (the one treated)
+    # until the verb's meaning is known, so both are refused. The eval set's gold has a reader's
+    # answer for them (p96, p70) and counts them as misses.
     scar = {"레온의 흉터는?": "흉터", "세린의 흉터는?": "흉터"}
     assert _run("세린은 오른손의 흉터를 레온에게 보여주었다.", scar).claims == []
     assert _run("레온은 흉터를 조심스레 치료해 주며 세린에게 말했다.", scar).claims == []

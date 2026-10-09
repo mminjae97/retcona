@@ -75,10 +75,14 @@ class Counts:
         self.fp += other.fp
         self.fn += other.fn
 
-    def scores(self) -> tuple[float, float, float]:
-        precision = self.tp / (self.tp + self.fp) if self.tp + self.fp else 0.0
-        recall = self.tp / (self.tp + self.fn) if self.tp + self.fn else 0.0
-        f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    def scores(self) -> tuple[float | None, float | None, float | None]:
+        """None where there is nothing to divide by: no claim (precision), no gold (recall)."""
+        precision = self.tp / (self.tp + self.fp) if self.tp + self.fp else None
+        recall = self.tp / (self.tp + self.fn) if self.tp + self.fn else None
+        if precision is None or recall is None:
+            f1 = None
+        else:
+            f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
         return precision, recall, f1
 
 
@@ -200,8 +204,9 @@ def describe(item: Item) -> str:
 
 
 def row(name: str, counts: Counts) -> str:
-    precision, recall, f1 = counts.scores()
-    return f"| {name} | {counts.tp} | {counts.fp} | {counts.fn} | {precision:.3f} | {recall:.3f} | {f1:.3f} |"
+    # "-" for a tag of traps only (no right, no extra), which is not a precision of 0.
+    precision, recall, f1 = (f"{x:.3f}" if x is not None else "-" for x in counts.scores())
+    return f"| {name} | {counts.tp} | {counts.fp} | {counts.fn} | {precision} | {recall} | {f1} |"
 
 
 def main() -> None:
