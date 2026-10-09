@@ -154,7 +154,8 @@ The tags of the new passages:
 
 - `other-subject`: an unregistered subject between the registered topic and the cue, or over it ("레온은 웃었고 노인은 붉은 눈동자로", "노인은 레온이 오자 오른손의 흉터를"). No gold for the registered name.
 - `acted-on`: a person the topic acts on or does something for ("노인을 부축하며 어깨의 흉터를": the old man's; "은빛 머리카락을 쓰다듬으며 세린에게", "흉터를 치료해 주며 세린에게", "오른손의 흉터를 레온에게 보여주었다": a reader gives these to the one stroked or treated, and the shown scar to the one showing it).
-- `describes-other`: the cue describes the name after it ("붉은 눈의 카엘을", "은발 소녀 세린을", "눈이 푸른 소녀 세린을"): that name's. Not p75 ("눈이 붉은 소녀들과 세린을"): there the cue describes the girls, joined to the name by 와/과, so nobody registered gets it; p75 has no gold and only the `topic-body` tag, as a trap for a rule of this kind.
+- `describes-other`: the cue describes the name after it ("붉은 눈의 카엘을", "은발 소녀 세린을", "눈이 푸른 소녀 세린을"): that name's. Not p75 ("눈이 붉은 소녀들과 세린을"), which has its own tag:
+- `describes-noun`: the cue describes a noun joined to the name by 와/과 ("눈이 붉은 소녀들과 세린을": the girls'), so nobody registered gets it (p75). No gold; it is the trap for a "describes the next name" rule, so run `--tag describes-noun` beside `--tag describes-other`.
 - `adverb`: an adverb, a modifier or a connective between the topic and the cue, which should not stop it ("웃다가", "떨리는 손으로", "오늘도"): the topic's.
 - `after-cue`: words after the cue and before the other name that look like a modifier of it and aren't ("얼른", "온 힘을 다해", "노려본 뒤"): the topic's.
 - `body-part`: the cue has a body part's "X의" in front of it ("오른손의 흉터"), which is no possessor.

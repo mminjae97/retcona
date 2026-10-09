@@ -72,7 +72,7 @@
 {"id": "p72", "cast": "main", "tags": ["review", "describes-other", "topic-body"], "text": "레온은 흉터투성이 사내 카엘을 바라보았다.", "gold": [{"subject": "카엘", "attribute": "scars", "values": ["흉터투성이", "흉터"]}]}
 {"id": "p73", "cast": "main", "tags": ["review", "describes-other", "topic-body"], "text": "레온은 눈이 붉은 사과 장수 세린을 바라보았다.", "gold": [{"subject": "세린", "attribute": "eye_color", "values": ["붉은", "붉게"]}]}
 {"id": "p74", "cast": "main", "tags": ["review", "describes-other", "topic-body"], "text": "레온은 눈이 푸른 소녀 세린을 바라보았다.", "gold": [{"subject": "세린", "attribute": "eye_color", "values": ["푸른", "푸르"]}]}
-{"id": "p75", "cast": "main", "tags": ["review", "topic-body"], "text": "레온은 눈이 붉은 소녀들과 세린을 바라보았다."}
+{"id": "p75", "cast": "main", "tags": ["review", "describes-noun", "topic-body"], "text": "레온은 눈이 붉은 소녀들과 세린을 바라보았다."}
 {"id": "p76", "cast": "main", "tags": ["review", "other-possessor"], "text": "레온은 배의 선체에 난 상흔을 만졌다."}
 {"id": "p77", "cast": "main", "tags": ["review", "color-window"], "text": "레온은 고개를 들었다. 그의 눈이 마주친 순간 붉은 노을이 졌다."}
 {"id": "p78", "cast": "main", "tags": ["review", "context-far", "dropped-subject"], "text": "레온은 문을 열었다. 바람이 불었다. 세린은 웃었다. 붉은 눈동자가 번뜩였다.", "gold": [{"subject": "세린", "attribute": "eye_color", "values": ["붉은", "붉게"]}]}
