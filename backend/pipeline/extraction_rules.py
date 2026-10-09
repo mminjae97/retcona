@@ -748,6 +748,11 @@ def _kiwi() -> Kiwi:
     return Kiwi()  # ~2.5 s to load, once
 
 
+def load_tagger() -> None:
+    """Loads the part-of-speech tagger now rather than on first use (worker startup)."""
+    _kiwi()
+
+
 # Punctuation and symbols, which say nothing of what a word is.
 _SYMBOL_TAGS = ("SF", "SP", "SS", "SE", "SO", "SW")
 
@@ -765,8 +770,9 @@ class _Word:
 @functools.lru_cache(maxsize=1024)
 def _words(text: str) -> tuple[_Word, ...]:
     """The words of a text (split at spaces) with their tags, read in context: "온 힘을"
-    is a determiner, "온" by itself the verb 오다. An unknown name may come apart ("카엘" ->
-    MAG, NNG), still as nothing that is a verb."""
+    is a determiner, "온" by itself the verb 오다. A name the tagger doesn't know may come
+    apart as anything, a verb too ("보라는" -> VX, ETM; "누군가는" -> NP, VCP, EC, JX): the
+    rules find names by the cast and the NER model, and _subject_word allows for it."""
     spans = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
     tags: list[list[str]] = [[] for _ in spans]
     starts = [start for start, _ in spans]
@@ -839,23 +845,37 @@ def _adjective_in_eun(text: str) -> bool:
     )
 
 
+# What a subject's particle can end a word in.
+_SUBJECT_PARTICLES = ("은", "는", "이", "가", "도", "만", "께서")
+
+
 def _subject_word(word: _Word) -> bool:
     """Whether a word is a subject with its particle: a noun with 이/가, 께서 (JKS), or 은/는,
     도, 만 (JX) right after it ("노인도", "노인만", "마리는"); a one-syllable word may be 이
     "this". Not a verb's connective ("웃다가", "돌리고는", "웃었지만"), an adverb ("말없이"),
-    a modifier ("떨리는", "빛나는", "깊은") or a time ("오늘도", "이번에도")."""
+    a modifier ("떨리는", "빛나는", "깊은") or a time ("오늘도", "이번에도").
+
+    A name the tagger doesn't know may be read as anything ("누군가는" -> 누구 + 이다,
+    "한결만" -> an adverb), and a subject missed here gives its body part to the topic: so
+    a word in a subject's particle that starts as a noun, or is one adverb with 은/는/도/만,
+    counts too. A verb that starts with a noun ("미소짓다가") is then a subject: a miss, not a
+    wrong claim."""
     tags = word.tags
     text = word.text.rstrip(".,!?…")
-    if len(text) < 2 or not tags:
+    if len(text) < 2 or not tags or not text.endswith(_SUBJECT_PARTICLES):
         return False
     if tags[-1] == "ETM" and text.endswith("은"):
         # "적은 붉은 눈동자로": the tagger reads 적다 "few", where 적 "enemy" + 은 is as
         # likely; only the stem says it's an adjective.
         return not _adjective_in_eun(text)
-    if len(tags) < 2 or tags[-2] not in _NOUN_TAGS:
+    if re.sub(r"(?:은|는|도|만|이|가|께서)$", "", text) in _TIME_NOUNS:
         return False
-    particle = tags[-1] == "JKS" or (tags[-1] == "JX" and text.endswith(("은", "는", "도", "만")))
-    return particle and re.sub(r"(?:은|는|도|만|이|가|께서)$", "", text) not in _TIME_NOUNS
+    if len(tags) >= 2 and tags[-2] in _NOUN_TAGS:
+        return tags[-1] == "JKS" or (tags[-1] == "JX" and text.endswith(("은", "는", "도", "만")))
+    # Not a noun with another case first ("이번에도", "앞에서는").
+    if any(tag.startswith("JK") for tag in tags[:-1]):
+        return False
+    return tags[0] in _NOUN_TAGS or (tags == ("MAG", "JX") and text.endswith(("은", "는", "도", "만")))
 
 
 def _clear_topic(narration: str, mention: Mention, end: int) -> bool:
