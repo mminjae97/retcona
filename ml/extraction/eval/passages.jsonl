@@ -95,3 +95,10 @@
 {"id": "p95", "cast": "main", "tags": ["review", "after-cue", "topic-body"], "text": "레온은 붉은 눈동자로 노려본 뒤 세린을 보았다.", "gold": [{"subject": "레온", "attribute": "eye_color", "values": ["붉은", "붉게"]}]}
 {"id": "p96", "cast": "main", "tags": ["review", "acted-on", "body-part"], "text": "세린은 오른손의 흉터를 레온에게 보여주었다.", "gold": [{"subject": "세린", "attribute": "scars", "values": ["흉터"]}]}
 {"id": "p97", "cast": "main", "tags": ["review", "color-window"], "text": "세린의 머리카락은 길고 탐스러운 은발, 눈은 푸르렀다.", "gold": [{"subject": "세린", "attribute": "hair_color", "values": ["은발"]}, {"subject": "세린", "attribute": "eye_color", "values": ["푸르렀", "푸른", "푸르"]}, {"subject": "세린", "attribute": "hairstyle", "values": ["길고", "긴"], "mutable": true}]}
+{"id": "p98", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 붉은 눈의 노인을 노려보았다."}
+{"id": "p99", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 은발 소녀를 바라보았다."}
+{"id": "p100", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 흉터투성이 사내를 바라보았다."}
+{"id": "p101", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 검은 눈의 여관 주인에게 말을 걸었다."}
+{"id": "p102", "cast": "main", "tags": ["describes-noun", "age"], "text": "레온은 스무 살의 청년을 만났다."}
+{"id": "p103", "cast": "main", "tags": ["describes-self", "topic-body"], "text": "세린은 은발 소녀였다.", "gold": [{"subject": "세린", "attribute": "hair_color", "values": ["은발"]}]}
+{"id": "p104", "cast": "main", "tags": ["describes-self", "topic-body"], "text": "레온은 은발 머리카락을 쓸어 넘겼다.", "gold": [{"subject": "레온", "attribute": "hair_color", "values": ["은발"]}]}

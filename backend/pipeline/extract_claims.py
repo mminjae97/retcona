@@ -315,6 +315,17 @@ def _spacetime_claims(
     return found
 
 
+def _is_a_name(value: str, sentences: list[Sentence], mentions: list[list[rules.Mention]], question: _Question) -> bool:
+    """Whether an answer is only the name of a character the sentence mentions, with a
+    particle. A place's name is a value, of an origin ("부산 출신")."""
+    narration = sentences[question.sentence].narration
+    return any(
+        re.fullmatch(rf"{re.escape(narration[m.start : m.end])}(?:은|는|이|가|을|를|의|에게|한테)?", value)
+        for m in mentions[question.sentence]
+        if m.subject.kind == "character"
+    )
+
+
 def extract_claims(
     novel_id: uuid.UUID,
     manuscript: str,
@@ -350,8 +361,10 @@ def extract_claims(
         else:
             value = rules.value_of(question.attribute, value, question.clause)
             # The context can hold the sentences before the clause: an answer from
-            # them (a cloak's color, an earlier age) isn't the clause's.
-            key, valid = question.attribute.key, bool(value) and value in question.clause
+            # them (a cloak's color, an earlier age) isn't the clause's. Nor is a name
+            # a value: "카엘의 흉터는?" of "레온은 흉터투성이 사내 카엘을" answered "레온".
+            key = question.attribute.key
+            valid = bool(value) and value in question.clause and not _is_a_name(value, sentences, mentions, question)
             statement = character_statement(question.who, key, value)
         if not valid:
             continue
