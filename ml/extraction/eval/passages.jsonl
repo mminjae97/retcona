@@ -62,7 +62,7 @@
 {"id": "p62", "cast": "main", "tags": ["review", "other-subject", "body-part"], "text": "노인은 레온이 오자 오른손의 흉터를 보였다."}
 {"id": "p63", "cast": "main", "tags": ["review", "other-subject", "body-part"], "text": "노인은 레온에게 오른손의 흉터를 보여주었다."}
 {"id": "p64", "cast": "main", "tags": ["review", "other-subject", "body-part"], "text": "레온은 노인에게 다가갔다. 노인은 오른손의 흉터를 보였다."}
-{"id": "p65", "cast": "main", "tags": ["review", "other-subject", "body-part"], "text": "레온은 노인을 보았다. 그 오른쪽 어깨의 흉터가 선명했다."}
+{"id": "p65", "cast": "main", "tags": ["review", "demonstrative", "body-part"], "text": "레온은 노인을 보았다. 그 오른쪽 어깨의 흉터가 선명했다."}
 {"id": "p66", "cast": "main", "tags": ["review", "acted-on", "body-part"], "text": "레온은 노인을 부축하며 어깨의 흉터를 살폈다."}
 {"id": "p67", "cast": "main", "tags": ["review", "acted-on", "body-part"], "text": "레온은 노인의 손을 잡고 오른손의 흉터를 살폈다."}
 {"id": "p68", "cast": "main", "tags": ["review", "acted-on", "body-part"], "text": "레온은 노인의 손을 잡고 그 손의 흉터를 보았다."}
@@ -73,7 +73,7 @@
 {"id": "p73", "cast": "main", "tags": ["review", "describes-other", "topic-body"], "text": "레온은 눈이 붉은 사과 장수 세린을 바라보았다.", "gold": [{"subject": "세린", "attribute": "eye_color", "values": ["붉은", "붉게"]}]}
 {"id": "p74", "cast": "main", "tags": ["review", "describes-other", "topic-body"], "text": "레온은 눈이 푸른 소녀 세린을 바라보았다.", "gold": [{"subject": "세린", "attribute": "eye_color", "values": ["푸른", "푸르"]}]}
 {"id": "p75", "cast": "main", "tags": ["review", "topic-body"], "text": "레온은 눈이 붉은 소녀들과 세린을 바라보았다."}
-{"id": "p76", "cast": "main", "tags": ["review", "idiom"], "text": "레온은 배의 선체에 난 상흔을 만졌다."}
+{"id": "p76", "cast": "main", "tags": ["review", "other-possessor"], "text": "레온은 배의 선체에 난 상흔을 만졌다."}
 {"id": "p77", "cast": "main", "tags": ["review", "color-window"], "text": "레온은 고개를 들었다. 그의 눈이 마주친 순간 붉은 노을이 졌다."}
 {"id": "p78", "cast": "main", "tags": ["review", "context-far", "dropped-subject"], "text": "레온은 문을 열었다. 바람이 불었다. 세린은 웃었다. 붉은 눈동자가 번뜩였다.", "gold": [{"subject": "세린", "attribute": "eye_color", "values": ["붉은", "붉게"]}]}
 {"id": "p79", "cast": "main", "tags": ["review", "scar-value"], "text": "레온의 목 뒤에는 흉터가 있었다.", "gold": [{"subject": "레온", "attribute": "scars", "values": ["흉터"]}]}

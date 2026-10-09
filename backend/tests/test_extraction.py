@@ -347,7 +347,7 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
         assert _run(text, hair).claims == []
     assert _run("레온은 흉터투성이 사내 세린을 바라보았다.", {"레온의 흉터는?": "흉터투성이"}).claims == []
     assert _run("레온은 물러섰고 적은 붉은 눈동자로 세린을 노려보았다.", answers).claims == []
-    # The cue as what the topic does something to may be the other's.
+    # The cue as what the topic does something to: the rules can't tell whose it is.
     for text in (
         "레온은 붉은 머리카락을 쓰다듬으며 세린에게 속삭였다.",
         "레온은 붉은 눈동자를 가만히 들여다보다 세린을 끌어안았다.",

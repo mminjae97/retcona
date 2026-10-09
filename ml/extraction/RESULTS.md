@@ -158,12 +158,13 @@ The tags of the new passages:
 - `adverb`: an adverb, a modifier or a connective between the topic and the cue, which should not stop it ("웃다가", "떨리는 손으로", "오늘도"): the topic's.
 - `after-cue`: words after the cue and before the other name that look like a modifier of it and aren't ("얼른", "온 힘을 다해", "노려본 뒤"): the topic's.
 - `body-part`: the cue has a body part's "X의" in front of it ("오른손의 흉터"), which is no possessor.
+- `demonstrative`: a "그/이/저" before the body part ("그 오른쪽 어깨의 흉터"): somebody already mentioned, maybe not registered (p65). No gold for the registered name.
 - `dropped-subject`: the sentence names nobody and has no pronoun; the owner is a character of the sentences before.
 - `color-window`, `context-far` (the nearest sentence's character, not one three back), `scar-value` (a scar's place is not its value).
 
 What it shows:
 
-- **Precision holds** on every trap: no `other-subject` or `acted-on` passage gives a claim to the wrong name. A tag with no right and no extra (`other-subject` has no gold at all) shows "-" for what it can't divide, not 0.000. These are the sentences the rules were fixed for, so it says the fixes hold, not that there are no other traps.
+- **Precision holds** on every trap: no `other-subject` or `acted-on` passage gives a claim to the wrong name. The table shows "-" where there is nothing to divide by: precision for a tag with no claim (`describes-other`, `acted-on`: all missed), recall for one with no gold, and both, with F1, for a tag of traps only (`other-subject`); F1 is 0.000 for a tag with gold and no right. These are the sentences the rules were fixed for, so it says the fixes hold, not that there are no other traps.
 - **The 11 new misses** are recall, in three groups:
   - **The described name gets nothing (5):** p55, p71–p74. The rules only refuse the topic there; they don't give the cue to the name it describes. A rule for that ("X의 / X인 / bare X + name" → that name's) is the cheapest gain left.
   - **Refused in `acted-on` sentences, needs the verb's meaning (3):** p69, p70 (stroked, treated: the other's) and p96 (shown: the topic's own), all refused on purpose in #58. Telling them apart takes knowing what the verb does, which the ownership experiment is for. The two say different things on purpose: the unit tests (`test_extraction.py`) pin what the extractor does now, refuse; the eval gold records a reader's answer, so these count as misses until a rule can give it.

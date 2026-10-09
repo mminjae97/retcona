@@ -76,13 +76,12 @@ class Counts:
         self.fn += other.fn
 
     def scores(self) -> tuple[float | None, float | None, float | None]:
-        """None where there is nothing to divide by: no claim (precision), no gold (recall)."""
+        """None where there is nothing to divide by: no claim (precision), no gold (recall),
+        neither (F1). A tag that misses all its gold has an F1 of 0, not None."""
         precision = self.tp / (self.tp + self.fp) if self.tp + self.fp else None
         recall = self.tp / (self.tp + self.fn) if self.tp + self.fn else None
-        if precision is None or recall is None:
-            f1 = None
-        else:
-            f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+        total = 2 * self.tp + self.fp + self.fn
+        f1 = 2 * self.tp / total if total else None
         return precision, recall, f1
 
 
@@ -204,7 +203,7 @@ def describe(item: Item) -> str:
 
 
 def row(name: str, counts: Counts) -> str:
-    # "-" for a tag of traps only (no right, no extra), which is not a precision of 0.
+    # "-" where there is nothing to divide by: precision with no claim, recall with no gold.
     precision, recall, f1 = (f"{x:.3f}" if x is not None else "-" for x in counts.scores())
     return f"| {name} | {counts.tp} | {counts.fp} | {counts.fn} | {precision} | {recall} | {f1} |"
 
