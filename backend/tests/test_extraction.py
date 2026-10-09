@@ -445,6 +445,18 @@ def test_a_body_part_is_no_possessor():
     ):
         [claim] = _run(text, shown).claims
         assert claim.subject == "레온"
+    # A verb's connective or adnominal that ends like a subject's particle, told by its
+    # part-of-speech tags: the topic's eyes.
+    answers = {"레온의 눈 색깔은?": "붉은", "세린의 눈 색깔은?": "붉은", "카엘의 눈 색깔은?": "붉은"}
+    for text in (
+        "레온은 웃다가 붉은 눈동자로 세린을 노려보았다.",
+        "레온은 고개를 돌리고는 붉은 눈동자로 세린을 노려보았다.",
+        "레온은 빛나는 붉은 눈동자로 카엘을 노려보았다.",
+    ):
+        [claim] = _run(text, answers).claims
+        assert claim.subject == "레온"
+    # ... but a name with 는 is a subject: "마리는 붉은 눈동자로" is not 레온's.
+    assert _run("레온은 웃었고 마리는 붉은 눈동자로 세린을 노려보았다.", answers).claims == []
 
 
 def test_a_scar_s_value_names_the_mark_not_the_body_part():
