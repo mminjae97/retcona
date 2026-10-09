@@ -845,6 +845,8 @@ def _adjective_in_eun(text: str) -> bool:
     )
 
 
+# A verb's or an adjective's stem, or the suffix that makes one of a noun (경멸하다, 의미있다).
+_VERB_TAGS = ("VV", "VA", "VX", "XSV", "XSA")
 # What a subject's particle can end a word in.
 _SUBJECT_PARTICLES = ("은", "는", "이", "가", "도", "만", "께서")
 
@@ -858,8 +860,7 @@ def _subject_word(word: _Word) -> bool:
     A name the tagger doesn't know may be read as anything ("누군가는" -> 누구 + 이다,
     "한결만" -> an adverb), and a subject missed here gives its body part to the topic: so
     a word in a subject's particle that starts as a noun, or is one adverb with 은/는/도/만,
-    counts too. A verb that starts with a noun ("미소짓다가") is then a subject: a miss, not a
-    wrong claim."""
+    counts too, unless it has a verb's or an adjective's stem in it ("경멸하는", "미소짓다가")."""
     tags = word.tags
     text = word.text.rstrip(".,!?…")
     if len(text) < 2 or not tags or not text.endswith(_SUBJECT_PARTICLES):
@@ -872,8 +873,9 @@ def _subject_word(word: _Word) -> bool:
         return False
     if len(tags) >= 2 and tags[-2] in _NOUN_TAGS:
         return tags[-1] == "JKS" or (tags[-1] == "JX" and text.endswith(("은", "는", "도", "만")))
-    # Not a noun with another case first ("이번에도", "앞에서는").
-    if any(tag.startswith("JK") for tag in tags[:-1]):
+    # Not a noun with another case first ("이번에도", "앞에서는"), nor a verb or an adjective
+    # made of a noun ("경멸하는", "힘없는", "당황했지만"); 이다 is let through ("누군가는").
+    if any(tag.startswith("JK") or tag in _VERB_TAGS for tag in tags[:-1]):
         return False
     return tags[0] in _NOUN_TAGS or (tags == ("MAG", "JX") and text.endswith(("은", "는", "도", "만")))
 
@@ -890,7 +892,7 @@ def _clear_topic(narration: str, mention: Mention, end: int) -> bool:
         return False
     if narration[mention.end : mention.end + 1] in "이가":
         before = [word for word in _words(narration) if word.end <= mention.start]
-        if any(_subject_word(word) and word.text[-1] in "은는" for word in before):
+        if any(_subject_word(word) and word.text.rstrip(".,!?…")[-1] in "은는" for word in before):
             return False
     return True
 

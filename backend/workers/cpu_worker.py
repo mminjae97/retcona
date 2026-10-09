@@ -67,9 +67,12 @@ def run() -> None:
     logger.info("Loading the models")
     try:
         logger.info("Loaded %s", load_models())
-        load_tagger()
     except Exception:
         logger.exception("Could not load the models; runs will try again when they need them")
+    try:
+        load_tagger()
+    except Exception:
+        logger.exception("Could not load the part-of-speech tagger; runs will try again when they need it")
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())  # finish the current job, then exit

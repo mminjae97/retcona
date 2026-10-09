@@ -415,7 +415,11 @@ def test_a_body_part_is_no_possessor():
     # 적은 is often 적 "the enemy" with 은, another subject.
     assert _run("레온은 물러섰고 적은 오른손의 흉터를 드러냈다.", shown).claims == []
     # The registered name is the subject of a clause under an unregistered topic.
-    for text in ("노인은 레온이 오자 오른손의 흉터를 보였다.", "노인은 레온이 묻자 오른손의 흉터를 보였다."):
+    for text in (
+        "노인은 레온이 오자 오른손의 흉터를 보였다.",
+        "노인은 레온이 묻자 오른손의 흉터를 보였다.",
+        "노인은, 레온이 다가오자 오른손의 흉터를 보였다.",
+    ):
         assert _run(text, shown).claims == []
     # The one named character is the one shown the hand, not its owner.
     assert _run("노인은 레온에게 오른손의 흉터를 보여주었다.", {"레온의 흉터는?": "흉터"}).claims == []
@@ -459,6 +463,10 @@ def test_a_body_part_is_no_possessor():
     # the tagger reads as a verb or an adverb ("누군가는" -> 누구 + 이다, "한결만").
     for subject in ("마리는", "누군가는", "누군가가", "누군가도", "누군가만", "한결만"):
         assert _run(f"레온은 웃었고 {subject} 붉은 눈동자로 세린을 노려보았다.", answers).claims == []
+    # ... but not a verb or an adjective made of a noun.
+    for word in ("경멸하는", "힘없는", "당황했지만", "긴장해도", "의미있는", "침묵하면서도"):
+        [claim] = _run(f"레온은 {word} 붉은 눈동자로 세린을 노려보았다.", answers).claims
+        assert claim.subject == "레온"
 
 
 def test_a_scar_s_value_names_the_mark_not_the_body_part():
