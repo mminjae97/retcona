@@ -941,6 +941,105 @@ def _topic_of_two(narration: str, mentions: list[Mention], hit: CueHit) -> Subje
     return topics[0].subject
 
 
+# What a person described by a cue is marked with when it is the sentence's own subject
+# after all: a predicate ("세린은 은발 소녀였다"), or a role ("은발의 소녀로 자랐다", "은발의
+# 기사로서 맹세했다").
+_DESCRIBED_AS_ROLE = ("로", "으로", "로서", "로써", "처럼", "같이", "답게")
+# Words for a person a cue can describe besides a name: "붉은 눈의 노인을", "검은 눈의 여관
+# 주인에게". Any other noun ("탓", "위", "속", "광채", "순간") is what the cue is of, so the
+# topic's by the rules after.
+_PERSON_HEAD_RE = re.compile(
+    rf"(?:{_PERSON_NOUNS}|주인|기사|병사|마녀|마법사|용병|전사|상인|장수|하녀|시녀|노파|할머니|할아버지"
+    r"|아저씨|아주머니|부인|귀족|영주|왕자|공주|왕|여왕|소년병|[가-힣]+(?:꾼|쟁이|잡이))"
+)
+# An adnominal clause's connectives before its adnominal: "눈이 크고 붉은 소녀", "눈이 붉게
+# 빛나는 소녀". Not "빛나며", "빛나서": the clause ends there ("눈이 붉게 빛나며 다가오는
+# 병사를" is the topic's eyes).
+_CLAUSE_CONNECTIVES = ("고", "게")
+# How many adverbs or connectives an adnominal clause can have before its adnominal: "눈이
+# 유난히 붉은 소녀", "눈이 크고 붉은 소녀".
+_CLAUSE_WORDS = 2
+
+
+def is_name_with_particle(value: str, name: str) -> bool:
+    """Whether value is name, alone or with a particle ("레온", "레온과", "레온에게서")."""
+    return re.fullmatch(rf"{re.escape(name)}(?:{_AFTER_NAME_PARTICLES})?", value) is not None
+
+
+def _described_person(narration: str, mentions: list[Mention], hit: CueHit) -> tuple[bool, Subject | None]:
+    """Whether the cue describes a person after it, and whom: "붉은 눈의 카엘을", "은발 소녀
+    세린을", "눈이 푸른 소녀 세린을" are 카엘's and 세린's, and "붉은 눈의 노인을", "은발
+    소녀를" somebody's not registered (None). (False, None) where the cue doesn't describe
+    a person after it ("붉은 눈동자로 세린을", "은발 머리카락을", "눈이 붉은 탓에"), or the
+    person is the sentence's own subject ("세린은 은발 소녀였다").
+
+    The cue's word is the start of a noun phrase: a bare noun ("은발 소녀"), the noun with
+    의 ("붉은 눈의 노인"), or the subject of an adnominal clause ("눈이 (유난히) 푸른 소녀",
+    "붉은 눈을 한 노인"). Bare nouns and modifiers after it ("사과 장수", "푸른") are skipped
+    up to the phrase's head, the first word with a particle, in the cue's clause ("세린은
+    은발, 레온은 흑발이었다" is two). A head joined by 와/과 ("소녀들과 세린을") is not the
+    name after it. A head that is a word for a person and no registered name ("노인을") is
+    nobody's of the registered; any other noun ("은발 머리카락을", "눈이 붉은 탓에", "흉터
+    위를", "스무 살 때") is what the cue is of, so the topic's."""
+    words = [word for word in _words(narration) if hit.clause[0] <= word.start < hit.clause[1]]
+    # The cue's last word: "스무 살의" is a cue of two.
+    noun = hit.attribute.noun.match(narration, hit.start)
+    last_char = noun.end() - 1 if noun else hit.start
+    i = next((k for k, word in enumerate(words) if word.start <= last_char < word.end), None)
+    if i is None or not words[i].tags:
+        return False, None
+    last = words[i].tags[-1]
+    j = i + 1
+    if last in ("JKS", "JKO"):
+        # An adnominal clause: "눈이 푸른", "눈이 유난히 붉은", "붉은 눈을 한".
+        k = j
+        while (
+            k < len(words)
+            and k - j < _CLAUSE_WORDS
+            and (words[k].tags[-1:] == ("MAG",) or (words[k].tags[-1:] == ("EC",) and words[k].text.endswith(_CLAUSE_CONNECTIVES)))
+        ):
+            k += 1
+        if k >= len(words) or words[k].tags[-1:] != ("ETM",):
+            return False, None
+        if last == "JKO" and words[k].text != "한":
+            return False, None
+        j = k + 1
+    elif last != "JKG" and last not in _NOUN_TAGS:
+        return False, None
+    while j < len(words) and words[j].tags and words[j].tags[-1] in (*_NOUN_TAGS, "ETM", "MM"):
+        if any(m.start >= words[j].start and m.start < words[j].end for m in mentions):
+            break  # a name with no particle: the head
+        if words[j].text in _BOUND_NOUNS or words[j].text in _TIME_NOUNS:
+            break  # a time: "스무 살 때 세린을" is no 세린's age
+        j += 1
+    if j >= len(words):
+        return False, None
+    head = words[j]
+    text = head.text.rstrip(".,!?…")
+    # "은발 소녀였다", "은발의 소녀로", "은발이 아름다운 여인이 되었다": the subject itself.
+    becomes = head.tags[-1:] == ("JKC",) or (
+        head.tags[-1:] == ("JKS",) and j + 1 < len(words) and words[j + 1].text.startswith("되")
+    )
+    if "VCP" in head.tags or text.endswith(_DESCRIBED_AS_ROLE) or becomes:
+        return False, None
+    named = [m for m in mentions if head.start <= m.start < head.end and m.subject.kind == "character"]
+    if named:
+        return True, named[0].subject
+    # A verb is no head ("은발 휘날리며").
+    if not head.tags or head.tags[0] not in _NOUN_TAGS:
+        return False, None
+    # A pronoun or "그 사내" is somebody already mentioned, for the pronoun rules ("스물세
+    # 살의 그녀는").
+    if head.tags[0] == "NP" or any(word.text in ("그", "이", "저") for word in words[i + 1 : j]):
+        return False, None
+    stem = re.sub(rf"(?:{_AFTER_NAME_PARTICLES})$", "", text)
+    # A word for a person, or a name nobody registered or recognized ("붉은 눈의 노인을",
+    # "스무 살의 청년을"), is somebody the lists can't all name, so nobody's of the registered.
+    if head.tags[0] == "NNP" or _PERSON_HEAD_RE.fullmatch(stem.removesuffix("들")):
+        return True, None
+    return False, None
+
+
 @dataclass(frozen=True)
 class Ambiguous:
     """A cue whose owner is one of several characters the pronoun fits, which
@@ -997,6 +1096,12 @@ def owner(
             possessor_kind = _pronoun_kind(("그" if person_after_that else "") + genitive.group(1))
         else:
             return None  # somebody else's ("노인의 눈")
+
+    # A cue that describes a person after it is that person's: "레온은 붉은 눈의 카엘을" is
+    # 카엘's, "레온은 은발 소녀를" nobody's of the registered.
+    described, person = _described_person(narration, mentions[index], hit)
+    if described:
+        return person
 
     if len(here) == 1:
         return next(iter(here.values()))
