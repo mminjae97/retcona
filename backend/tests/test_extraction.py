@@ -384,9 +384,21 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
         ("레온은 열여섯 살의 봄에 집을 떠났다.", {"레온의 나이는?": "열여섯 살"}),
         ("레온은 흑발 장발을 휘날렸다.", {"레온의 머리색은?": "흑발"}),
         ("세린은 은발이 아름다운 여인이 되었다.", {"세린의 머리색은?": "은발"}),
+        # Nor is any noun that is no word for a person ("위", "속", "광채", "순간"), a
+        # clause that ends before an adnominal ("빛나며 다가오는 병사를") or a role ("로서").
+        ("레온은 뺨의 흉터 위를 쓰다듬었다.", {"레온의 흉터는?": "흉터"}),
+        ("세린은 붉은 눈동자 속에 분노를 담았다.", {"세린의 눈 색깔은?": "붉은"}),
+        ("세린은 붉은 눈의 광채를 번뜩였다.", {"세린의 눈 색깔은?": "붉은"}),
+        ("레온은 눈이 붉게 빛나며 다가오는 병사를 노려보았다.", {"레온의 눈 색깔은?": "붉게"}),
+        ("레온은 눈이 붉게 빛나는 순간 검을 뽑았다.", {"레온의 눈 색깔은?": "붉게"}),
+        ("레온은 은발의 기사로서 맹세했다.", {"레온의 머리색은?": "은발"}),
     ):
         [claim] = _run(text, asked).claims
         assert claim.subject == text[:2]
+    # An age with no 의 before a person is that person's; before a time, nobody's of the two.
+    [claim] = _run("레온은 스무 살 소녀 세린을 만났다.", {"세린의 나이는?": "스무 살"}).claims
+    assert (claim.subject, claim.attributes) == ("세린", {"age": "스무 살"})
+    assert _run("레온은 스무 살 때 세린을 만났다.", {"세린의 나이는?": "스무 살"}).claims == []
     # An adverb or a connective in the adnominal clause: still the other's.
     for text in ("레온은 눈이 유난히 붉은 소녀를 바라보았다.", "레온은 눈이 크고 붉은 소녀를 바라보았다.", "레온은 붉은 눈을 한 노인을 노려보았다."):
         assert _run(text, answers).claims == []
