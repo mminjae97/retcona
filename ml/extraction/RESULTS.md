@@ -141,14 +141,16 @@ The set is small and these rules were written looking at its passages, so this s
 
 ## Round 6 — 2026-10-08: the eval set grows with the review's counterexamples
 
-No change to the extractor. PR #58 went through fourteen review rounds, and nearly every round found a sentence the rules got wrong; each was fixed one by one, and judged by itself. Those sentences are now passages (p56–p97, tag `review`), with gold as a reader would read them, so that the next changes (a morphological analyzer, another way to tell whose body part it is) are judged by numbers on all of them at once. p55 ("레온은 붉은 눈의 카엘을 노려보았다.") gets the gold a reader would give it, 카엘's red eyes; it had none.
+No change to the extractor. PR #58 went through fourteen review rounds, and nearly every round found a sentence the rules got wrong; each was fixed one by one, and judged by itself. Those sentences are now passages (p56–p97, tag `review`), with gold as a reader would read them, so that the next changes (a morphological analyzer, another way to tell whose body part it is) are judged by numbers on all of them at once. p55 ("레온은 붉은 눈의 카엘을 노려보았다.") gets the gold a reader would give it, 카엘's red eyes; it had none. That came from the review too, so p55 is tagged `review` as well.
 
 | | right | extra | missed | precision | recall | F1 |
 |---|---|---|---|---|---|---|
 | round 5, 55 passages | 60 | 0 | 6 | 1.000 | 0.909 | 0.952 |
 | the same, p55's gold added | 60 | 0 | 7 | 1.000 | 0.896 | 0.945 |
 | **the same extractor, 97 passages** | **77** | **0** | **17** | **1.000** | **0.819** | **0.901** |
-| of which the `review` passages | 17 | 0 | 10 | 1.000 | 0.630 | 0.773 |
+| of which the `review` passages (p55–p97) | 17 | 0 | 11 | 1.000 | 0.607 | 0.756 |
+
+The mutable attributes (not extracted yet) are 7 of the misses now, not 6: p97's gold adds a hairstyle ("길고").
 
 The tags of the new passages:
 
@@ -159,7 +161,7 @@ The tags of the new passages:
 - `adverb`: an adverb, a modifier or a connective between the topic and the cue, which should not stop it ("웃다가", "떨리는 손으로", "오늘도"): the topic's.
 - `after-cue`: words after the cue and before the other name that look like a modifier of it and aren't ("얼른", "온 힘을 다해", "노려본 뒤"): the topic's.
 - `body-part`: the cue has a body part's "X의" in front of it ("오른손의 흉터"), which is no possessor.
-- `demonstrative`: a "그/이/저" before the body part ("그 오른쪽 어깨의 흉터"): somebody already mentioned, maybe not registered (p65). No gold for the registered name.
+- `demonstrative`: a "그/이/저" before the body part ("그 오른쪽 어깨의 흉터"): somebody already mentioned, maybe not registered (p65, p68). No gold for the registered name.
 - `dropped-subject`: the sentence names nobody and has no pronoun; the owner is a character of the sentences before.
 - `color-window`, `context-far` (the nearest sentence's character, not one three back), `scar-value` (a scar's place is not its value).
 

@@ -52,7 +52,7 @@
 {"id": "p52", "cast": "main", "tags": ["location", "location-state"], "text": "벨로스 성은 오래전 몰락한 왕가의 거처였다.", "gold": [{"subject": "벨로스 성", "kind": "location", "attribute": "features", "values": ["거처"]}]}
 {"id": "p53", "cast": "main", "tags": ["location", "location-state"], "text": "몇 해 뒤 벨로스 성은 폐허였다.", "gold": [{"subject": "벨로스 성", "kind": "location", "attribute": "state", "values": ["폐허"]}]}
 {"id": "p54", "cast": "main", "tags": ["scene", "topic-body"], "text": "레온은 붉은 눈동자로 카엘을 노려보았다.", "gold": [{"subject": "레온", "attribute": "eye_color", "values": ["붉은"]}]}
-{"id": "p55", "cast": "main", "tags": ["describes-other", "topic-body"], "text": "레온은 붉은 눈의 카엘을 노려보았다.", "gold": [{"subject": "카엘", "attribute": "eye_color", "values": ["붉은"]}]}
+{"id": "p55", "cast": "main", "tags": ["review", "describes-other", "topic-body"], "text": "레온은 붉은 눈의 카엘을 노려보았다.", "gold": [{"subject": "카엘", "attribute": "eye_color", "values": ["붉은"]}]}
 {"id": "p56", "cast": "main", "tags": ["review", "other-subject", "body-part"], "text": "레온은 웃었고 노인도 오른손의 흉터를 보였다."}
 {"id": "p57", "cast": "main", "tags": ["review", "other-subject", "body-part"], "text": "레온은 웃었고 노인께서 오른손의 흉터를 보이셨다."}
 {"id": "p58", "cast": "main", "tags": ["review", "other-subject", "topic-body"], "text": "레온은 웃었고 노인은 붉은 눈동자로 세린을 노려보았다."}
@@ -65,7 +65,7 @@
 {"id": "p65", "cast": "main", "tags": ["review", "demonstrative", "body-part"], "text": "레온은 노인을 보았다. 그 오른쪽 어깨의 흉터가 선명했다."}
 {"id": "p66", "cast": "main", "tags": ["review", "acted-on", "body-part"], "text": "레온은 노인을 부축하며 어깨의 흉터를 살폈다."}
 {"id": "p67", "cast": "main", "tags": ["review", "acted-on", "body-part"], "text": "레온은 노인의 손을 잡고 오른손의 흉터를 살폈다."}
-{"id": "p68", "cast": "main", "tags": ["review", "acted-on", "body-part"], "text": "레온은 노인의 손을 잡고 그 손의 흉터를 보았다."}
+{"id": "p68", "cast": "main", "tags": ["review", "acted-on", "demonstrative", "body-part"], "text": "레온은 노인의 손을 잡고 그 손의 흉터를 보았다."}
 {"id": "p69", "cast": "main", "tags": ["review", "acted-on", "topic-body"], "text": "레온은 은빛 머리카락을 쓰다듬으며 세린에게 속삭였다.", "gold": [{"subject": "세린", "attribute": "hair_color", "values": ["은빛"]}]}
 {"id": "p70", "cast": "main", "tags": ["review", "acted-on", "topic-body"], "text": "레온은 흉터를 조심스레 치료해 주며 세린에게 말했다.", "gold": [{"subject": "세린", "attribute": "scars", "values": ["흉터"]}]}
 {"id": "p71", "cast": "main", "tags": ["review", "describes-other", "topic-body"], "text": "레온은 은발 소녀 세린을 바라보았다.", "gold": [{"subject": "세린", "attribute": "hair_color", "values": ["은발"]}]}
