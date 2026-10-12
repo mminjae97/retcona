@@ -362,13 +362,45 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
         "레온은 흉터투성이 사내를 바라보았다.",
         "레온은 눈이 붉은 소녀에게 다가갔다.",
         "레온은 검은 눈의 여관 주인에게 말을 걸었다.",
+        # A place, a number or a likeness after the person; a verb of having; particles
+        # after particles; a pronoun or "그 + noun" where the sentence names somebody; a
+        # word for kin or an old soldier.
+        "레온은 은발의 소녀 앞에 섰다.",
+        "레온은 붉은 눈의 사내 뒤를 쫓았다.",
+        "레온은 은발 소녀 쪽으로 걸어갔다.",
+        "세린은 은발 소녀들 사이에서 웃었다.",
+        "레온은 흉터투성이 사내 둘을 쓰러뜨렸다.",
+        "레온은 붉은 눈의 노인처럼 웃었다.",
+        "레온은 붉은 눈의 노인에게로 다가갔다.",
+        "레온은 붉은 눈을 가진 노인을 노려보았다.",
+        "레온은 은발을 지닌 소녀를 바라보았다.",
+        "레온은 은발의 공주님을 바라보았다.",
+        "레온은 흉터 많은 노인들에게도 물었다.",
+        "레온은 붉은 눈의 그녀를 바라보았다.",
+        "레온은 은발의 그 소녀를 보았다.",
+        "레온은 붉은 눈의 어머니를 떠올렸다.",
+        "세린은 붉은 눈의 언니를 그리워했다.",
+        "레온은 흉터 많은 노병에게 물었다.",
     ):
-        assert _run(text, scars).claims == []
+        assert _run(text, {"세린의 머리색은?": "은발", "세린의 눈 색깔은?": "붉은", "세린의 흉터는?": "흉터", **scars}).claims == []
+    [claim] = _run("레온은 붉은 눈을 가진 세린을 바라보았다.", answers).claims
+    assert claim.subject == "세린"
     assert _run("레온은 스무 살의 청년을 만났다.", {"레온의 나이는?": "스무 살"}).claims == []
     # ... but a person the topic is, or what it does with, is the topic's.
-    for text in ("세린은 은발 소녀였다.", "세린은 은발의 소녀로 자랐다.", "세린은 은발 머리카락을 쓸어 넘겼다."):
-        [claim] = _run(text, hair).claims
+    for text in (
+        "세린은 은발 소녀였다.",
+        "세린은 은발의 소녀로 자랐다.",
+        "세린은 은발 머리카락을 쓸어 넘겼다.",
+        "세린은 은발의 소녀 기사로서 맹세했다.",
+        "세린은 은발의 소녀답게 웃었다.",
+        "세린은 붉은 눈의 자신을 거울로 보았다.",
+    ):
+        [claim] = _run(text, {"세린의 눈 색깔은?": "붉은", **hair}).claims
         assert claim.subject == "세린"
+    # A season or a place after an age is no person: "스무 살 겨울 부산에" is the topic's.
+    for text in ("레온은 스무 살 겨울 부산에 왔다.", "레온은 스무 살 여름 런던을 떠났다.", "레온은 스무 살의 봄에 검은 숲에 갔다."):
+        [claim] = _run(text, {"레온의 나이는?": "스무 살"}).claims
+        assert claim.subject == "레온"
     # The QA model's answer is no value where it is a name: "세린의 흉터는?" answered "레온".
     for value in ("레온", "레온과", "레온에게서"):
         assert _run("레온은 흉터투성이 사내 세린을 바라보았다.", {"세린의 흉터는?": value}).claims == []

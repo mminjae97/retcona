@@ -118,3 +118,17 @@
 {"id": "p118", "cast": "main", "tags": ["describes-self", "topic-body"], "text": "레온은 은발의 기사로서 맹세했다.", "gold": [{"subject": "레온", "attribute": "hair_color", "values": ["은발"]}]}
 {"id": "p119", "cast": "main", "tags": ["describes-other", "age"], "text": "레온은 스무 살 청년 카엘을 만났다.", "gold": [{"subject": "카엘", "attribute": "age", "values": ["스무 살", "스무"]}]}
 {"id": "p120", "cast": "main", "tags": ["describes-noun", "age"], "text": "레온은 스무 살 때 세린을 만났다."}
+{"id": "p121", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 은발의 소녀 앞에 섰다."}
+{"id": "p122", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 흉터투성이 사내 둘을 쓰러뜨렸다."}
+{"id": "p123", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 붉은 눈의 노인처럼 웃었다."}
+{"id": "p124", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 붉은 눈의 노인에게로 다가갔다."}
+{"id": "p125", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 붉은 눈을 가진 노인을 노려보았다."}
+{"id": "p126", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 붉은 눈의 왕자님을 바라보았다."}
+{"id": "p127", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 흉터 많은 노인들에게도 물었다."}
+{"id": "p128", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 붉은 눈의 그녀를 바라보았다."}
+{"id": "p129", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 은발의 그 소녀를 보았다."}
+{"id": "p130", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 붉은 눈의 어머니를 떠올렸다."}
+{"id": "p131", "cast": "main", "tags": ["describes-noun", "topic-body"], "text": "레온은 흉터 많은 노병에게 물었다."}
+{"id": "p132", "cast": "main", "tags": ["describes-other", "topic-body"], "text": "레온은 붉은 눈을 가진 세린을 바라보았다.", "gold": [{"subject": "세린", "attribute": "eye_color", "values": ["붉은"]}]}
+{"id": "p133", "cast": "main", "tags": ["describes-self", "age"], "text": "레온은 스무 살 겨울 부산에 왔다.", "gold": [{"subject": "레온", "attribute": "age", "values": ["스무 살", "스무"]}]}
+{"id": "p134", "cast": "main", "tags": ["describes-self", "topic-body"], "text": "세린은 은발의 소녀 기사로서 맹세했다.", "gold": [{"subject": "세린", "attribute": "hair_color", "values": ["은발"]}]}
