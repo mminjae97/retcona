@@ -10,12 +10,8 @@ const headers = {
 
 export default defineConfig({
   plugins: [react()],
-  // One fixed port, failing if it's taken rather than moving to the next one:
-  // the API accepts browser requests from this origin only (ALLOWED_ORIGINS,
-  // backend/api/main.py). `vite preview` serves on it too.
+  // `vite preview` uses these headers and the proxy too.
   server: {
-    port: 5173,
-    strictPort: true,
     headers,
     proxy: {
       // backend/api (FastAPI) mounts routes at the root (e.g. /novels), not under /api
@@ -24,10 +20,5 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
     },
-  },
-  preview: {
-    port: 5173,
-    strictPort: true,
-    headers,
   },
 });

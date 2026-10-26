@@ -15,6 +15,9 @@ export default function NovelListPage() {
   const [error, setError] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [creating, setCreating] = useState(false);
+  // The novel being deleted: a second click (or a double-click past the
+  // confirm) doesn't send a second DELETE, which would 404 on a novel already gone.
+  const [deleting, setDeleting] = useState<string | null>(null);
   // The novel being renamed (one row at a time), and its form's state.
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -94,13 +97,17 @@ export default function NovelListPage() {
   }
 
   async function handleDelete(novel: NovelPublic) {
-    if (!window.confirm(`"${novel.title}"을(를) 삭제하시겠습니까? 30일 이내에는 복구할 수 있습니다.`)) return;
+    if (deleting !== null) return;
+    if (!window.confirm(`"${novel.title}"을(를) 삭제하시겠습니까?`)) return;
     setError(null);
+    setDeleting(novel.id);
     try {
       await deleteNovel(novel.id);
       setNovels((prev) => prev?.filter((n) => n.id !== novel.id) ?? null);
     } catch (err) {
       setError(describeError(err));
+    } finally {
+      setDeleting(null);
     }
   }
 
@@ -171,8 +178,8 @@ export default function NovelListPage() {
                       <button type="button" onClick={() => startRename(novel)}>
                         제목 변경
                       </button>
-                      <button type="button" onClick={() => handleDelete(novel)}>
-                        삭제
+                      <button type="button" onClick={() => handleDelete(novel)} disabled={deleting !== null}>
+                        {deleting === novel.id ? "삭제 중..." : "삭제"}
                       </button>
                     </div>
                   </>

@@ -1,6 +1,9 @@
 // Thin client for talking to backend/api (FastAPI), the local backend.
 
 const BASE_URL = "/api";
+// Sent on every request: the local API refuses one without it, which another
+// site's page can't send (backend/api/main.py, CLIENT_HEADER).
+const CLIENT_HEADER = "X-Retcona-Client";
 
 export class ApiError extends Error {
   status: number;
@@ -48,6 +51,7 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
     ...options,
     headers: {
       "Content-Type": "application/json",
+      [CLIENT_HEADER]: "1",
       ...options?.headers,
     },
   });

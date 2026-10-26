@@ -1,4 +1,4 @@
-import { Outlet, RouterProvider, createBrowserRouter } from "react-router-dom";
+import { Navigate, Outlet, RouterProvider, createBrowserRouter } from "react-router-dom";
 import NovelListPage from "./pages/NovelListPage";
 import EpisodeListPage from "./pages/EpisodeListPage";
 import EditorPage from "./pages/EditorPage";
@@ -37,6 +37,9 @@ const router = createBrowserRouter([
       { path: "novels/:novelId/episodes/:episodeId", element: <EditorPage /> },
       { path: "novels/:novelId/episodes/:episodeId/result", element: <ValidationResultPage /> },
       { path: "novels/:novelId/graph", element: <GraphPage /> },
+      // Anything else, e.g. a bookmark of a removed screen (/login, /mypage,
+      // /dashboard): the novel list.
+      { path: "*", element: <Navigate to="/" replace /> },
     ],
   },
 ]);

@@ -1,7 +1,9 @@
 """remove accounts (users, email_verifications, novels.user_id)
 
 The desktop app has no accounts (design doc 4.1): novels are the top level.
-Every user's novels stay, as the one author's.
+Every user's novels stay, as the one author's, except those of an account put up
+for deletion (3.5 of the web service): they go to the trash (deleted_at), as the
+deletion promised, rather than into the author's list.
 
 Revision ID: c4d7e1a9f2b6
 Revises: a9c4e1f7b3d2
@@ -18,6 +20,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.execute(
+        "UPDATE novels SET deleted_at = now() WHERE deleted_at IS NULL AND user_id IN "
+        "(SELECT id FROM users WHERE deletion_requested_at IS NOT NULL)"
+    )
     op.drop_constraint('novels_user_id_fkey', 'novels', type_='foreignkey')
     op.drop_column('novels', 'user_id')
     op.drop_table('email_verifications')

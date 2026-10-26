@@ -265,8 +265,11 @@ export function pruneStaleDrafts(now = Date.now()): void {
 // manuscript is parsed): main.tsx runs it before the first render.
 const LEGACY_WIPED_PREFIX = "retcona_drafts_wiped:";
 const LEGACY_KEYS = ["retcona_token", "retcona_user_id"];
+// Set once it has run, so later launches don't walk the storage again.
+const MIGRATED_KEY = "retcona_storage_migrated";
 
 export function migrateLegacyStorage(): void {
+  if (storageGet(MIGRATED_KEY) !== null) return;
   for (const key of storageKeys(DRAFT_PREFIX)) {
     const parts = key.slice(DRAFT_PREFIX.length).split(":");
     if (parts.length !== 3) continue; // already <episode id>:<slot>
@@ -280,4 +283,9 @@ export function migrateLegacyStorage(): void {
   }
   for (const key of storageKeys(LEGACY_WIPED_PREFIX)) storageRemove(key);
   for (const key of LEGACY_KEYS) storageRemove(key);
+  // Only once every legacy draft has moved: one whose write was refused (full
+  // storage) is tried again next launch.
+  if (storageKeys(DRAFT_PREFIX).every((key) => key.slice(DRAFT_PREFIX.length).split(":").length !== 3)) {
+    storageSet(MIGRATED_KEY, "1");
+  }
 }
