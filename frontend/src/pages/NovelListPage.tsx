@@ -23,9 +23,10 @@ export default function NovelListPage() {
   const [renameValue, setRenameValue] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
-  // Which row's form is open now, for a save that comes back after the author
-  // has moved on to another row: it mustn't close or mark that one.
-  const renamingRef = useRef<string | null>(null);
+  // Counts the rename forms opened and closed: a save that comes back after its
+  // form was closed (another row's opened, or the same row's reopened) mustn't
+  // close, mark or hold up the form open now.
+  const renameAttemptRef = useRef(0);
   // Ref, not state: needs to block a second call synchronously (e.g. a fast
   // double-click on "다시 시도"), before a state update could re-render and
   // disable the button.
@@ -73,31 +74,35 @@ export default function NovelListPage() {
   }
 
   function startRename(novel: NovelPublic) {
-    renamingRef.current = novel.id;
+    renameAttemptRef.current += 1;
     setRenaming(novel.id);
     setRenameValue(novel.title);
     setRenameError(null);
+    setRenameSaving(false);
   }
 
   function cancelRename() {
-    renamingRef.current = null;
+    renameAttemptRef.current += 1;
     setRenaming(null);
     setRenameError(null);
+    setRenameSaving(false);
   }
 
   async function handleRename(e: FormEvent, id: string) {
     e.preventDefault();
     if (renameSaving || !renameValue.trim()) return;
+    const attempt = renameAttemptRef.current;
+    const stillOpen = () => renameAttemptRef.current === attempt;
     setRenameError(null);
     setRenameSaving(true);
     try {
       const updated = await renameNovel(id, renameValue);
       setNovels((prev) => prev?.map((n) => (n.id === id ? updated : n)) ?? null);
-      if (renamingRef.current === id) cancelRename();
+      if (stillOpen()) cancelRename();
     } catch (err) {
-      if (renamingRef.current === id) setRenameError(describeError(err));
+      if (stillOpen()) setRenameError(describeError(err));
     } finally {
-      setRenameSaving(false);
+      if (stillOpen()) setRenameSaving(false);
     }
   }
 

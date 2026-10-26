@@ -283,17 +283,19 @@ export function migrateLegacyStorage(): void {
     return false;
   });
   for (const key of storageKeys(LEGACY_WIPED_PREFIX)) storageRemove(key);
+  let allMoved = true;
   for (const { key, parts } of kept) {
     const [, episodeId, slot] = parts;
     const raw = storageGet(key);
     const target = `${DRAFT_PREFIX}${episodeId}:${slot}`;
     // The old key goes only once the text is under the new one.
-    if (raw !== null && storageGet(target) === null && !storageSet(target, raw)) continue;
+    if (raw !== null && storageGet(target) === null && !storageSet(target, raw)) {
+      allMoved = false;
+      continue;
+    }
     storageRemove(key);
   }
   // Only once every legacy draft has moved: one whose write was refused (full
   // storage) is tried again next launch.
-  if (storageKeys(DRAFT_PREFIX).every((key) => key.slice(DRAFT_PREFIX.length).split(":").length !== 3)) {
-    storageSet(MIGRATED_KEY, "1");
-  }
+  if (allMoved) storageSet(MIGRATED_KEY, "1");
 }

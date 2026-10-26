@@ -7,10 +7,10 @@ Run: uvicorn api.main:app --reload  (binds 127.0.0.1 unless told otherwise; keep
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
-from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Security
+from fastapi.security import APIKeyHeader
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from api.episodes import router as episodes_router
 from api.events import router as events_router
@@ -23,15 +23,37 @@ from models.db import check_database
 # using this API (design doc 10.4.2):
 # - only these Host names are served, so a site whose DNS name is pointed at
 #   127.0.0.1 (DNS rebinding) is refused;
-# - every request must carry CLIENT_HEADER, which the app's own frontend sends
-#   (api/client.ts). A page on another site can't: a custom header needs a CORS
-#   preflight this API never approves, and what needs none (a form, an <img>,
-#   a link) can't set it. The desktop shell will make its value a per-launch
-#   secret, for programs on the PC too.
+# - every route under /novels needs CLIENT_HEADER, which the app's own frontend
+#   sends (api/client.ts). A page on another site can't: a custom header needs
+#   a CORS preflight that neither this API nor the dev server's proxy approves,
+#   and what needs none (a form, an <img>, a link) can't set it. The desktop
+#   shell will make its value a per-launch secret, for programs on the PC too.
+#   The API docs (/docs) list it as the API key: "Authorize" there, any value;
+# - no page of this server may be framed (the docs could be clickjacked).
 ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 CLIENT_HEADER = "X-Retcona-Client"
-# Read-only and changing nothing: the liveness check and FastAPI's API docs.
-_OPEN_PATHS = frozenset(("/health", "/docs", "/redoc", "/openapi.json"))
+_CLIENT = [Security(APIKeyHeader(name=CLIENT_HEADER))]
+_NO_FRAMING = [(b"x-frame-options", b"DENY"), (b"content-security-policy", b"frame-ancestors 'none'")]
+
+
+class NoFramingMiddleware:
+    """Adds the no-framing headers to every response (plain ASGI: nothing else
+    is wrapped)."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                message["headers"] = [*message.get("headers", []), *_NO_FRAMING]
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 @asynccontextmanager
@@ -44,31 +66,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Retcona API", lifespan=lifespan)
-
-
-def _openapi() -> dict:
-    # The docs (/docs) list the header as the API's key, so "Authorize" there
-    # (any value) lets "Try it out" through.
-    if app.openapi_schema is None:
-        schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
-        schema.setdefault("components", {})["securitySchemes"] = {
-            "client": {"type": "apiKey", "in": "header", "name": CLIENT_HEADER}
-        }
-        schema["security"] = [{"client": []}]
-        app.openapi_schema = schema
-    return app.openapi_schema
-
-
-app.openapi = _openapi
-
-
-@app.middleware("http")
-async def require_client_header(request: Request, call_next):
-    if request.url.path not in _OPEN_PATHS and not request.headers.get(CLIENT_HEADER):
-        return JSONResponse({"detail": f"Missing {CLIENT_HEADER} header"}, status_code=403)
-    return await call_next(request)
-
-
+app.add_middleware(NoFramingMiddleware)
 # Added last, so it runs first.
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 
@@ -78,10 +76,10 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-app.include_router(novels_router, prefix="/novels", tags=["novels"])
-app.include_router(episodes_router, prefix="/novels", tags=["episodes"])
-app.include_router(settings_router, prefix="/novels", tags=["settings"])
-app.include_router(relations_router, prefix="/novels", tags=["relations"])
-app.include_router(events_router, prefix="/novels", tags=["events"])
+app.include_router(novels_router, prefix="/novels", tags=["novels"], dependencies=_CLIENT)
+app.include_router(episodes_router, prefix="/novels", tags=["episodes"], dependencies=_CLIENT)
+app.include_router(settings_router, prefix="/novels", tags=["settings"], dependencies=_CLIENT)
+app.include_router(relations_router, prefix="/novels", tags=["relations"], dependencies=_CLIENT)
+app.include_router(events_router, prefix="/novels", tags=["events"], dependencies=_CLIENT)
 
 # TODO: register remaining routers (design doc 2.4 validation results, etc.)

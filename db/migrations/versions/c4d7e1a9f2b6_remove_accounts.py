@@ -20,28 +20,24 @@ branch_labels = None
 depends_on = None
 
 
+# The novels of accounts put up for deletion.
+DOOMED = (
+    "SELECT n.id FROM novels n JOIN users u ON u.id = n.user_id "
+    "WHERE u.deletion_requested_at IS NOT NULL"
+)
+
+
 def upgrade() -> None:
     bind = op.get_bind()
-    doomed = [
-        row[0]
-        for row in bind.execute(
-            sa.text(
-                "SELECT n.id FROM novels n JOIN users u ON u.id = n.user_id "
-                "WHERE u.deletion_requested_at IS NOT NULL"
-            )
-        )
-    ]
-    if doomed:
-        tables = sa.MetaData()
-        tables.reflect(bind)
-        # Children first (sorted_tables lists parents before children), as the
-        # purge job did: every table but users and novels carries novel_id.
-        for table in reversed(tables.sorted_tables):
-            if "novel_id" in table.c:
-                bind.execute(table.delete().where(table.c.novel_id.in_(doomed)))
-        novels = tables.tables["novels"]
-        bind.execute(novels.delete().where(novels.c.id.in_(doomed)))
-    op.drop_constraint('novels_user_id_fkey', 'novels', type_='foreignkey')
+    tables = sa.MetaData()
+    tables.reflect(bind)
+    # Children first (sorted_tables lists parents before children), as the purge
+    # job did: every table but users and novels carries novel_id.
+    for table in reversed(tables.sorted_tables):
+        if "novel_id" in table.c:
+            op.execute(f"DELETE FROM {table.name} WHERE novel_id IN ({DOOMED})")
+    op.execute(f"DELETE FROM novels WHERE id IN ({DOOMED})")
+    # Dropping the column drops its foreign key too, whatever it's named.
     op.drop_column('novels', 'user_id')
     op.drop_table('email_verifications')
     op.drop_table('users')
