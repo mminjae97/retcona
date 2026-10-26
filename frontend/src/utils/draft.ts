@@ -270,19 +270,27 @@ const MIGRATED_KEY = "retcona_storage_migrated";
 
 export function migrateLegacyStorage(): void {
   if (storageGet(MIGRATED_KEY) !== null) return;
-  for (const key of storageKeys(DRAFT_PREFIX)) {
-    const parts = key.slice(DRAFT_PREFIX.length).split(":");
-    if (parts.length !== 3) continue; // already <episode id>:<slot>
-    const [userId, episodeId, slot] = parts;
+  const legacy = storageKeys(DRAFT_PREFIX)
+    .map((key) => ({ key, parts: key.slice(DRAFT_PREFIX.length).split(":") }))
+    .filter(({ parts }) => parts.length === 3); // not already <episode id>:<slot>
+  // What goes anyway first, so that storage near its quota has room for the
+  // copies below: the session's keys and the drafts of accounts put up for
+  // deletion, then their markers.
+  for (const key of LEGACY_KEYS) storageRemove(key);
+  const kept = legacy.filter(({ key, parts }) => {
+    if (storageGet(LEGACY_WIPED_PREFIX + parts[0]) === null) return true;
+    storageRemove(key);
+    return false;
+  });
+  for (const key of storageKeys(LEGACY_WIPED_PREFIX)) storageRemove(key);
+  for (const { key, parts } of kept) {
+    const [, episodeId, slot] = parts;
     const raw = storageGet(key);
     const target = `${DRAFT_PREFIX}${episodeId}:${slot}`;
-    const wiped = storageGet(LEGACY_WIPED_PREFIX + userId) !== null;
     // The old key goes only once the text is under the new one.
-    if (raw !== null && !wiped && storageGet(target) === null && !storageSet(target, raw)) continue;
+    if (raw !== null && storageGet(target) === null && !storageSet(target, raw)) continue;
     storageRemove(key);
   }
-  for (const key of storageKeys(LEGACY_WIPED_PREFIX)) storageRemove(key);
-  for (const key of LEGACY_KEYS) storageRemove(key);
   // Only once every legacy draft has moved: one whose write was refused (full
   // storage) is tried again next launch.
   if (storageKeys(DRAFT_PREFIX).every((key) => key.slice(DRAFT_PREFIX.length).split(":").length !== 3)) {

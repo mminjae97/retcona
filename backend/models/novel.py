@@ -2,7 +2,8 @@
 
 The top level: there are no accounts, so a novel belongs to no one but the app's
 one author.
-deleted_at: soft-delete timestamp (2.6) — permanently deleted by a batch job after 30 days.
+deleted_at: soft-delete timestamp (2.6), the trash. Permanently deleting it after 30
+days is the local job queue's to come (roadmap stage 6); until then it stays.
 """
 
 import uuid

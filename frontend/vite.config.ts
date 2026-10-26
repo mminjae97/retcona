@@ -10,9 +10,13 @@ const headers = {
 
 export default defineConfig({
   plugins: [react()],
-  // `vite preview` uses these headers and the proxy too.
+  // `vite preview` uses these settings (headers, cors, proxy) too.
   server: {
     headers,
+    // No CORS at all: the proxy below would otherwise carry another site's
+    // request to the API once a preflight let it add X-Retcona-Client
+    // (backend/api/main.py). The app's own page is same-origin and needs none.
+    cors: false,
     proxy: {
       // backend/api (FastAPI) mounts routes at the root (e.g. /novels), not under /api
       "/api": {

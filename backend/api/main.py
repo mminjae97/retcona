@@ -8,6 +8,7 @@ import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -43,6 +44,22 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Retcona API", lifespan=lifespan)
+
+
+def _openapi() -> dict:
+    # The docs (/docs) list the header as the API's key, so "Authorize" there
+    # (any value) lets "Try it out" through.
+    if app.openapi_schema is None:
+        schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+        schema.setdefault("components", {})["securitySchemes"] = {
+            "client": {"type": "apiKey", "in": "header", "name": CLIENT_HEADER}
+        }
+        schema["security"] = [{"client": []}]
+        app.openapi_schema = schema
+    return app.openapi_schema
+
+
+app.openapi = _openapi
 
 
 @app.middleware("http")

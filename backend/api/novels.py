@@ -1,8 +1,8 @@
 """Novel (작품) management endpoints (design doc 2.6).
 
 Novels are the top level (there are no accounts); every other entity table is
-scoped to a novel_id (4.1). Deletion here is a soft delete (deleted_at) — the design doc's
-30-day grace period and permanent-delete batch job (2.6) are handled elsewhere.
+scoped to a novel_id (4.1). Deletion here is a soft delete (deleted_at, the trash); the
+design doc's 30-day permanent delete (2.6) comes with the local job queue.
 """
 
 import uuid

@@ -1,4 +1,4 @@
-"""Log output for this app's own packages (api, auth, models, workers, ...).
+"""Log output for this app's own packages (api, models, pipeline, workers, ...).
 
 Nothing else sets it up: uvicorn only configures its own loggers, so a module
 logger here (logging.getLogger(__name__)) would have no handler. Its warnings
@@ -7,8 +7,9 @@ message (no level, no logger name, so `grep WARNING` misses them), and
 anything below WARNING would be dropped.
 
 Called from api/__init__.py and workers/__init__.py, i.e. before any module in
-those packages is imported, because some of what they import logs at import
-time.
+those packages is imported, so that whatever they import is set up before it
+first logs (nothing logs at import time now, but a module that does shouldn't
+lose it).
 """
 
 import logging

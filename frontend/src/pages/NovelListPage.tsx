@@ -23,6 +23,9 @@ export default function NovelListPage() {
   const [renameValue, setRenameValue] = useState("");
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
+  // Which row's form is open now, for a save that comes back after the author
+  // has moved on to another row: it mustn't close or mark that one.
+  const renamingRef = useRef<string | null>(null);
   // Ref, not state: needs to block a second call synchronously (e.g. a fast
   // double-click on "다시 시도"), before a state update could re-render and
   // disable the button.
@@ -70,12 +73,14 @@ export default function NovelListPage() {
   }
 
   function startRename(novel: NovelPublic) {
+    renamingRef.current = novel.id;
     setRenaming(novel.id);
     setRenameValue(novel.title);
     setRenameError(null);
   }
 
   function cancelRename() {
+    renamingRef.current = null;
     setRenaming(null);
     setRenameError(null);
   }
@@ -88,9 +93,9 @@ export default function NovelListPage() {
     try {
       const updated = await renameNovel(id, renameValue);
       setNovels((prev) => prev?.map((n) => (n.id === id ? updated : n)) ?? null);
-      cancelRename();
+      if (renamingRef.current === id) cancelRename();
     } catch (err) {
-      setRenameError(describeError(err));
+      if (renamingRef.current === id) setRenameError(describeError(err));
     } finally {
       setRenameSaving(false);
     }
