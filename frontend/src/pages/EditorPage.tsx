@@ -17,6 +17,7 @@ import {
   clearDraft,
   discardDraft,
   discardDraftIfContent,
+  draftKeyOf,
   holdDraftSlot,
   isDraftEventFor,
   listOtherDrafts,
@@ -256,6 +257,9 @@ export default function EditorPage() {
   const save = useCallback(
     (targetNovelId: string, targetEpisodeId: string, nextContent: string): Promise<boolean> => {
       const seq = ++saveSeqRef.current;
+      // The draft this save backs up: its follow-up below goes there, even if
+      // the episode has been left and reopened (a new, held slot) meanwhile.
+      const draftKey = draftKeyOf(targetEpisodeId);
       if (mountedRef.current) {
         setSaveState("saving");
         setSaveError(null);
@@ -279,14 +283,14 @@ export default function EditorPage() {
           const ownContent = ownDraftRef.current.get(targetEpisodeId);
           if (ownContent !== undefined) {
             if (ownContent === updated.content) {
-              clearDraft(targetEpisodeId);
+              clearDraft(targetEpisodeId, draftKey);
               ownDraftRef.current.delete(targetEpisodeId);
             } else {
               // Newer text was typed here while this save was in flight: keep
               // it, now based on the version this save produced. (If this
               // write fails the draft keeps its old base, so loading it later
               // is flagged as older than the server's copy.)
-              saveDraft(targetEpisodeId, { content: ownContent, baseUpdatedAt: updated.updated_at });
+              saveDraft(targetEpisodeId, { content: ownContent, baseUpdatedAt: updated.updated_at }, draftKey);
             }
           }
           if (targetEpisodeId === currentEpisodeIdRef.current) {

@@ -22,16 +22,10 @@ export default function NovelListPage() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
-  // The novels with a rename in flight: one at a time per novel (a form closed
-  // and reopened meanwhile can't save until it settles), so the last response
-  // is the title the server has. The ref is the synchronous guard, the state
-  // what renders.
-  const renamePendingRef = useRef(new Set<string>());
-  const [renamePending, setRenamePending] = useState<ReadonlySet<string>>(new Set());
-  // Counts the rename forms opened and closed: a save that comes back after its
-  // form was closed (another row's opened, or the same row's reopened) mustn't
-  // close or mark the form open now.
-  const renameAttemptRef = useRef(0);
+  // While a rename is saving, its form stays open (취소 and the other rows'
+  // 제목 변경 wait): one rename at a time, and its result — the new title, or
+  // the error — always lands in the form that sent it.
+  const [renameSaving, setRenameSaving] = useState(false);
   // Ref, not state: needs to block a second call synchronously (e.g. a fast
   // double-click on "다시 시도"), before a state update could re-render and
   // disable the button.
@@ -79,45 +73,37 @@ export default function NovelListPage() {
   }
 
   function startRename(novel: NovelPublic) {
-    renameAttemptRef.current += 1;
+    if (renameSaving) return;
     setRenaming(novel.id);
     setRenameValue(novel.title);
     setRenameError(null);
   }
 
   function cancelRename() {
-    renameAttemptRef.current += 1;
+    if (renameSaving) return;
     setRenaming(null);
     setRenameError(null);
   }
 
-  function setRenameInFlight(id: string, inFlight: boolean) {
-    if (inFlight) renamePendingRef.current.add(id);
-    else renamePendingRef.current.delete(id);
-    setRenamePending(new Set(renamePendingRef.current));
-  }
-
   async function handleRename(e: FormEvent, id: string) {
     e.preventDefault();
-    if (renamePendingRef.current.has(id) || !renameValue.trim()) return;
-    const attempt = renameAttemptRef.current;
-    const stillOpen = () => renameAttemptRef.current === attempt;
+    if (renameSaving || !renameValue.trim()) return;
     setRenameError(null);
-    setRenameInFlight(id, true);
+    setRenameSaving(true);
     try {
       const updated = await renameNovel(id, renameValue);
       setNovels((prev) => prev?.map((n) => (n.id === id ? updated : n)) ?? null);
-      if (stillOpen()) cancelRename();
+      setRenaming(null);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
-        // Deleted meanwhile (here or in another tab): no title to keep.
+        // Deleted meanwhile (in another tab): no title to keep.
         setNovels((prev) => prev?.filter((n) => n.id !== id) ?? null);
-        if (stillOpen()) cancelRename();
-      } else if (stillOpen()) {
+        setRenaming(null);
+      } else {
         setRenameError(describeError(err));
       }
     } finally {
-      setRenameInFlight(id, false);
+      setRenameSaving(false);
     }
   }
 
@@ -130,7 +116,12 @@ export default function NovelListPage() {
       await deleteNovel(novel.id);
       setNovels((prev) => prev?.filter((n) => n.id !== novel.id) ?? null);
     } catch (err) {
-      setError(describeError(err));
+      // 404: already deleted (in another tab), which is what was asked.
+      if (err instanceof ApiError && err.status === 404) {
+        setNovels((prev) => prev?.filter((n) => n.id !== novel.id) ?? null);
+      } else {
+        setError(describeError(err));
+      }
     } finally {
       setDeleting(null);
     }
@@ -179,10 +170,10 @@ export default function NovelListPage() {
                       maxLength={200}
                       autoFocus
                     />
-                    <button type="submit" disabled={renamePending.has(novel.id)}>
-                      {renamePending.has(novel.id) ? "저장 중..." : "저장"}
+                    <button type="submit" disabled={renameSaving}>
+                      {renameSaving ? "저장 중..." : "저장"}
                     </button>
-                    <button type="button" onClick={cancelRename}>
+                    <button type="button" onClick={cancelRename} disabled={renameSaving}>
                       취소
                     </button>
                     {renameError && <p className="novel-list-error">{renameError}</p>}
@@ -200,7 +191,7 @@ export default function NovelListPage() {
                       <Link className="link-button" to={`/novels/${novel.id}/graph`}>
                         관계도·타임라인
                       </Link>
-                      <button type="button" onClick={() => startRename(novel)}>
+                      <button type="button" onClick={() => startRename(novel)} disabled={renameSaving}>
                         제목 변경
                       </button>
                       <button type="button" onClick={() => handleDelete(novel)} disabled={deleting !== null}>

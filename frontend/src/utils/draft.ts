@@ -112,8 +112,15 @@ export function loadDraft(episodeId: string): Draft | null {
 const ROOM_RETRY_MS = 30_000;
 const retryRoomAt = new Map<string, number>();
 
-export function saveDraft(episodeId: string, draft: DraftInput): boolean {
-  const key = ownKey(episodeId);
+// This session's draft key of the episode now (null: no slot, or held). A save
+// keeps it to rebase or clear the draft it was made from when it completes,
+// even if the editor has moved to a new slot since (left the episode and came
+// back while the save was in flight).
+export function draftKeyOf(episodeId: string): string | null {
+  return ownKey(episodeId);
+}
+
+export function saveDraft(episodeId: string, draft: DraftInput, key: string | null = ownKey(episodeId)): boolean {
   if (key === null) return false;
   // Room is checked whenever the slot has to be created — not just the first
   // time, because a confirmed save removes it and other tabs or loads may have
@@ -141,8 +148,7 @@ export function saveDraft(episodeId: string, draft: DraftInput): boolean {
   return true;
 }
 
-export function clearDraft(episodeId: string): void {
-  const key = ownKey(episodeId);
+export function clearDraft(episodeId: string, key: string | null = ownKey(episodeId)): void {
   if (key !== null) storageRemove(key);
 }
 
