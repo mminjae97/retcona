@@ -382,11 +382,35 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
         "세린은 붉은 눈의 언니를 그리워했다.",
         "세린은 붉은 눈의 아들을 안았다.",
         "레온은 흉터 많은 노병에게 물었다.",
+        # A name before a word for a person is whose the person is ("세린 어머니"); a subject
+        # before a verb that starts in 되 but isn't 되다; a plural with 로, what fills a place.
+        "레온은 은발의 세린 어머니를 만났다.",
+        "레온은 붉은 눈의 세린 동생을 안았다.",
+        "레온은 은발의 세린 일행을 맞았다.",
+        "레온은 은발의 세린 오라버니를 만났다.",  # a word for a person no list has
+        "레온은 붉은 눈의 간호사에게 물었다.",  # nor here, but only a person takes 에게
+        "레온은 눈이 붉은 소녀가 되돌아보자 웃었다.",
+        "레온은 은발의 소녀가 되묻자 웃었다.",
+        "레온은 붉은 눈의 사내가 되살아나자 놀랐다.",
+        "레온은 은발 소녀들로 가득한 방에 들어갔다.",
     ):
         assert _run(text, {"세린의 머리색은?": "은발", "세린의 눈 색깔은?": "붉은", "세린의 흉터는?": "흉터", **scars}).claims == []
     [claim] = _run("레온은 붉은 눈을 가진 세린을 바라보았다.", answers).claims
     assert claim.subject == "세린"
+    # ... but a title after the name is the named one, and so is a place relative to her.
+    for text in ("레온은 은발의 세린 공주를 바라보았다.", "레온은 은발의 세린 앞에 섰다."):
+        [claim] = _run(text, hair).claims
+        assert claim.subject == "세린"
     assert _run("레온은 스무 살의 청년을 만났다.", {"레온의 나이는?": "스무 살"}).claims == []
+    # A place before the person is part of the phrase: "검은 숲 청년" is the young man.
+    assert _run("레온은 스무 살 검은 숲 청년을 만났다.", {"레온의 나이는?": "스무 살"}).claims == []
+    # An origin is a cue that ends in an adnominal: what it modifies is who came from there.
+    origin = {"레온의 출신은?": "부산", "세린의 출신은?": "부산"}
+    assert _run("레온은 부산에서 올라온 청년을 만났다.", origin).claims == []
+    [claim] = _run("레온은 부산에서 올라온 세린을 만났다.", origin).claims
+    assert claim.subject == "세린"
+    [claim] = _run("레온은 부산에서 태어난 것을 숨겼다.", origin).claims
+    assert claim.subject == "레온"
     # ... but a person the topic is, or what it does with, is the topic's.
     for text in (
         "세린은 은발 소녀였다.",
@@ -395,6 +419,7 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
         "세린은 은발의 소녀 기사로서 맹세했다.",
         "세린은 은발의 소녀답게 웃었다.",
         "세린은 붉은 눈의 자신을 거울로 보았다.",
+        "세린은 붉은 눈의 아들로 태어났다.",
     ):
         [claim] = _run(text, {"세린의 눈 색깔은?": "붉은", **hair}).claims
         assert claim.subject == "세린"
@@ -417,6 +442,7 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
         ("레온은 열여섯 살의 봄에 집을 떠났다.", {"레온의 나이는?": "열여섯 살"}),
         ("레온은 흑발 장발을 휘날렸다.", {"레온의 머리색은?": "흑발"}),
         ("세린은 은발이 아름다운 여인이 되었다.", {"세린의 머리색은?": "은발"}),
+        ("세린은 은발이 아름다운 여인이 됐다.", {"세린의 머리색은?": "은발"}),
         # Nor is any noun that is no word for a person ("위", "속", "광채", "순간"), a
         # clause that ends before an adnominal ("빛나며 다가오는 병사를") or a role ("로서").
         ("레온은 뺨의 흉터 위를 쓰다듬었다.", {"레온의 흉터는?": "흉터"}),
@@ -463,6 +489,9 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
     # A place or possession of the other name is not a description of it.
     [claim] = _run("레온은 붉은 눈동자로 탑 위의 세린을 노려보았다.", answers).claims
     assert claim.subject == "레온"
+    # The cue in an adnominal clause of the other ("붉은 눈동자로 노려보는 세린을"): hers, or at
+    # least not the topic's.
+    assert _run("레온은 붉은 눈동자로 노려보는 세린을 피했다.", answers).claims == []
     # A title or role between the modifier and the name, or the cue as an adnominal of the
     # other: the other's, never the topic's.
     for text in (
@@ -477,6 +506,14 @@ def test_the_topic_owns_the_body_part_the_other_name_is_acted_on():
     # "붉은 눈을 한 세린을": the one who has the eyes.
     [claim] = _run("레온은 붉은 눈을 한 세린을 바라보았다.", answers).claims
     assert claim.subject == "세린"
+
+
+def test_words_for_a_person_are_not_any_word_in_their_endings():
+    for word in ("대장장이가", "사냥꾼을", "칼잡이에게", "노인들에게도", "공주님을"):
+        assert rules._person_word(word)
+    # 이 is a particle too: "심장이" is 심장, not a -장이.
+    for word in ("심장이", "광장이", "손잡이를", "고기잡이"):
+        assert not rules._person_word(word)
 
 
 def test_a_body_part_is_no_possessor():
@@ -505,7 +542,11 @@ def test_a_body_part_is_no_possessor():
     # ... unless a pronoun names the subject.
     assert _run("레온은 문을 열었다. 그는 오른손의 흉터를 문질렀다.", shown).claims != []
     # Somebody else the topic acts on ahead of the body part: that one's.
-    for text in ("레온은 노인을 부축하며 어깨의 흉터를 살폈다.", "레온은 노인의 손을 잡고 오른손의 흉터를 살폈다."):
+    for text in (
+        "레온은 노인을 부축하며 어깨의 흉터를 살폈다.",
+        "레온은 노인의 손을 잡고 오른손의 흉터를 살폈다.",
+        "레온은 어머니를 부축하며 어깨의 흉터를 살폈다.",
+    ):
         assert _run(text, shown).claims == []
     # 적은 is often 적 "the enemy" with 은, another subject.
     assert _run("레온은 물러섰고 적은 오른손의 흉터를 드러냈다.", shown).claims == []
