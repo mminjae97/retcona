@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, load_only
 
-from api.deps import get_novel as _get_novel
+from api.deps import require_novel
 from infra.queue_client import get_queue_client
 from models.character import SPACETIME_ATTR_KEYS, Character
 from models.claim import Claim, ContradictionFlag
@@ -77,7 +77,7 @@ class EpisodePublic(EpisodeSummary):
 def _get_episode(
     db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, *, for_update: bool = False
 ) -> Episode:
-    _get_novel(db, novel_id, for_update=for_update)
+    require_novel(db, novel_id, for_update=for_update)
     episode = db.scalar(select(Episode).where(Episode.id == episode_id, Episode.novel_id == novel_id))
     if episode is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Episode not found")
@@ -88,7 +88,7 @@ def _get_episode(
 def list_episodes(
     novel_id: uuid.UUID, db: Session = Depends(get_db)
 ) -> list[Episode]:
-    _get_novel(db, novel_id)
+    require_novel(db, novel_id)
     return list(
         db.scalars(
             select(Episode)
@@ -118,7 +118,7 @@ def create_episode(
     # Relies on the default READ COMMITTED isolation level (models/db.py) to see
     # that committed episode once unblocked; a higher isolation level would need
     # a fresh transaction/snapshot here instead.
-    _get_novel(db, novel_id, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     next_index = db.scalar(
         select(func.coalesce(func.max(Episode.episode_index), 0)).where(Episode.novel_id == novel_id)
     ) + 1

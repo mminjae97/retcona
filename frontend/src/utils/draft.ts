@@ -243,55 +243,31 @@ export function schedulePruneStaleDrafts(): void {
   }
 }
 
+// What the web-service version left in this browser's storage: drafts kept per
+// account (retcona_draft:<user id>:<episode id>:<slot>, which nothing reads
+// now), the session token, the signed-in account's id and the markers of
+// accounts put up for deletion. Dropped rather than carried over: the app was
+// never released, so they can only be a developer's own leftovers.
+const LEGACY_PREFIXES = ["retcona_drafts_wiped:"];
+// (retcona_storage_migrated: an earlier version of this cleanup marked itself done with it.)
+const LEGACY_KEYS = ["retcona_token", "retcona_user_id", "retcona_storage_migrated"];
+
+function isLegacyDraftKey(key: string): boolean {
+  return key.slice(DRAFT_PREFIX.length).split(":").length !== 2;
+}
+
 // Drops drafts nobody came back for (including those of episodes or novels
-// that no longer exist), so they don't accumulate forever.
+// that no longer exist), so they don't accumulate forever, and what the
+// web-service version left.
 export function pruneStaleDrafts(now = Date.now()): void {
   for (const key of storageKeys(DRAFT_PREFIX)) {
+    if (isLegacyDraftKey(key)) {
+      discardDraft(key);
+      continue;
+    }
     const draft = readDraft(key);
     if (draft === null || now - draft.savedAt >= MAX_DRAFT_AGE_MS) discardDraft(key);
   }
-}
-
-// What the web-service version left in this browser's storage: drafts were
-// kept per account (retcona_draft:<user id>:<episode id>:<slot>), next to the
-// session token, the signed-in account's id and the markers of accounts put up
-// for deletion. Drafts move to their per-episode key, so unsaved text is still
-// offered back, except those of an account put up for deletion, which were
-// meant to be gone; the rest is dropped. Synchronous and cheap (keys only, no
-// manuscript is parsed): main.tsx runs it before the first render.
-const LEGACY_WIPED_PREFIX = "retcona_drafts_wiped:";
-const LEGACY_KEYS = ["retcona_token", "retcona_user_id"];
-// Set once it has run, so later launches don't walk the storage again.
-const MIGRATED_KEY = "retcona_storage_migrated";
-
-export function migrateLegacyStorage(): void {
-  if (storageGet(MIGRATED_KEY) !== null) return;
-  const legacy = storageKeys(DRAFT_PREFIX)
-    .map((key) => ({ key, parts: key.slice(DRAFT_PREFIX.length).split(":") }))
-    .filter(({ parts }) => parts.length === 3); // not already <episode id>:<slot>
-  // What goes anyway first, so that storage near its quota has room for the
-  // copies below: the session's keys and the drafts of accounts put up for
-  // deletion, then their markers.
-  for (const key of LEGACY_KEYS) storageRemove(key);
-  const kept = legacy.filter(({ key, parts }) => {
-    if (storageGet(LEGACY_WIPED_PREFIX + parts[0]) === null) return true;
-    storageRemove(key);
-    return false;
-  });
-  for (const key of storageKeys(LEGACY_WIPED_PREFIX)) storageRemove(key);
-  let allMoved = true;
-  for (const { key, parts } of kept) {
-    const [, episodeId, slot] = parts;
-    const raw = storageGet(key);
-    const target = `${DRAFT_PREFIX}${episodeId}:${slot}`;
-    // The old key goes only once the text is under the new one.
-    if (raw !== null && storageGet(target) === null && !storageSet(target, raw)) {
-      allMoved = false;
-      continue;
-    }
-    storageRemove(key);
-  }
-  // Only once every legacy draft has moved: one whose write was refused (full
-  // storage) is tried again next launch.
-  if (allMoved) storageSet(MIGRATED_KEY, "1");
+  for (const prefix of LEGACY_PREFIXES) storageKeys(prefix).forEach(storageRemove);
+  LEGACY_KEYS.forEach(storageRemove);
 }

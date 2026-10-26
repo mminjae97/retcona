@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Retcona backend — a novel plausibility/consistency verification app"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115",
+    "fastapi>=0.162",
     "starlette>=1.10",  # TrustedHostMiddleware reading an IPv6 Host ("[::1]:8000"), which api/main.py allows
     "uvicorn[standard]>=0.30",
     "sqlalchemy>=2.0",

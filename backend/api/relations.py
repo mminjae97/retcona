@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from api.deps import get_novel as _get_novel
+from api.deps import require_novel
 from models.character import Character
 from models.db import get_db
 from models.relation import Relation
@@ -128,7 +128,7 @@ def _apply(relation: Relation, body: RelationInput) -> None:
 def list_relations(
     novel_id: uuid.UUID, db: Session = _DB
 ) -> list[RelationPublic]:
-    _get_novel(db, novel_id)
+    require_novel(db, novel_id)
     rows = db.scalars(
         select(Relation).where(Relation.novel_id == novel_id, Relation.entity_kind == KIND).order_by(Relation.created_at, Relation.id)
     )
@@ -141,7 +141,7 @@ def create_relation(
     body: RelationInput,
     db: Session = _DB,
 ) -> RelationPublic:
-    _get_novel(db, novel_id, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     _check(db, novel_id, body)
     relation = Relation(novel_id=novel_id)
     _apply(relation, body)
@@ -158,7 +158,7 @@ def update_relation(
     body: RelationInput,
     db: Session = _DB,
 ) -> RelationPublic:
-    _get_novel(db, novel_id, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     relation = _get_relation(db, novel_id, relation_id)
     _check(db, novel_id, body, except_id=relation_id)
     _apply(relation, body)
@@ -173,6 +173,6 @@ def delete_relation(
     relation_id: uuid.UUID,
     db: Session = _DB,
 ) -> None:
-    _get_novel(db, novel_id, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     db.delete(_get_relation(db, novel_id, relation_id))
     db.commit()

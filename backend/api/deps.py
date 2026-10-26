@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from models.novel import Novel
 
 
-def get_novel(db: Session, novel_id: uuid.UUID, *, for_update: bool = False) -> Novel:
+def require_novel(db: Session, novel_id: uuid.UUID, *, for_update: bool = False) -> Novel:
     query = select(Novel).where(Novel.id == novel_id, Novel.deleted_at.is_(None))
     if for_update:
         # Locks the row for the rest of the transaction, re-checking deleted_at

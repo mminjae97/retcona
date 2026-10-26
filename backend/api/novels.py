@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from api.deps import get_novel as _get_novel
+from api.deps import require_novel
 from models.db import get_db
 from models.novel import Novel
 
@@ -63,7 +63,7 @@ def list_novels(db: Session = Depends(get_db)) -> list[Novel]:
 
 @router.get("/{novel_id}", response_model=NovelPublic)
 def get_novel(novel_id: uuid.UUID, db: Session = Depends(get_db)) -> Novel:
-    return _get_novel(db, novel_id)
+    return require_novel(db, novel_id)
 
 
 @router.post("", response_model=NovelPublic, status_code=status.HTTP_201_CREATED)
@@ -87,7 +87,7 @@ def rename_novel(
     # concurrent delete_novel can commit its soft-delete between this read and
     # this function's own commit, leaving a "deleted" novel with an updated
     # title (10.1).
-    novel = _get_novel(db, novel_id, for_update=True)
+    novel = require_novel(db, novel_id, for_update=True)
     novel.title = body.title
     db.commit()
     db.refresh(novel)
@@ -106,6 +106,6 @@ def delete_novel(
     # its change after this soft-delete reads deleted_at as still null,
     # landing on top of it — exactly the outcome those locks are meant to
     # prevent.
-    novel = _get_novel(db, novel_id, for_update=True)
+    novel = require_novel(db, novel_id, for_update=True)
     novel.deleted_at = datetime.now(timezone.utc)
     db.commit()

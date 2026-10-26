@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { describeError } from "../api/client";
-import { createNovel, deleteNovel, listNovels, renameNovel } from "../api/novels";
+import { createNovel, deleteNovel, getNovel, listNovels, renameNovel } from "../api/novels";
 import type { NovelPublic } from "../api/novels";
 import "./NovelListPage.css";
 
@@ -30,8 +30,9 @@ export default function NovelListPage() {
   // Renames of one novel are sent one after another (each waits for the one
   // before), so the server applies them in the order they were made, and the
   // newest one's response is the title it ends with: an older response is
-  // ignored. If the newest fails, the list is read again, since an older one may
-  // have gone through.
+  // ignored. If the newest fails, that novel is read again, since an older one
+  // may have gone through (just that row: the rest of the list may have changed
+  // since).
   const renameSeqRef = useRef(new Map<string, number>());
   const renameChainRef = useRef(new Map<string, Promise<unknown>>());
   // Ref, not state: needs to block a second call synchronously (e.g. a fast
@@ -115,7 +116,13 @@ export default function NovelListPage() {
       if (newest()) setNovels((prev) => prev?.map((n) => (n.id === id ? updated : n)) ?? null);
       if (stillOpen()) cancelRename();
     } catch (err) {
-      if (newest()) loadNovels();
+      if (newest()) {
+        getNovel(id)
+          .then((current) => {
+            if (newest()) setNovels((prev) => prev?.map((n) => (n.id === id ? current : n)) ?? null);
+          })
+          .catch(() => setError("작품 목록이 최신이 아닐 수 있습니다. 새로 고침해 주세요."));
+      }
       if (stillOpen()) setRenameError(describeError(err));
     } finally {
       if (stillOpen()) setRenameSaving(false);

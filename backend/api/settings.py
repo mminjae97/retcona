@@ -30,7 +30,7 @@ from pydantic import (
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
-from api.deps import get_novel as _get_novel
+from api.deps import require_novel
 from models.character import Character, CharacterStateHistory
 from models.claim import Claim
 from models.claim_link_choice import ClaimLinkChoice
@@ -94,7 +94,7 @@ def _get_world_setting(db: Session, novel_id: uuid.UUID, setting_id: uuid.UUID) 
 def list_world_settings(
     novel_id: uuid.UUID, db: Session = Depends(get_db)
 ) -> list[WorldSetting]:
-    _get_novel(db, novel_id)
+    require_novel(db, novel_id)
     return list(
         db.scalars(
             select(WorldSetting)
@@ -110,7 +110,7 @@ def create_world_setting(
     body: WorldSettingInput,
     db: Session = Depends(get_db),
 ) -> WorldSetting:
-    _get_novel(db, novel_id, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     setting = WorldSetting(novel_id=novel_id, **body.model_dump())
     db.add(setting)
     db.commit()
@@ -125,7 +125,7 @@ def update_world_setting(
     body: WorldSettingInput,
     db: Session = Depends(get_db),
 ) -> WorldSetting:
-    _get_novel(db, novel_id, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     setting = _get_world_setting(db, novel_id, setting_id)
     for field, value in body.model_dump().items():
         setattr(setting, field, value)
@@ -140,7 +140,7 @@ def delete_world_setting(
     setting_id: uuid.UUID,
     db: Session = Depends(get_db),
 ) -> None:
-    _get_novel(db, novel_id, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     db.delete(_get_world_setting(db, novel_id, setting_id))
     db.commit()
 
@@ -328,7 +328,7 @@ def list_characters(
 ) -> list[Character]:
     # Whole cards, not summaries: a novel has tens of characters at most, and
     # the settings screen edits them in place without a fetch per card.
-    _get_novel(db, novel_id)
+    require_novel(db, novel_id)
     return list(
         db.scalars(select(Character).where(Character.novel_id == novel_id).order_by(Character.created_at, Character.id))
     )
@@ -340,7 +340,7 @@ def create_character(
     body: CharacterInput,
     db: Session = Depends(get_db),
 ) -> Character:
-    _get_novel(db, novel_id, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     _reject_indistinguishable(db, novel_id, body)
     character = Character(novel_id=novel_id, source="manual")
     _apply(character, body)
@@ -357,7 +357,7 @@ def update_character(
     body: CharacterInput,
     db: Session = Depends(get_db),
 ) -> Character:
-    _get_novel(db, novel_id, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     character = _get_character(db, novel_id, character_id)
     _reject_indistinguishable(db, novel_id, body, except_id=character_id)
     if character.name != body.name:
@@ -383,7 +383,7 @@ def delete_character(
     character_id: uuid.UUID,
     db: Session = Depends(get_db),
 ) -> None:
-    _get_novel(db, novel_id, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     character = _get_character(db, novel_id, character_id)
     # What's derived from this character goes with it: its state history and
     # event participation reference it by foreign key, and relations by id
