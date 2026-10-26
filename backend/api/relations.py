@@ -22,17 +22,14 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from api.deps import get_owned_novel as _get_owned_novel
-from auth.dependencies import get_current_user
+from api.deps import get_novel as _get_novel
 from models.character import Character
 from models.db import get_db
 from models.relation import Relation
-from models.user import User
 from pipeline.entities import normalize_name
 
 router = APIRouter()
 _DB = Depends(get_db)
-_USER = Depends(get_current_user)
 
 _TYPE_MAX_LENGTH = 50
 DIRECTED = "from_to"
@@ -129,9 +126,9 @@ def _apply(relation: Relation, body: RelationInput) -> None:
 
 @router.get("/{novel_id}/relations", response_model=list[RelationPublic])
 def list_relations(
-    novel_id: uuid.UUID, db: Session = _DB, user: User = _USER
+    novel_id: uuid.UUID, db: Session = _DB
 ) -> list[RelationPublic]:
-    _get_owned_novel(db, novel_id, user)
+    _get_novel(db, novel_id)
     rows = db.scalars(
         select(Relation).where(Relation.novel_id == novel_id, Relation.entity_kind == KIND).order_by(Relation.created_at, Relation.id)
     )
@@ -143,9 +140,8 @@ def create_relation(
     novel_id: uuid.UUID,
     body: RelationInput,
     db: Session = _DB,
-    user: User = _USER,
 ) -> RelationPublic:
-    _get_owned_novel(db, novel_id, user, for_update=True)
+    _get_novel(db, novel_id, for_update=True)
     _check(db, novel_id, body)
     relation = Relation(novel_id=novel_id)
     _apply(relation, body)
@@ -161,9 +157,8 @@ def update_relation(
     relation_id: uuid.UUID,
     body: RelationInput,
     db: Session = _DB,
-    user: User = _USER,
 ) -> RelationPublic:
-    _get_owned_novel(db, novel_id, user, for_update=True)
+    _get_novel(db, novel_id, for_update=True)
     relation = _get_relation(db, novel_id, relation_id)
     _check(db, novel_id, body, except_id=relation_id)
     _apply(relation, body)
@@ -177,8 +172,7 @@ def delete_relation(
     novel_id: uuid.UUID,
     relation_id: uuid.UUID,
     db: Session = _DB,
-    user: User = _USER,
 ) -> None:
-    _get_owned_novel(db, novel_id, user, for_update=True)
+    _get_novel(db, novel_id, for_update=True)
     db.delete(_get_relation(db, novel_id, relation_id))
     db.commit()

@@ -17,7 +17,6 @@ from sqlalchemy import Connection, create_engine, make_url
 from sqlalchemy.orm import sessionmaker
 
 import models  # every model module, registered on Base.metadata (for _missing_schema)
-from models.user import check_nickname_column_length
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +25,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg://retcona:retc
 # Without a connect timeout, an unreachable database host (one that drops
 # packets rather than refusing) leaves every connection attempt waiting on the
 # OS's TCP timeout, which can be minutes: startup's schema checks hang with no
-# error instead of failing, and so does any request or purge pass that needs a
+# error instead of failing, and so does any request or job that needs a
 # new pooled connection. This applies to all of them, not only startup — a
 # connection that can't be made in this long fails with OperationalError.
 #
@@ -88,7 +87,7 @@ def get_db():
         db.close()
 
 
-# Repo-root db/migrations, like shared/nickname-rules.json outside what
+# Repo-root db/migrations, outside what
 # pyproject.toml packages: present in a repo checkout (how this app runs today),
 # not necessarily in a non-editable install.
 _MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "db" / "migrations"
@@ -182,17 +181,10 @@ def check_schema_is_current(connection: Connection) -> None:
     )
 
 
-def check_database(*, nickname_column: bool = True) -> None:
-    """The startup checks, over one connection: every entry point that talks
-    to the database (the API server's lifespan, the standalone purge worker)
-    runs this before doing anything else. Migrations first: a database behind
-    them gets that plain error rather than whatever the nickname check trips
-    over — check_nickname_column_length relies on that ordering. The purge
-    worker leaves the nickname check out (nickname_column=False): a column
-    too narrow for signups has nothing to do with deleting accounts. Blocking
-    — the API server runs it in a thread.
+def check_database() -> None:
+    """The startup check, over one connection: every entry point that talks to
+    the database (the API server's lifespan, the CPU worker) runs this before
+    doing anything else. Blocking — the API server runs it in a thread.
     """
     with engine.connect() as connection:
         check_schema_is_current(connection)
-        if nickname_column:
-            check_nickname_column_length(connection)

@@ -1,4 +1,4 @@
-.mypage {
+.novel-list-page {
   max-width: 640px;
   margin: 0 auto;
   padding: 32px 24px;
@@ -7,43 +7,27 @@
   gap: 24px;
 }
 
-.mypage h1 {
+.novel-list-page h1 {
   margin: 0;
   font-size: 22px;
 }
 
-.mypage-error {
+.novel-list-error {
   margin: 0;
   font-size: 13px;
   color: var(--color-danger);
 }
 
-.mypage-section {
+.novel-list-section {
   padding: 20px;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 12px;
 }
 
-.mypage-section h2 {
+.novel-list-section h2 {
   margin: 0 0 12px;
   font-size: 16px;
-}
-
-.account-info {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 8px 16px;
-  margin: 0;
-}
-
-.account-info dt {
-  color: var(--color-text-muted);
-  font-size: 13px;
-}
-
-.account-info dd {
-  margin: 0;
 }
 
 .new-novel-form {
@@ -121,19 +105,4 @@
 
 .rename-form input {
   flex: 1;
-}
-
-.danger-zone {
-  border-color: var(--color-danger);
-}
-
-.deletion-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.deletion-form p {
-  flex-basis: 100%;
-  margin: 0;
 }

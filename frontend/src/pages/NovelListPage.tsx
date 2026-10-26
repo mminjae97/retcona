@@ -1,0 +1,187 @@
+// Novel list (design doc 2.6): the screen the app opens on. There are no
+// accounts: create, rename, open (episodes · settings · relationship graph ·
+// timeline) and delete the author's novels.
+import { useEffect, useRef, useState } from "react";
+import type { FormEvent } from "react";
+import { Link } from "react-router-dom";
+import { describeError } from "../api/client";
+import { createNovel, deleteNovel, listNovels, renameNovel } from "../api/novels";
+import type { NovelPublic } from "../api/novels";
+import "./NovelListPage.css";
+
+export default function NovelListPage() {
+  const [novels, setNovels] = useState<NovelPublic[] | null>(null);
+  const [novelsError, setNovelsError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [newTitle, setNewTitle] = useState("");
+  const [creating, setCreating] = useState(false);
+  // The novel being renamed (one row at a time), and its form's state.
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  // Ref, not state: needs to block a second call synchronously (e.g. a fast
+  // double-click on "다시 시도"), before a state update could re-render and
+  // disable the button.
+  const novelsLoadingRef = useRef(false);
+
+  function loadNovels() {
+    if (novelsLoadingRef.current) return;
+    novelsLoadingRef.current = true;
+    setNovelsError(null);
+    listNovels()
+      .then(setNovels)
+      .catch((err) => setNovelsError(describeError(err)))
+      .finally(() => {
+        novelsLoadingRef.current = false;
+      });
+  }
+
+  useEffect(() => {
+    loadNovels();
+  }, []);
+
+  async function handleCreate(e: FormEvent) {
+    e.preventDefault();
+    // Guard on `novels` having loaded (not just `creating`): creating before
+    // the initial GET resolves would race an optimistic
+    // [novel, ...(prev ?? [])] update against that GET's list, and whichever
+    // resolves second would silently wipe out the other's result. If the
+    // load instead failed, `novels` also stays null here — that's
+    // deliberate too, since creating against an unknown/incomplete list
+    // would make it look like the other novels had vanished.
+    // The "다시 시도" button (shown on load failure) is the way out, not
+    // loosening this guard.
+    if (creating || novels === null || !newTitle.trim()) return;
+    setError(null);
+    setCreating(true);
+    try {
+      const novel = await createNovel(newTitle);
+      setNovels((prev) => [novel, ...(prev ?? [])]);
+      setNewTitle("");
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  function startRename(novel: NovelPublic) {
+    setRenaming(novel.id);
+    setRenameValue(novel.title);
+    setRenameError(null);
+  }
+
+  function cancelRename() {
+    setRenaming(null);
+    setRenameError(null);
+  }
+
+  async function handleRename(e: FormEvent, id: string) {
+    e.preventDefault();
+    if (renameSaving || !renameValue.trim()) return;
+    setRenameError(null);
+    setRenameSaving(true);
+    try {
+      const updated = await renameNovel(id, renameValue);
+      setNovels((prev) => prev?.map((n) => (n.id === id ? updated : n)) ?? null);
+      cancelRename();
+    } catch (err) {
+      setRenameError(describeError(err));
+    } finally {
+      setRenameSaving(false);
+    }
+  }
+
+  async function handleDelete(novel: NovelPublic) {
+    if (!window.confirm(`"${novel.title}"을(를) 삭제하시겠습니까? 30일 이내에는 복구할 수 있습니다.`)) return;
+    setError(null);
+    try {
+      await deleteNovel(novel.id);
+      setNovels((prev) => prev?.filter((n) => n.id !== novel.id) ?? null);
+    } catch (err) {
+      setError(describeError(err));
+    }
+  }
+
+  return (
+    <div className="novel-list-page">
+      <h1>내 작품</h1>
+
+      {error && <p className="novel-list-error">{error}</p>}
+
+      <section className="novel-list-section">
+        <form className="new-novel-form" onSubmit={handleCreate}>
+          <input
+            type="text"
+            placeholder="새 작품 제목"
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            maxLength={200}
+          />
+          <button type="submit" disabled={creating || novels === null || !newTitle.trim()}>
+            + 새 작품
+          </button>
+        </form>
+
+        {novels === null ? (
+          novelsError ? (
+            <p className="novel-list-error">
+              {novelsError} <button type="button" onClick={loadNovels}>다시 시도</button>
+            </p>
+          ) : (
+            <p>불러오는 중...</p>
+          )
+        ) : novels.length === 0 ? (
+          <p className="empty-state">아직 등록한 작품이 없습니다. 위에서 새 작품을 만들어 보세요.</p>
+        ) : (
+          <ul className="novel-list">
+            {novels.map((novel) => (
+              <li key={novel.id} className="novel-row">
+                {renaming === novel.id ? (
+                  <form className="rename-form" onSubmit={(e) => handleRename(e, novel.id)}>
+                    <input
+                      type="text"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      maxLength={200}
+                      autoFocus
+                    />
+                    <button type="submit" disabled={renameSaving}>
+                      저장
+                    </button>
+                    <button type="button" onClick={cancelRename}>
+                      취소
+                    </button>
+                    {renameError && <p className="novel-list-error">{renameError}</p>}
+                  </form>
+                ) : (
+                  <>
+                    <span className="novel-title">{novel.title}</span>
+                    <div className="novel-actions">
+                      <Link className="link-button" to={`/novels/${novel.id}/episodes`}>
+                        열기
+                      </Link>
+                      <Link className="link-button" to={`/novels/${novel.id}/settings`}>
+                        설정
+                      </Link>
+                      <Link className="link-button" to={`/novels/${novel.id}/graph`}>
+                        관계도·타임라인
+                      </Link>
+                      <button type="button" onClick={() => startRename(novel)}>
+                        제목 변경
+                      </button>
+                      <button type="button" onClick={() => handleDelete(novel)}>
+                        삭제
+                      </button>
+                    </div>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}

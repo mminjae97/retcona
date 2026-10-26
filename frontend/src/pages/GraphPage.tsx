@@ -138,8 +138,8 @@ export default function GraphPage() {
 
   return (
     <div className="graph-page">
-      <Link className="back-link" to="/mypage">
-        ← 마이페이지
+      <Link className="back-link" to="/">
+        ← 내 작품
       </Link>
       <div className="section-header">
         <h1>관계 그래프 · 타임라인</h1>

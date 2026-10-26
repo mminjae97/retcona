@@ -24,8 +24,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, load_only
 
-from api.deps import get_owned_novel as _get_owned_novel
-from auth.dependencies import get_current_user
+from api.deps import get_novel as _get_novel
 from infra.queue_client import get_queue_client
 from models.character import SPACETIME_ATTR_KEYS, Character
 from models.claim import Claim, ContradictionFlag
@@ -33,7 +32,6 @@ from models.db import get_db
 from models.episode import Episode
 from models.flag_revalidation import FlagRevalidation
 from models.location import STATE_ATTR_KEYS, Location
-from models.user import User
 from models.validation_run import ValidationRun
 from pipeline.claim_links import link_key, record_choice
 from pipeline.dismissals import dismissal_key, record_dismissal, remove_dismissal
@@ -77,9 +75,9 @@ class EpisodePublic(EpisodeSummary):
 
 
 def _get_episode(
-    db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, user: User, *, for_update: bool = False
+    db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, *, for_update: bool = False
 ) -> Episode:
-    _get_owned_novel(db, novel_id, user, for_update=for_update)
+    _get_novel(db, novel_id, for_update=for_update)
     episode = db.scalar(select(Episode).where(Episode.id == episode_id, Episode.novel_id == novel_id))
     if episode is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Episode not found")
@@ -88,9 +86,9 @@ def _get_episode(
 
 @router.get("/{novel_id}/episodes", response_model=list[EpisodeSummary])
 def list_episodes(
-    novel_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+    novel_id: uuid.UUID, db: Session = Depends(get_db)
 ) -> list[Episode]:
-    _get_owned_novel(db, novel_id, user)
+    _get_novel(db, novel_id)
     return list(
         db.scalars(
             select(Episode)
@@ -112,7 +110,6 @@ def create_episode(
     novel_id: uuid.UUID,
     body: EpisodeCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> Episode:
     # Locks the novel row for the rest of this transaction so two concurrent
     # creates (double-click, two tabs) can't both read the same MAX(episode_index)
@@ -121,7 +118,7 @@ def create_episode(
     # Relies on the default READ COMMITTED isolation level (models/db.py) to see
     # that committed episode once unblocked; a higher isolation level would need
     # a fresh transaction/snapshot here instead.
-    _get_owned_novel(db, novel_id, user, for_update=True)
+    _get_novel(db, novel_id, for_update=True)
     next_index = db.scalar(
         select(func.coalesce(func.max(Episode.episode_index), 0)).where(Episode.novel_id == novel_id)
     ) + 1
@@ -137,9 +134,8 @@ def get_episode(
     novel_id: uuid.UUID,
     episode_id: uuid.UUID,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> Episode:
-    return _get_episode(db, novel_id, episode_id, user)
+    return _get_episode(db, novel_id, episode_id)
 
 
 @router.patch("/{novel_id}/episodes/{episode_id}", response_model=EpisodePublic)
@@ -148,12 +144,11 @@ def save_episode(
     episode_id: uuid.UUID,
     body: EpisodeUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> Episode:
     # Locked for the same reason as create_episode/rename_novel: without it, a
     # concurrent soft-delete of the novel could commit between this read and
     # this function's own commit, letting a save land on a "deleted" novel.
-    episode = _get_episode(db, novel_id, episode_id, user, for_update=True)
+    episode = _get_episode(db, novel_id, episode_id, for_update=True)
     # Only touch the row (and flip a submitted episode back to draft) when the
     # content actually changed — otherwise re-saving unmodified content would
     # needlessly invalidate validation results and bump updated_at.
@@ -253,14 +248,13 @@ def request_validation(
     novel_id: uuid.UUID,
     episode_id: uuid.UUID,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> ValidationRunPublic:
     """Validates the episode's saved content (the editor saves first). While
     a run for the episode is queued or running, returns that one instead of
     starting another — a double click, or a second tab, doesn't validate twice.
     """
     # The novel's row lock serializes this check-then-create per novel.
-    episode = _get_episode(db, novel_id, episode_id, user, for_update=True)
+    episode = _get_episode(db, novel_id, episode_id, for_update=True)
     if not episode.content.strip():
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The manuscript is empty")
     latest = _latest_run(db, novel_id, episode_id)
@@ -298,9 +292,8 @@ def get_latest_validation(
     novel_id: uuid.UUID,
     episode_id: uuid.UUID,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> ValidationRunPublic | Response:
-    _get_episode(db, novel_id, episode_id, user)
+    _get_episode(db, novel_id, episode_id)
     run = _latest_run(db, novel_id, episode_id)
     if run is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -349,11 +342,10 @@ def list_flags(
     novel_id: uuid.UUID,
     episode_id: uuid.UUID,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> list[FlagPublic]:
     """What the episode's latest successful run found contradicting the
     settings, most confident first (2.4, 2.5). A new run replaces them."""
-    _get_episode(db, novel_id, episode_id, user)
+    _get_episode(db, novel_id, episode_id)
     rows = db.execute(
         select(ContradictionFlag, Claim)
         .join(Claim, Claim.id == ContradictionFlag.claim_id)
@@ -460,11 +452,10 @@ def act_on_flag(
     flag_id: uuid.UUID,
     body: FlagAction,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> FlagPublic:
     # The novel's row lock: accepting writes a setting card, as the settings
     # screen and validation runs do under the same lock.
-    episode = _get_episode(db, novel_id, episode_id, user, for_update=True)
+    episode = _get_episode(db, novel_id, episode_id, for_update=True)
     flag, claim = _get_flag(db, novel_id, episode_id, flag_id)
 
     if body.action == "reopen":
@@ -626,7 +617,6 @@ def revalidate_flag(
     flag_id: uuid.UUID,
     body: RevalidateRequest,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> FlagPublic:
     """Judges an open flag again against its card (7.5): only the judgment
     that raised it, by the CPU worker (pipeline/revalidate_flag.py). With a
@@ -636,7 +626,7 @@ def revalidate_flag(
     the flag's last revalidation is still queued or running, returns that one
     instead of starting another."""
     # The novel's row lock: this may write a setting card, as accepting does.
-    _get_episode(db, novel_id, episode_id, user, for_update=True)
+    _get_episode(db, novel_id, episode_id, for_update=True)
     flag, claim = _get_flag(db, novel_id, episode_id, flag_id)
     if flag.status != "open":
         raise HTTPException(status.HTTP_409_CONFLICT, FLAG_HANDLED)
@@ -816,13 +806,12 @@ def list_pending_links(
     novel_id: uuid.UUID,
     episode_id: uuid.UUID,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> list[PendingLinkPublic]:
     """The claims the extraction couldn't tie to one card — a pronoun that fits
     several characters, a name several share — in the order of the manuscript,
     for the author to pick a card for (7.1.1), with the picks being judged. A
     new run replaces them."""
-    episode = _get_episode(db, novel_id, episode_id, user)
+    episode = _get_episode(db, novel_id, episode_id)
     _put_back_stale_picks(db, novel_id, episode_id)
     claims = list(
         db.scalars(
@@ -855,13 +844,12 @@ def pick_pending_link(
     claim_id: uuid.UUID,
     body: LinkPick,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> LinkPickResult:
     """The author's pick for a claim waiting for one (7.1.1): a card among its
     candidates, which the CPU worker judges the claim against now
     (pipeline/judge_linked_claim.py), or none ("해당 없음"), which drops it.
     Either is kept, so the next run applies it and doesn't ask again."""
-    _get_episode(db, novel_id, episode_id, user, for_update=True)
+    _get_episode(db, novel_id, episode_id, for_update=True)
     claim = db.scalar(
         select(Claim).where(Claim.id == claim_id, Claim.novel_id == novel_id, Claim.episode_id == episode_id)
     )

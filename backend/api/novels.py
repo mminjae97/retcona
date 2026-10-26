@@ -1,7 +1,7 @@
-"""Novel (작품) management endpoints (design doc 2.6, 3.4).
+"""Novel (작품) management endpoints (design doc 2.6).
 
-An account can own multiple novels; every other entity table is scoped to a
-novel_id (4.1). Deletion here is a soft delete (deleted_at) — the design doc's
+Novels are the top level (there are no accounts); every other entity table is
+scoped to a novel_id (4.1). Deletion here is a soft delete (deleted_at) — the design doc's
 30-day grace period and permanent-delete batch job (2.6) are handled elsewhere.
 """
 
@@ -13,11 +13,9 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from api.deps import get_owned_novel as _get_owned_novel
-from auth.dependencies import get_current_user
+from api.deps import get_novel as _get_novel
 from models.db import get_db
 from models.novel import Novel
-from models.user import User
 
 router = APIRouter()
 
@@ -55,19 +53,19 @@ class NovelPublic(BaseModel):
 
 
 @router.get("", response_model=list[NovelPublic])
-def list_novels(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[Novel]:
+def list_novels(db: Session = Depends(get_db)) -> list[Novel]:
     return list(
         db.scalars(
-            select(Novel).where(Novel.user_id == user.id, Novel.deleted_at.is_(None)).order_by(Novel.created_at.desc())
+            select(Novel).where(Novel.deleted_at.is_(None)).order_by(Novel.created_at.desc())
         )
     )
 
 
 @router.post("", response_model=NovelPublic, status_code=status.HTTP_201_CREATED)
 def create_novel(
-    body: NovelCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+    body: NovelCreate, db: Session = Depends(get_db)
 ) -> Novel:
-    novel = Novel(user_id=user.id, title=body.title)
+    novel = Novel(title=body.title)
     db.add(novel)
     db.commit()
     db.refresh(novel)
@@ -79,13 +77,12 @@ def rename_novel(
     novel_id: uuid.UUID,
     body: NovelRename,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> Novel:
     # Locked for the same reason as episodes.py:create_episode — without it, a
     # concurrent delete_novel can commit its soft-delete between this read and
     # this function's own commit, leaving a "deleted" novel with an updated
     # title (10.1).
-    novel = _get_owned_novel(db, novel_id, user, for_update=True)
+    novel = _get_novel(db, novel_id, for_update=True)
     novel.title = body.title
     db.commit()
     db.refresh(novel)
@@ -96,7 +93,6 @@ def rename_novel(
 def delete_novel(
     novel_id: uuid.UUID,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> None:
     # Locked for the same reason as rename_novel/create_episode/save_episode
     # — without it, this read isn't actually serialized against theirs (an
@@ -105,6 +101,6 @@ def delete_novel(
     # its change after this soft-delete reads deleted_at as still null,
     # landing on top of it — exactly the outcome those locks are meant to
     # prevent.
-    novel = _get_owned_novel(db, novel_id, user, for_update=True)
+    novel = _get_novel(db, novel_id, for_update=True)
     novel.deleted_at = datetime.now(timezone.utc)
     db.commit()

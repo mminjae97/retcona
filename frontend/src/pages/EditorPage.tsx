@@ -5,12 +5,10 @@
 // what's saved; a worker does it in the background while the author keeps writing, and the page polls the run
 // (utils/validationRun.ts) and shows what it found — or that a later save has made it out of date.
 // Editing a submitted episode flips its status back to draft (2.2).
-// The draft is dropped once a save confirms it, so it survives an expired session, a network failure or a
-// closed tab. Every tab (every page load) keeps its own draft and rewrites only that one; the drafts other tabs
+// The draft is dropped once a save confirms it, so it survives a failed save, a crash or a closed window. Every tab (every page load) keeps its own draft and rewrites only that one; the drafts other tabs
 // or earlier loads left are listed on the page and the author loads whichever one they want.
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Link, useBlocker, useParams } from "react-router-dom";
-import { fetchCurrentUserId } from "../api/auth";
 import { describeError } from "../api/client";
 import { getEpisode, saveEpisode } from "../api/episodes";
 import type { EpisodePublic, ValidationRun } from "../api/episodes";
@@ -20,7 +18,6 @@ import {
   discardDraft,
   discardDraftIfContent,
   isDraftEventFor,
-  isDraftsWipedEventFor,
   listOtherDrafts,
   loadDraft,
   releaseDraftCache,
@@ -196,10 +193,6 @@ export default function EditorPage() {
     const onStorage = (e: StorageEvent) => {
       const id = currentEpisodeIdRef.current;
       if (!id) return;
-      // Another tab just wiped this account's drafts (a deletion request went
-      // through): this tab's own slot is gone too, so its backup is gone right
-      // now, not just as of its next write.
-      if (isDraftsWipedEventFor(id, e.key)) setDraftBackupOk(false);
       if (!isDraftEventFor(id, e.key)) return;
       // A removal under this episode's prefix can be another tab's makeRoom()
       // reclaiming *this* session's own stale slot (evicted for room, not by
@@ -245,9 +238,8 @@ export default function EditorPage() {
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [atRisk]);
-  // Same guard for a navigation within the app: the back-link, an App.tsx
-  // route change, or AuthExpiryRedirect forcing everyone to /login when the
-  // session ends — and, because this runs through the data router, browser
+  // Same guard for a navigation within the app: the back-link or an App.tsx
+  // route change — and, because this runs through the data router, browser
   // back/forward too, which a Link-only guard can't reach (the URL has
   // already changed by the time a popstate handler would see it).
   const blocker = useBlocker(atRisk);
@@ -350,11 +342,9 @@ export default function EditorPage() {
     setDraftBackupOk(true);
     showOtherDrafts([]);
     currentEpisodeIdRef.current = episodeId;
-    // Owner unknown until the account id arrives below: without this, ownerOf()
-    // would fall back to the live getUserId() for storage events that land in
-    // the gap, which can point at a different account by the time it resolves
-    // (another tab signing in as someone else, or this account being deleted).
-    startDraftSlot(episodeId, null);
+    // This load writes to a slot of its own; drafts an earlier load left stay
+    // in storage and show up in the list.
+    startDraftSlot(episodeId);
     setServerVersion("", "");
     // Chained after saveChainRef instead of fired directly: a quick
     // A -> B -> A navigation can come back to A while the save the author
@@ -364,15 +354,9 @@ export default function EditorPage() {
     // next save would silently drop the saved edit.
     saveChainRef.current
       .catch(() => {})
-      // Together: the account (drafts are keyed by the one this token is for)
-      // isn't needed until the episode has arrived.
-      .then(() => (cancelled ? null : Promise.all([fetchCurrentUserId(), getEpisode(novelId, episodeId)])))
-      .then((loaded) => {
-        if (cancelled || loaded === null) return;
-        const [userId, ep] = loaded;
-        // This load writes to a slot of its own; drafts an earlier load left
-        // stay in storage and show up in the list.
-        startDraftSlot(episodeId, userId);
+      .then(() => (cancelled ? null : getEpisode(novelId, episodeId)))
+      .then((ep) => {
+        if (cancelled || ep === null) return;
         ownDraftRef.current.delete(episodeId);
         setServerVersion(ep.updated_at, ep.content);
         setEpisode(ep);
@@ -387,8 +371,7 @@ export default function EditorPage() {
     return () => {
       cancelled = true;
       // Nothing goes to the server on leaving: unsaved text stays in the local
-      // draft, which this writes now — it is also what runs when an expired
-      // session routes away from the editor.
+      // draft, which this writes now.
       flushDraft();
       releaseDraftCache(episodeId);
     };

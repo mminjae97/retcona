@@ -55,9 +55,9 @@ def handle(job: dict) -> None:
 
 
 def run() -> None:
-    # The same startup check as the API server's, minus the nickname column
-    # (see workers/purge.py). Logging needs no setup: workers/__init__.py did it.
-    check_database(nickname_column=False)
+    # The same startup check as the API server's. Logging needs no setup:
+    # workers/__init__.py did it.
+    check_database()
     # The models (NLI, NER, QA, and the extraction rules' part-of-speech tagger) now, not
     # inside the first job: loading takes a
     # while (a ~440 MB download, for a Hugging Face checkpoint not cached yet),

@@ -41,33 +41,3 @@ export function storageKeys(prefix: string): string[] {
   }
   return keys;
 }
-
-export interface PersistedValue {
-  get(): string | null;
-  set(value: string): void;
-  clear(): void;
-}
-
-// A string kept in localStorage that still works for this page load when the
-// write is refused: the value is then held in memory, and wins over whatever
-// storage may still hold (a stale copy). The memory copy is only used after a
-// refused write, never while storage works, so another tab's change (a logout,
-// say) isn't undone by it — a `storage` event for this key (or a whole-storage
-// clear, reported with a null key) drops the memory copy, since it means
-// another tab's own write or removal did go through and is what should show.
-export function persistedValue(key: string): PersistedValue {
-  let memory: string | null = null;
-  window.addEventListener("storage", (e) => {
-    if (e.key === null || e.key === key) memory = null;
-  });
-  return {
-    get: () => memory ?? storageGet(key),
-    set(value) {
-      memory = storageSet(key, value) ? null : value;
-    },
-    clear() {
-      memory = null;
-      storageRemove(key);
-    },
-  };
-}

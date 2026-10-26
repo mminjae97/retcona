@@ -79,8 +79,8 @@ export default function EpisodeListPage() {
 
   return (
     <div className="episode-list-page">
-      <Link className="back-link" to="/mypage">
-        ← 마이페이지
+      <Link className="back-link" to="/">
+        ← 내 작품
       </Link>
       <div className="section-header">
         <h1>화 목록</h1>

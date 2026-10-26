@@ -23,17 +23,14 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
-from api.deps import get_owned_novel as _get_owned_novel
-from auth.dependencies import get_current_user
+from api.deps import get_novel as _get_novel
 from models.character import Character
 from models.db import get_db
 from models.location import Location
 from models.story_event import EventLink, EventLocation, EventParticipant, StoryEvent
-from models.user import User
 
 router = APIRouter()
 _DB = Depends(get_db)
-_USER = Depends(get_current_user)
 
 _EPISODE_MAX = 100_000  # the column is a 32-bit integer; no serial runs this long
 _SUMMARY_MAX_LENGTH = 500
@@ -110,10 +107,10 @@ class LocationPublic(BaseModel):
 
 
 @router.get("/{novel_id}/locations", response_model=list[LocationPublic])
-def list_locations(novel_id: uuid.UUID, db: Session = _DB, user: User = _USER) -> list[Location]:
+def list_locations(novel_id: uuid.UUID, db: Session = _DB) -> list[Location]:
     """The places the manuscript's claims registered (7.4), for the author to
     pick the ones an event happens in."""
-    _get_owned_novel(db, novel_id, user)
+    _get_novel(db, novel_id)
     return list(db.scalars(select(Location).where(Location.novel_id == novel_id).order_by(Location.name, Location.id)))
 
 
@@ -176,8 +173,8 @@ def _set_members(db: Session, novel_id: uuid.UUID, event_id: uuid.UUID, body: Ev
 
 
 @router.get("/{novel_id}/events", response_model=list[EventPublic])
-def list_events(novel_id: uuid.UUID, db: Session = _DB, user: User = _USER) -> list[EventPublic]:
-    _get_owned_novel(db, novel_id, user)
+def list_events(novel_id: uuid.UUID, db: Session = _DB) -> list[EventPublic]:
+    _get_novel(db, novel_id)
     events = list(
         db.scalars(
             select(StoryEvent)
@@ -189,8 +186,8 @@ def list_events(novel_id: uuid.UUID, db: Session = _DB, user: User = _USER) -> l
 
 
 @router.post("/{novel_id}/events", response_model=EventPublic, status_code=status.HTTP_201_CREATED)
-def create_event(novel_id: uuid.UUID, body: EventInput, db: Session = _DB, user: User = _USER) -> EventPublic:
-    _get_owned_novel(db, novel_id, user, for_update=True)
+def create_event(novel_id: uuid.UUID, body: EventInput, db: Session = _DB) -> EventPublic:
+    _get_novel(db, novel_id, for_update=True)
     _check_members(db, novel_id, body)
     event = StoryEvent(novel_id=novel_id, episode_index=body.episode_index, summary=body.summary)
     db.add(event)
@@ -202,9 +199,9 @@ def create_event(novel_id: uuid.UUID, body: EventInput, db: Session = _DB, user:
 
 @router.put("/{novel_id}/events/{event_id}", response_model=EventPublic)
 def update_event(
-    novel_id: uuid.UUID, event_id: uuid.UUID, body: EventInput, db: Session = _DB, user: User = _USER
+    novel_id: uuid.UUID, event_id: uuid.UUID, body: EventInput, db: Session = _DB
 ) -> EventPublic:
-    _get_owned_novel(db, novel_id, user, for_update=True)
+    _get_novel(db, novel_id, for_update=True)
     event = _get_event(db, novel_id, event_id)
     _check_members(db, novel_id, body)
     event.episode_index = body.episode_index
@@ -215,8 +212,8 @@ def update_event(
 
 
 @router.delete("/{novel_id}/events/{event_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_event(novel_id: uuid.UUID, event_id: uuid.UUID, db: Session = _DB, user: User = _USER) -> None:
-    _get_owned_novel(db, novel_id, user, for_update=True)
+def delete_event(novel_id: uuid.UUID, event_id: uuid.UUID, db: Session = _DB) -> None:
+    _get_novel(db, novel_id, for_update=True)
     event = _get_event(db, novel_id, event_id)
     # What hangs off it goes with it: who and where, and the links to and from it.
     db.execute(delete(EventParticipant).where(EventParticipant.novel_id == novel_id, EventParticipant.event_id == event_id))
@@ -272,15 +269,15 @@ def _apply_link(link: EventLink, body: LinkInput) -> None:
 
 
 @router.get("/{novel_id}/event-links", response_model=list[LinkPublic])
-def list_links(novel_id: uuid.UUID, db: Session = _DB, user: User = _USER) -> list[LinkPublic]:
-    _get_owned_novel(db, novel_id, user)
+def list_links(novel_id: uuid.UUID, db: Session = _DB) -> list[LinkPublic]:
+    _get_novel(db, novel_id)
     rows = db.scalars(select(EventLink).where(EventLink.novel_id == novel_id).order_by(EventLink.created_at, EventLink.id))
     return [_public_link(row) for row in rows]
 
 
 @router.post("/{novel_id}/event-links", response_model=LinkPublic, status_code=status.HTTP_201_CREATED)
-def create_link(novel_id: uuid.UUID, body: LinkInput, db: Session = _DB, user: User = _USER) -> LinkPublic:
-    _get_owned_novel(db, novel_id, user, for_update=True)
+def create_link(novel_id: uuid.UUID, body: LinkInput, db: Session = _DB) -> LinkPublic:
+    _get_novel(db, novel_id, for_update=True)
     _check_link(db, novel_id, body)
     link = EventLink(novel_id=novel_id)
     _apply_link(link, body)
@@ -292,9 +289,9 @@ def create_link(novel_id: uuid.UUID, body: LinkInput, db: Session = _DB, user: U
 
 @router.put("/{novel_id}/event-links/{link_id}", response_model=LinkPublic)
 def update_link(
-    novel_id: uuid.UUID, link_id: uuid.UUID, body: LinkInput, db: Session = _DB, user: User = _USER
+    novel_id: uuid.UUID, link_id: uuid.UUID, body: LinkInput, db: Session = _DB
 ) -> LinkPublic:
-    _get_owned_novel(db, novel_id, user, for_update=True)
+    _get_novel(db, novel_id, for_update=True)
     link = _get_link(db, novel_id, link_id)
     _check_link(db, novel_id, body, except_id=link_id)
     _apply_link(link, body)
@@ -304,7 +301,7 @@ def update_link(
 
 
 @router.delete("/{novel_id}/event-links/{link_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_link(novel_id: uuid.UUID, link_id: uuid.UUID, db: Session = _DB, user: User = _USER) -> None:
-    _get_owned_novel(db, novel_id, user, for_update=True)
+def delete_link(novel_id: uuid.UUID, link_id: uuid.UUID, db: Session = _DB) -> None:
+    _get_novel(db, novel_id, for_update=True)
     db.delete(_get_link(db, novel_id, link_id))
     db.commit()
