@@ -27,6 +27,9 @@ export default function NovelListPage() {
   // form was closed (another row's opened, or the same row's reopened) mustn't
   // close, mark or hold up the form open now.
   const renameAttemptRef = useRef(0);
+  // The newest rename sent for each novel: an older one's response, arriving
+  // last, mustn't put its title back over the newer one.
+  const renameSeqRef = useRef(new Map<string, number>());
   // Ref, not state: needs to block a second call synchronously (e.g. a fast
   // double-click on "다시 시도"), before a state update could re-render and
   // disable the button.
@@ -93,11 +96,15 @@ export default function NovelListPage() {
     if (renameSaving || !renameValue.trim()) return;
     const attempt = renameAttemptRef.current;
     const stillOpen = () => renameAttemptRef.current === attempt;
+    const seq = (renameSeqRef.current.get(id) ?? 0) + 1;
+    renameSeqRef.current.set(id, seq);
     setRenameError(null);
     setRenameSaving(true);
     try {
       const updated = await renameNovel(id, renameValue);
-      setNovels((prev) => prev?.map((n) => (n.id === id ? updated : n)) ?? null);
+      if (renameSeqRef.current.get(id) === seq) {
+        setNovels((prev) => prev?.map((n) => (n.id === id ? updated : n)) ?? null);
+      }
       if (stillOpen()) cancelRename();
     } catch (err) {
       if (stillOpen()) setRenameError(describeError(err));

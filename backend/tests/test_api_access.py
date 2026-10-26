@@ -14,6 +14,8 @@ MISSING = "00000000-0000-0000-0000-000000000000"
 def test_the_app_itself_is_served():
     assert client.get("/health").status_code == 200
     assert TestClient(app, base_url="http://127.0.0.1:8000").get("/health").status_code == 200
+    # IPv6 loopback, port and all (an older Starlette cut the host at the first ':').
+    assert client.get("/health", headers={"Host": "[::1]:8000"}).status_code == 200
     # Past the header check to the route's own validation (422 for no title,
     # before any database work).
     assert client.post("/novels", json={}, headers=APP).status_code == 422
@@ -32,6 +34,24 @@ def test_a_request_without_the_client_header_is_refused():
         assert client.post("/novels", json={"title": "x"}, headers=headers).status_code in (401, 403)
         assert client.get(f"/novels/{MISSING}/episodes/{MISSING}/pending-links", headers=headers).status_code in (401, 403)
         assert client.delete(f"/novels/{MISSING}", headers=headers).status_code in (401, 403)
+
+
+def test_a_route_added_later_needs_the_header_too():
+    # The header is the app's own dependency, not each router's.
+    from fastapi import APIRouter
+
+    router = APIRouter()
+
+    @router.get("/later")
+    def later() -> dict:
+        return {}
+
+    app.include_router(router)
+    try:
+        assert client.get("/later").status_code in (401, 403)
+        assert client.get("/later", headers=APP).status_code == 200
+    finally:
+        app.router.routes[:] = [route for route in app.router.routes if getattr(route, "path", None) != "/later"]
 
 
 def test_no_page_can_be_framed():

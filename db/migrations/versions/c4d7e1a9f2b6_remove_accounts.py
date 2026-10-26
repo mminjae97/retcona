@@ -2,9 +2,9 @@
 
 The desktop app has no accounts (design doc 4.1): novels are the top level.
 Every user's novels stay, as the one author's, except those of an account put up
-for deletion (3.5 of the web service): they are deleted for good, with every row
-under their novel_id, as the deletion promised (the purge job that would have
-done it goes with the accounts).
+for deletion (3.5 of the web service): they go to the trash (deleted_at), out of
+the author's list but not destroyed, as the account was still within its grace
+period. Emptying the trash comes with the local job queue (roadmap stage 6).
 
 Revision ID: c4d7e1a9f2b6
 Revises: a9c4e1f7b3d2
@@ -20,23 +20,11 @@ branch_labels = None
 depends_on = None
 
 
-# The novels of accounts put up for deletion.
-DOOMED = (
-    "SELECT n.id FROM novels n JOIN users u ON u.id = n.user_id "
-    "WHERE u.deletion_requested_at IS NOT NULL"
-)
-
-
 def upgrade() -> None:
-    bind = op.get_bind()
-    tables = sa.MetaData()
-    tables.reflect(bind)
-    # Children first (sorted_tables lists parents before children), as the purge
-    # job did: every table but users and novels carries novel_id.
-    for table in reversed(tables.sorted_tables):
-        if "novel_id" in table.c:
-            op.execute(f"DELETE FROM {table.name} WHERE novel_id IN ({DOOMED})")
-    op.execute(f"DELETE FROM novels WHERE id IN ({DOOMED})")
+    op.execute(
+        "UPDATE novels SET deleted_at = now() WHERE deleted_at IS NULL AND user_id IN "
+        "(SELECT id FROM users WHERE deletion_requested_at IS NOT NULL)"
+    )
     # Dropping the column drops its foreign key too, whatever it's named.
     op.drop_column('novels', 'user_id')
     op.drop_table('email_verifications')
