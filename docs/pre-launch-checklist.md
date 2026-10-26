@@ -1,113 +1,113 @@
-# Pre-launch checklist
+# Pre-release checklist
 
-Things deliberately left in their development setup, to be finished in the
-project's wrap-up phase before real users sign up. Each item says what is in
+Things to settle before the first public release of the Windows desktop app
+(free and open source, design doc chapter 10). Each item says what is in
 place now, what has to change, and how to check it.
 
-## 1. Google login: production OAuth client
+The web service's items (a production Google OAuth client, real sending of
+the signup verification email) are gone: the desktop app has no accounts, and
+stage 6 of the roadmap removes login, signup and account deletion.
 
-**Now:** a development OAuth client (Google Cloud Console → APIs & Services →
-Credentials), redirect URI `http://localhost:5173/auth/google/callback`, its
-values in the local `.env` (`GOOGLE_OAUTH_CLIENT_ID`,
-`GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`). The client may be
-replaced with a different one (or project) before launch.
+## 1. Licenses
 
-**To do:**
-- [ ] Create (or switch to) the production OAuth client, type "Web application".
-- [ ] Add the production redirect URI, `https://<frontend domain>/auth/google/callback`,
-      under "Authorized redirect URIs" — it must match `GOOGLE_OAUTH_REDIRECT_URI`
-      exactly (scheme, host, path, no trailing slash).
-- [ ] Set the three `GOOGLE_OAUTH_*` values in the production environment
-      (secret manager, not a committed file). Remove the development client's
-      values from anywhere they were copied.
-- [ ] OAuth consent screen: move the app from **Testing** to **In production**.
-      While it is in Testing, only the listed test users can sign in; everyone
-      else gets an "access blocked" error from Google. The requested scopes
-      are `openid email` only, so no Google verification review should be
-      needed, but check the console's current rules.
-- [ ] Fill in the consent screen's app name, support email, logo, and links
-      to the privacy policy / terms (Google shows them to users).
-
-**Check:** `GET /auth/google/config` returns `enabled: true` with the
-production client id and redirect URI; sign in with an account that is not a
-test user.
-
-Code: `backend/auth/oauth.py`, `frontend/src/utils/googleAuth.ts`.
-
-## 2. Signup verification email: real sending
-
-**Now:** `EMAIL_PROVIDER=console` — no email is sent; the 6-digit code is
-written to the API server's log. That is only acceptable locally: anyone who
-can read the log can complete any signup.
+**Now:** no license; the repository can't be reused by anyone yet.
 
 **To do:**
-- [ ] Choose the sending service (an SMTP relay: Gmail/Google Workspace, Amazon
-      SES, SendGrid, ...). `infra/email_client.py` speaks plain SMTP, so any of
-      them works through configuration; a provider-specific HTTP API would be a
-      new `EmailClient` implementation there.
-- [ ] Set `EMAIL_PROVIDER=smtp` and `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`,
-      `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM` in the production
-      environment (see `.env.example`).
-- [ ] Sender domain: set up SPF, DKIM and DMARC for the `SMTP_FROM` domain, so
-      the codes don't land in spam.
-- [ ] Make sure production can never start with `EMAIL_PROVIDER=console`
-      (e.g. fail startup, or at least alert, when it is console outside local
-      development).
+- [ ] Choose the code license and add `LICENSE`. Apache-2.0 is a natural fit:
+      the same as kiwipiepy and transformers, with a patent grant.
+- [ ] Third-party notices for everything the installer bundles (Python and
+      its packages, ONNX Runtime, Tauri, the frontend's npm packages), shown
+      in the app's About screen.
+- [ ] The models are released under CC BY-SA 4.0 (item 2), which is separate
+      from the code license; say so in the README.
 
-**Check:** request a code for a real inbox (Gmail and Naver mail, at least),
-confirm it arrives within a minute and not in spam, and that a failure at the
-mail server shows the "인증 메일을 보내지 못했습니다" message.
+**Check:** the About screen lists every bundled component with its license;
+a license scanner over the installer's contents finds nothing unlisted.
 
-Code: `backend/infra/email_client.py`, `backend/auth/email_verification.py`.
+## 2. Models: ONNX export, publishing and attribution
 
-## 3. NLI model: hosting and attribution
-
-**Now:** the appearance/location judgment uses the NLI model trained in
-`ml/nli` (`mixed` in `ml/nli/RESULTS.md`), kept only on the machine that
-trained it, in `ml/nli/runs/mixed` (not committed). A worker without that
-directory falls back to a weaker public checkpoint (with a warning in its log).
+**Now:** the NER, QA and NLI models are PyTorch checkpoints kept only on the
+machine that trained them (`ml/ner/runs/klue`, `ml/qa/runs/klue`,
+`ml/nli/runs/mixed`, not committed). A worker without the NLI model falls
+back to a weaker public checkpoint; without NER or QA, extraction fails.
 
 **To do:**
-- [ ] Host the model where production workers can load it, e.g. a private
-      Hugging Face Hub repository (then `NLI_MODEL=<repo id>` plus an access
-      token) or a GCS bucket (needs a download step at worker startup).
-- [ ] Set `NLI_MODEL` in the production environment, and make sure production
-      can't silently run on the fallback checkpoint (fail startup, or alert).
-- [ ] Attribution: the training data (KorNLI, KLUE-NLI) is CC BY-SA 4.0. Credit
-      both where the service lists its sources: KorNLI (Ham et al., 2020,
-      kakaobrain/kor-nlu-datasets) and KLUE (Park et al., 2021,
-      KLUE-benchmark/KLUE).
-- [ ] The NER and QA models of claim extraction (`ml/ner/runs/klue`,
-      `ml/qa/runs/klue`) are kept on the training machine too: host them with
-      the NLI model and set `NER_MODEL` / `QA_MODEL` in production. They have no
-      public fallback, so a worker without them fails extraction (alert on it).
-- [ ] Attribution: their training data (KLUE-NER, KLUE-MRC) is CC BY-SA 4.0;
-      KLUE (Park et al., 2021) is already credited above.
+- [ ] Export the three to ONNX, and check that the ONNX models score the same
+      as the PyTorch ones on the evaluation sets (`ml/extraction`,
+      `ml/nli/RESULTS.md`), on the CPU and on a GPU. If they're quantized to
+      shrink the download, measure the quantized ones the same way.
+- [ ] Publish them in a public Hugging Face repository under CC BY-SA 4.0,
+      with model cards that credit the training data: KorNLI (Ham et al.,
+      2020, kakaobrain/kor-nlu-datasets) and KLUE (Park et al., 2021,
+      KLUE-benchmark/KLUE; KLUE-NLI, KLUE-NER, KLUE-MRC). The base model,
+      klue/roberta-base, is credited too.
+- [ ] First-run download in the app: pinned versions, SHA-256 checks, resume
+      after a dropped connection, a clear message offline. No silent fallback
+      to a weaker model: a missing model is an error the author sees.
+- [ ] The same credits in the app's About screen.
 
-**Check:** a validation run on the production worker logs no fallback
-warning, and the flags match what the same episode gives locally.
+**Check:** on a clean Windows PC, the first run downloads the models,
+verifies them, and validates an episode with the same flags as the
+development machine.
 
-Code: `backend/infra/inference_client.py`, `ml/nli/`.
+Code: `backend/infra/inference_client.py`, `ml/nli/`, `ml/ner/`, `ml/qa/`.
 
-## 4. LLM for OOC judgment: choose and wire it up
+## 3. LLM connections: terms and notices
 
-**Now:** `LLM_PROVIDER=mock` — no model, and it judges nothing. The LLM is used
-for OOC judgment only (design doc 7.2); claim extraction runs on in-house NER /
-QA models and rules (7.1.1) with no LLM. The external and self-hosted clients
-are stubs that fail. The model is set in `LLM_MODEL_JUDGMENT`
-(`backend/infra/llm_client.py`). A failed LLM call needs an error code on the
-run once judgment is built (the editor turns codes into messages).
+**Now:** `LLM_PROVIDER=mock`, no model; the OOC judgment isn't built yet
+(roadmap stage 5). The design (README part 2, chapter 3) is: Sign in with
+ChatGPT (plan usage), an API key (Anthropic, OpenAI-compatible), or a local
+OpenAI-compatible server.
 
 **To do:**
-- [ ] Choose the model, trying it on real OOC cases (free options looked at:
-      Groq's free tier, which doesn't train on inputs; a self-hosted open
-      model via Ollama).
-- [ ] Implement the chosen client (and a concurrency limit + retry backoff on
-      rate limits, design doc 10.4).
-- [ ] Set `LLM_PROVIDER`, `LLM_API_KEY` / `LLM_ENDPOINT` and
-      `LLM_MODEL_JUDGMENT` in the production environment (secret manager).
+- [ ] Re-read the providers' current terms right before release, since they
+      have changed often: OpenAI's Sign in with ChatGPT for open-source /
+      locally run apps (developers.openai.com/siwc), that Claude and Gemini
+      subscriptions still can't be used by other apps, and how each free API
+      tier uses its inputs (the Gemini API's free tier trains on them).
+- [ ] The consent notice shown when a connection is first turned on, and the
+      warning for tiers that train on inputs.
+- [ ] Keys and tokens only in Windows Credential Manager; check that none end
+      up in the database, logs or crash reports.
 
-**Check:** an episode with an out-of-character passage gets an OOC flag with
-the production provider, and the provider's usage shows only judgment calls.
+**Check:** connect each way once (ChatGPT, an Anthropic key, an
+OpenAI-compatible key, Ollama), run an episode with an out-of-character
+passage, and see an OOC flag; with the connection removed, the same episode
+validates with "OOC not judged" and nothing else missing.
 
 Code: `backend/infra/llm_client.py`, `backend/ai/llm.py`.
+
+## 4. Installer, signing and updates
+
+**Now:** no installer; the app runs from the development setup (Docker
+PostgreSQL and Redis, `uvicorn`, `vite`).
+
+**To do:**
+- [ ] Code signing. Unsigned, the installer gets a SmartScreen warning that
+      many authors won't click through. Options: a code-signing certificate,
+      Azure Trusted Signing, or shipping unsigned with instructions at first.
+- [ ] The updater's signing key: generated once, kept out of the repository
+      (CI secret), backed up. Losing it means existing installs can't
+      update.
+- [ ] WebView2: present on Windows 11 and most Windows 10; the installer
+      bootstraps it where it isn't.
+- [ ] Uninstall keeps the data folder unless the author asks to remove it.
+
+**Check:** install, update to a newer build and uninstall on a clean
+Windows 10 and Windows 11 PC; the novels are still there after the update.
+
+## 5. GPU and CPU
+
+**Now:** development runs PyTorch on the CPU (`torch ...+cpu`).
+
+**To do:**
+- [ ] Before building on it, check the state of DirectML in ONNX Runtime
+      (Microsoft has been moving Windows GPU inference to Windows ML) and
+      pick the execution provider accordingly.
+- [ ] Test on an NVIDIA GPU, an AMD or Intel GPU, and a PC with no usable GPU:
+      the same flags on each, and a fallback to the CPU when the GPU fails.
+- [ ] Measure a typical episode's validation time on the CPU, and say in the
+      README what to expect.
+
+**Check:** the settings screen shows which device ran the last validation,
+and CPU only gives the same results as the GPU.

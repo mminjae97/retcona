@@ -1,6 +1,6 @@
 # db
 
-Uses Alembic as the schema migration tool (design doc 10.5.4) — adopted from the start so local (e2-micro) and Cloud SQL stay identically reproducible.
+Uses Alembic as the schema migration tool (design doc 10.5.4) — adopted from the start so the schema is reproducible anywhere; the desktop app will use it to upgrade the author's database at startup.
 
 ## Usage
 

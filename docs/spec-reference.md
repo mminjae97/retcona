@@ -10,7 +10,8 @@ can read this file instead of the full README each time.
 ## 0. Product summary
 
 Retcona ("Recording Every Timeline Change: Oversight Network, Assistant") is
-a web service for web-novel authors. While an author serializes a long-form
+a free, open-source Windows desktop app for web-novel authors: manuscripts
+and settings stay on the author's PC. While an author serializes a long-form
 novel episode by episode, it automatically records the character/location/
 event settings that accumulate over time, and automatically flags when a new
 episode's manuscript contradicts what was already established.
@@ -49,10 +50,9 @@ where the character/world count is large.
 
 ### Core features (functional requirements)
 
-1. **Account & My Page** — sign up via email or a Google account; use a pen
-   name instead of a real name; manage multiple novels
-   under one account from My Page; view per-novel relationship graph/
-   timeline; account deletion.
+1. **Novel management** — no sign-up or login: the app opens on the list of
+   novels; manage several novels; view each one's relationship graph/
+   timeline. Everything is stored on the author's PC.
 2. **In-service writing editor** — long-form text editor; a local, in-browser
    draft plus an explicit save button so work in progress is never lost;
    validation runs against the saved manuscript; previously saved episodes
@@ -94,6 +94,9 @@ cross-checks new manuscript input against existing records and surfaces
 contradiction candidates first — the author doesn't have to go looking for
 inconsistencies, the service raises them. Authors can also start writing
 immediately without pre-filling any settings, lowering the barrier to entry.
+And since it runs on the author's PC, an unpublished manuscript never goes to
+a server — the only thing that sends any of it out is an LLM connection the
+author turns on (§3).
 
 ---
 
@@ -106,8 +109,9 @@ immediately without pre-filling any settings, lowering the barrier to entry.
   location errors, spacetime (timeline) contradictions.
 - **Design principle**: split module boundaries by **judgment perspective**,
   not by data type (character vs. location) — data lookups happen in one
-  shared layer. Since this is a multi-user service, all data and AI
-  processing must be isolated per user (per novel).
+  shared layer. One author uses the app on their own PC, but all data is
+  still grouped per novel so one novel's settings never leak into another's
+  validation.
 
 ---
 
@@ -116,18 +120,17 @@ immediately without pre-filling any settings, lowering the barrier to entry.
 ### 2.1 Overall screen flow
 
 ```
-Login / social login -> Dashboard
-Dashboard -> Preset management (optional): characters · locations
-Dashboard -> Manuscript editor
+Novel list (home) -> Preset management (optional): characters · locations
+Novel list -> Manuscript editor
   editor --(save)--> editor
   editor --(run validation)--> automatic validation run (includes auto-registering new characters/locations)
     -> Validation result screen
        --(accept)--> setting history updated
        --(dismiss as false positive)--> flag dismissed
        --(supplement settings)--> add world/character settings -> re-run validation -> back to validation result screen
-Dashboard -> pre-writing brief / checklist
-Dashboard -> My Page
-My Page -> per-novel relationship graph · timeline (scoped to that novel_id only)
+Novel list -> pre-writing brief / checklist
+Novel list -> per-novel relationship graph · timeline (scoped to that novel_id only)
+Novel list -> Settings: LLM connection · inference device · data folder
 ```
 
 ### 2.2 Manuscript editor screen
@@ -145,22 +148,21 @@ My Page -> per-novel relationship graph · timeline (scoped to that novel_id onl
 ```
 
 - **Local draft**: while typing, the manuscript is written to a draft kept in
-  this browser only (debounced, on a short delay) — never sent to the server.
-  It's a safety net against an expired session, a network failure or a closed
-  tab: whichever of those happens, the text since the last **Save** is still
-  recoverable in this browser, and a page reopening the episode offers it back
-  if the server's own copy is older. It's flushed one last time when the tab
-  is hidden or the editor is left, and dropped once a save confirms the server
-  has the same text. A confirmation is shown before leaving with changes this
+  the app's WebView storage (debounced, on a short delay) — not yet to the
+  database. It's a safety net against a crash or a closed window: the text
+  since the last **Save** is still recoverable, and reopening the episode
+  offers it back if the saved copy is older. It's flushed one last time when the tab
+  is hidden or the editor is left, and dropped once a save confirms the
+  database has the same text. A confirmation is shown before leaving with changes this
   draft failed to capture (storage blocked, full, or otherwise unavailable) —
   the only case leaving the editor can actually lose text.
-- **Save**: the only thing that reaches the server. Manual, immediate save
+- **Save**: the only thing that writes the database. Manual, immediate save
   button; does not trigger the AI pipeline.
-- **Run validation**: enqueues the saved manuscript onto the job queue
+- **Run validation**: enqueues the saved manuscript onto the local job queue
   (§8.2) to run the pipeline. Saving (write) and validating (AI processing)
   are intentionally separate so every keystroke doesn't trigger an AI call.
-- **Reopening an existing episode**: selecting an episode from My Page
-  (§2.5) loads its raw text into this same editor for continued editing,
+- **Reopening an existing episode**: selecting an episode from the novel
+  list (§2.5) loads its raw text into this same editor for continued editing,
   regardless of whether its status is `draft` or `submitted`.
 - **Editing an already-validated episode**: saving edits to a `submitted`
   episode flips its status back to `draft`. Existing validation results
@@ -239,37 +241,46 @@ Design principles for this area:
 - Flags are sorted by confidence; clicking the evidence sentence jumps to
   its location in the manuscript.
 
-### 2.5 My Page screen
+### 2.5 Novel list & settings screens
 
 ```
 +--------------------------------------------------+
-|  My Page                                          |
+|  My novels                    [+ New]  [Settings]  |
 +--------------------------------------------------+
-|  Account info                                      |
-|   Nickname: NightShadow                  [Change]  |
-|   Email: writer@email.com   Linked: Google         |
-+--------------------------------------------------+
-|  My novels                             [+ New]     |
 |   Otherworldly Swordsman   Ep.42   updated 2d ago   |
 |                     [Open] [Graph/Timeline] [Delete]|
 |   Legacy of the Throne     Ep.12   updated 1w ago   |
 |                     [Open] [Graph/Timeline] [Delete]|
 +--------------------------------------------------+
-|  Danger zone                                        |
-|                                     [Delete account]|
+|   Trash (1)                                         |
 +--------------------------------------------------+
 ```
 
-- **Nickname change**: inline edit from the [Change] button (constraints in
-  §3.6).
+```
++--------------------------------------------------+
+|  Settings                                          |
++--------------------------------------------------+
+|  LLM connection (OOC judgment, optional)           |
+|   Connected: ChatGPT (Plus)     [Change] [Disconnect]|
++--------------------------------------------------+
+|  Inference device  (o) Auto (GPU first)  ( ) CPU only |
+|  Data folder  C:\Users\...\Retcona     [Open] [Back up] |
++--------------------------------------------------+
+|  About · open-source licenses · model data sources |
++--------------------------------------------------+
+```
+
+- The app opens on the novel list — there are no accounts, so no login,
+  sign-up or withdrawal screens.
 - **Novel management**: rename, open (episode list -> selecting an episode
   goes to the §2.2 editor; new episodes also start here), delete.
-- **Novel delete**: confirmation modal, then soft-delete (kept 30 days,
-  recoverable in that window) -> after that a batch job permanently deletes
-  everything under that `novel_id`. The multi-tenancy design (all child data
-  hangs off `novel_id`) makes the deletion scope unambiguous.
-- **Account deletion**: kept in a separate "danger zone" to prevent
-  accidental clicks; full procedure in §3.5 below.
+- **Novel delete**: confirmation modal, then to the trash (kept 30 days,
+  recoverable in that window) -> after that, while the app runs, a job
+  permanently deletes everything under that `novel_id`. All child data hangs
+  off `novel_id` (§4.1), so the deletion scope is unambiguous.
+- **Settings**: the LLM connection (§3), the inference device (§8.3), opening
+  and backing up the data folder (§8.1), and the app's licenses and the
+  models' training-data sources (§8.5.2).
 
 ### 2.6 Per-novel relationship graph / timeline screen
 
@@ -283,131 +294,85 @@ Design principles for this area:
 +--------------------------------------------------+
 ```
 
-- Only reachable from the novel list in My Page — even a direct URL hit is
-  blocked unless the requester's `user_id` owns that novel (DB-level
-  isolation, §8.1).
+- Reached from the novel list (§2.5); every query is scoped to that novel's
+  `novel_id` (§8.1).
 - A top tab switches between the character relationship graph (§6.2) and the
   story timeline graph (§6.3) — same graph component, different data
   binding (§6.4).
 
 ---
 
-## 3. Auth & account
+## 3. LLM connection (OOC judgment, optional)
 
-### 3.1 Login methods
+The LLM is used only for the hard OOC cases left after rules and NLI (§7.2).
+The app neither bundles an LLM nor pays for one: the author connects the LLM
+they already use. Without a connection, claim extraction and the appearance,
+location and spacetime judgments all still run on the models on the PC; only
+OOC's LLM step is off.
 
-| Method | Provider | Notes |
+### 3.1 Ways to connect
+
+| Way | For | Notes |
 |---|---|---|
-| Native login | Email + password | Password hashed (bcrypt or similar). Signup form includes a nickname (pen name) field. Before signup, a 6-digit code emailed to the address proves the author owns it. |
-| Social login | Google | OAuth 2.0 (authorization code + PKCE). On first login the account is created once a nickname is chosen (§3.2). |
+| Sign in with ChatGPT | ChatGPT Go / Plus / Pro subscribers | OpenAI's "Sign in with ChatGPT" plan-usage permission: no API key or separate billing, usage comes out of the plan. OpenAI allows it for open-source and locally run apps. Requests go to the Responses API |
+| API key | Anthropic; OpenAI-compatible (OpenAI, Google Gemini, Groq, OpenRouter, ...) | The author creates the key in the provider's developer console; billed per use, separately from any chat subscription |
+| Local server | Ollama, LM Studio, other OpenAI-compatible servers | The manuscript never leaves the PC; quality and speed depend on the GPU |
 
-### 3.2 Social login flow
+- Claude and Gemini chat subscriptions can't be used by other apps under
+  those providers' terms (as of 2026): they connect by API key only.
+- Two adapters: the Anthropic Messages API, and OpenAI-compatible (built on
+  the Responses API, which Sign in with ChatGPT uses too).
+- The author picks the model; the app only suggests one per connection.
 
-```
-User clicks the Google login button
-  -> Frontend sends the browser to Google (state + PKCE code challenge)
-  -> Google returns an authorization code to the frontend's callback page
-  -> Frontend sends the code + PKCE verifier to the API server
-  -> API exchanges the code with Google (client secret stays on the server)
-     for an ID token: Google account id + verified email
-  -> API looks up the user by Google account id
-  -> Existing account: API issues an auth token (JWE-encrypted)
-  -> New account: API returns a short-lived signup token; frontend shows a
-     nickname-setup screen; the nickname + signup token create the account,
-     and API issues an auth token
-```
+### 3.2 Storing keys and tokens
 
-An email already registered with a password is refused rather than linked:
-accounts created before signup email verification existed never proved they own
-the address, so linking by email would let whoever registered someone else's
-Gmail address first into that person's account.
+- API keys and the ChatGPT sign-in token are kept in Windows Credential
+  Manager — never in plain text in the database or a config file.
+- A key is only ever sent to its own provider.
 
-Key rule: **social login never auto-fills the nickname from the provider
-profile name.** It is always entered directly by the user, so authors can
-use a pen name instead of their real name.
+### 3.3 Notice and consent
 
-### 3.3 Token encryption (JWE)
+- When an LLM connection is first turned on, the app says that OOC judgment
+  sends parts of the manuscript (the passage, the character's personality/
+  speech settings) to that provider, and asks for consent.
+- A free tier that trains on its inputs (e.g. the Gemini API's free tier,
+  whose inputs improve Google's models and may be read by human reviewers)
+  gets its own warning.
 
-Issued auth tokens are not plain JWTs — they are **JWE-encrypted** so that
-claims (user ID, novel access rights) aren't exposed in the token itself.
+### 3.4 Calling the LLM
 
-- Structure (nested JWT): claims are signed as a JWT (JWS, integrity) → the
-  signed token is then encrypted as JWE (confidentiality).
-- Example algorithms: signing RS256 / key management RSA-OAEP-256 / content
-  encryption A256GCM.
-- Only the server holds the decryption key; the client only stores/forwards
-  the encrypted token.
-- Request flow: frontend sends `Authorization: <JWE token>` -> API decrypts
-  JWE -> verifies JWT signature -> uses claims (user_id, novel permissions).
-
-### 3.4 Account structure
-
-- One account can register and manage multiple novels.
-- All data is isolated **per novel**, not per account — see the Data Model
-  section below.
-
-### 3.5 Account deletion (withdrawal)
-
-```
-My Page -> request withdrawal
-  -> identity confirmation (re-enter password, or social re-auth)
-  -> account marked "pending deletion" (users.deletion_requested_at set)
-  -> 30-day grace period
-     -> if user logs back in within the grace period: deletion is cancelled, account restored
-     -> if grace period elapses: a batch job permanently deletes the account and all its novel data
-```
-
-- **Identity confirmation**: never delete immediately — require password
-  re-entry (native login) or social re-auth first.
-- **Grace period**: 30 days; logging back in during this window
-  auto-cancels the deletion (protects against accidental withdrawal).
-- **Deletion scope**: after the grace period, a batch job (reusing the
-  queue/worker infra from §8.2 below) deletes every `novels` row owned by
-  that `user_id`, plus everything hanging off those `novel_id`s (characters,
-  locations, episodes, claims, flags, event graph, etc). The
-  `user_id -> novels -> novel_id` chain from the multi-tenancy design makes
-  the deletion scope unambiguous.
-- **Irreversibility notice**: must be communicated clearly both at the time
-  of the withdrawal request and during the grace period — after the grace
-  period there is no recovery.
-
-### 3.6 Nickname (pen name) rules
-
-- **Initial setup**: native signup collects it on the signup form; social
-  login collects it on a dedicated first-login screen (§3.2).
-- **Change**: editable any time from My Page's account info section.
-- **Constraints**: length 2–20 characters (counted after Unicode NFC
-  normalization and stripping surrounding whitespace), and only letters,
-  numbers and the ordinary space (combining marks allowed, at most 3 in a row
-  and never leading a name). Emoji, punctuation, symbols, other kinds of
-  whitespace and invisible / control characters (zero-width joiner, NUL, ...)
-  are rejected, as are characters outside the Basic Multilingual Plane. Backend
-  (`auth/schemas.py`) and frontend (`utils/nickname.ts`) apply the same rule.
-  Duplicates are allowed — the real identifier is email/`user_id`, so nickname
-  uniqueness is not enforced.
+- One episode's OOC candidates are batched into as few calls as possible; a
+  concurrency limit and retry backoff keep it under per-minute limits.
+- A failure (rate limit 429, expired sign-in, ...) marks only that judgment
+  "OOC not judged" and shows the rest of the results; it can be retried
+  later.
+- Since any model may be on the other end, the response format is fixed
+  JSON; a malformed response counts as no judgment.
 
 ---
 
 ## 4. Data model
 
-### 4.1 Multi-tenancy shape
+### 4.1 Per-novel shape
+
+A single-user app with no accounts: there is no `users` table, and the novel
+is the top level. All data is grouped **per novel**, so one novel's settings
+never mix into another's validation, and deletion or export is scoped by one
+`novel_id`.
 
 ```
-users -> novels -> characters
-                 -> locations
-                 -> episodes
-                 -> claims
-                 -> contradiction_flags
+novels -> characters
+       -> locations
+       -> episodes
+       -> claims
+       -> contradiction_flags
 ```
 
 Every entity table below carries a `novel_id` FK, and **every query must be
-filtered by `novel_id`** (enforced at the application layer, and see §8.1 for
-the RLS backstop).
+filtered by `novel_id`** (enforced at the application layer, §8.1).
 
-- **users**: id, email, `nickname`, provider, provider_id, password_hash,
-  created_at, `deletion_requested_at` (§3.5).
-- **novels**: id, user_id FK, title, created_at, `deleted_at` (soft delete,
-  §2.5) — one account can own many novels.
+- **novels**: id, title, created_at, `deleted_at` (moved to the trash,
+  §2.5).
 
 ### 4.2 Dual time axes
 
@@ -469,13 +434,21 @@ flashback episodes) — keep them separate:
 
 | Component | Choice | Notes |
 |---|---|---|
+| App shell | Tauri 2 + the React frontend | Uses Windows' WebView2, so the installer stays small; also installs and updates |
+| Local backend | FastAPI, bundled with PyInstaller and started by the shell | Listens on 127.0.0.1 only (§8.4.2) |
+| Inference runtime | ONNX Runtime — GPU (DirectML), else CPU | NVIDIA, AMD and Intel GPUs alike. Training stays in `ml/` on PyTorch and exports to ONNX — the app ships no PyTorch |
+| Morphological analysis | kiwipiepy | Part-of-speech tags for the extraction rules (§7.1.1) |
 | Embedding | KURE-v1 + BM25 hybrid | Combines semantic search with keyword matching |
 | Cross-encoder reranker | bge-reranker-v2-m3-ko family | Extracts top-K relevant past setting sentences |
 | NLI | klue-roberta + KorNLI base | Needs re-finetuning for novel narrative/dialogue register |
 | NER | klue-roberta, fine-tuned in-house | Claim extraction — finding character/location names (§7.1.1) |
 | Extractive QA | klue-roberta, fine-tuned in-house | Claim extraction — pulling attribute values out of a sentence (§7.1.1) |
-| LLM (external API) | model TBD | **OOC judgment only** — the hard cases left after rules and NLI (§7.2) |
-| DB | PostgreSQL + pgvector | Vector search and structured data in one DB |
+| LLM | The one the author connects (§3) | **OOC judgment only, optional** — the hard cases left after rules and NLI (§7.2) |
+| DB | SQLite (vector search: sqlite-vec) | One file on the author's PC — no database server to install or run |
+
+The embedding model and reranker are large (KURE-v1 is about 570M
+parameters); whether the app ships them, or uses them only with a GPU, is
+decided when they're implemented.
 
 ---
 
@@ -484,37 +457,37 @@ flashback episodes) — keep them separate:
 ### 6.1 Architecture
 
 ```
-Frontend -> API server -> Auth module
-                        -> Validation pipeline -> Embedding/reranker
-                                                -> NLI module
-                                                -> LLM integration
-                                                -> PostgreSQL + pgvector
-API server -> PostgreSQL + pgvector
+Desktop shell (Tauri) -> Frontend (React)
+Frontend -> Local backend (FastAPI, 127.0.0.1) -> Job runner -> Validation pipeline -> Local models (ONNX Runtime)
+                                                                                     -> LLM connection (the author's plan / API key)
+                                                                                     -> SQLite
+Local backend -> SQLite
 ```
 
 ### 6.2 Folder layout
 
 ```
 retcona/
-├── frontend/     # login, preset cards, upload, validation result screens
+├── desktop/      # Tauri shell: starts the backend process, installer, updates
+├── frontend/     # novel list, preset cards, editor, validation result screens
 ├── backend/
-│   ├── api/       # REST endpoints
-│   ├── auth/        # login, social login (OAuth), token issuance
+│   ├── api/       # REST endpoints (called only by the frontend in the shell)
 │   ├── pipeline/       # extract_claims, context_bundle, 3 judgment modules, merge
-│   ├── models/           # DB models (users, novels, characters, locations, ...)
+│   ├── models/           # DB models (novels, characters, locations, ...)
 │   ├── ai/                 # embedding / reranker / NLI / LLM client wrappers
-│   ├── workers/              # cpu_worker / gpu_worker entrypoints (branch on WORKER_TYPE)
-│   └── infra/                  # QueueClient / StorageClient etc. cloud abstraction layer
-└── db/                            # migrations · schema
+│   ├── workers/              # local job runner (validation, re-validation, emptying the trash)
+│   └── infra/                  # job queue / inference / LLM / storage interfaces and implementations
+├── ml/           # model training and evaluation (PyTorch), ONNX export
+└── db/           # migrations · schema
 ```
 
 - The 3 judgment modules under `pipeline/` share one interface
   (`claims + context_bundle` in -> `flags` out) so they can run in parallel
   and be swapped independently.
 - Every `models/` and `pipeline/` function should require `novel_id` as a
-  mandatory argument, so isolation gaps are caught at the code level.
-- `pipeline/` and `ai/` hold business logic only — queue/storage access
-  always goes through the `infra/` interfaces (see §8.4).
+  mandatory argument, so cross-novel mix-ups are caught at the code level.
+- `pipeline/` and `ai/` hold business logic only — queue, inference, LLM and
+  storage access always goes through the `infra/` interfaces (see §8.4.3).
 
 ---
 
@@ -578,8 +551,9 @@ time tune NLI's contradiction threshold.
   need through the shared context bundle.
 - Result merge is required: dedupe multiple flags pointing at the same root
   cause.
-- Resource contention: external LLM API rate limits; local models should use
-  batch serving (e.g. vLLM).
+- Resources: one validation job at a time so the author's GPU memory isn't
+  exceeded, with sentences batched for inference (§8.3); the LLM within the
+  author's own limits (§3.4).
 
 ### 7.4 Auto entity registration & auto setting merge
 
@@ -616,157 +590,133 @@ Validation result screen -> supplement world/character settings
 
 - Never re-run the whole pipeline — only the judgment module that produced
   the flag, against a fresh context bundle. Saves cost.
-- Also goes through the job queue (§8.2), processed asynchronously.
+- Also goes through the local job queue (§8.2), processed asynchronously.
 - A flag resolved via re-validation keeps a record of which setting resolved
   it, to help reduce similar false positives later.
 
 ---
 
-## 8. Concurrency, multi-tenancy & deployment
+## 8. Runtime & distribution (Windows desktop app)
 
-### 8.1 DB-level isolation
+A free, open-source app one author runs on their own PC. There's no server,
+so manuscripts and settings stay on the PC — except what the author's own LLM
+connection sends (§3), and model downloads and update checks (§8.5).
 
+### 8.1 Data storage & per-novel isolation
+
+- Data lives in one SQLite file under `%LOCALAPPDATA%\Retcona`.
 - Every read/write is forced through a `novel_id` filter (repository
-  functions require `novel_id` as a mandatory argument).
-- Consider PostgreSQL **Row-Level Security (RLS)** as a defense-in-depth
-  layer — set `novel_id` on the session and enforce via policy, so an
-  application-code mistake still can't leak across novels.
-- pgvector similarity search must also always be scoped by `novel_id` —
-  otherwise another user's setting sentences could leak into results.
+  functions require `novel_id` as a mandatory argument), so one novel's
+  settings never enter another's validation or search; vector similarity
+  search is always scoped by `novel_id` too.
+- Backup: the settings screen (§2.5) backs up the whole database file and
+  exports/imports one novel as a file.
 
-### 8.2 Job queue for concurrent requests
+### 8.2 Local job queue
 
 Validation requests are not processed synchronously — they're enqueued as
 async jobs:
 
 ```
-API server -> job queue -> worker 1, worker 2 (parallel) -> DB
-Frontend polls the API for job status
+Frontend -> local backend -> job queue (an SQLite table) -> job runner (in the backend process) -> SQLite
+Frontend polls the backend for job status
 ```
 
-- New episode validation request -> enqueue -> workers process in parallel
-  -> results saved to DB -> client polls/websockets for completion.
+- Validation, re-validation and emptying the trash are enqueued and run one
+  at a time by a job runner inside the backend process — a database table
+  as the queue, no Redis, so pending jobs survive closing the app.
 - The editor's (§2.2) "Run validation" button is the entry point that
   enqueues onto this queue.
-- API responses stay fast under load since processing is decoupled.
+- One job at a time keeps the GPU's memory in bounds.
 
-### 8.3 AI resource contention
+### 8.3 Local resources
 
-- Local models (NLI, reranker): batch-serving framework (e.g. vLLM) to
-  batch multiple users' requests together.
-- External LLM API: concurrency limit (semaphore) + retry backoff on rate
-  limit.
-- DB connections: connection pooling (e.g. PgBouncer) to avoid exhaustion
-  under concurrent load.
+- **Inference device**: ONNX Runtime on the GPU (DirectML) where there is
+  one, the CPU where there isn't or it fails; settings (§2.5) can force CPU
+  only. NER, QA and NLI are ~110M-parameter models, practical on a CPU.
+- **Models**: loaded on first use and kept while the app runs; sentences are
+  batched.
+- **LLM**: within the author's own limits (§3.4).
 
-### 8.4 GCP-oriented worker scaling design
+### 8.4 App layout
 
-#### Worker types
+#### 8.4.1 Processes
 
-| Worker type | Role | Characteristics | Scaling |
-|---|---|---|---|
-| CPU worker | Claim extraction orchestration, rule-based checks, LLM API calls (OOC) | I/O-bound, throughput scales linearly with count | Horizontal autoscaling on queue depth |
-| GPU worker | Embedding, reranker, NLI / NER / QA inference | Needs batching for efficiency, adding instances alone doesn't help | Batch serving (vLLM) + limited scaling |
-
-#### GCP service mapping
-
-| Component | GCP service |
+| Part | Role |
 |---|---|
-| Job queue | Pub/Sub |
-| CPU worker runtime | Cloud Run |
-| GPU worker runtime | Compute Engine GPU + MIG (or Cloud Run GPU) |
-| DB | Cloud SQL for PostgreSQL (+pgvector) |
-| DB connection management | Cloud SQL Auth Proxy + PgBouncer |
-| Object storage | Cloud Storage |
+| Desktop shell (Tauri) | Window, starting/stopping the local backend, install and update |
+| Local backend (FastAPI) | API + job runner (§8.2) + model inference |
+| Frontend (React) | Shown in the shell's WebView |
 
-#### Interface abstraction
+#### 8.4.2 Protecting the local backend
 
-To support local-dev ↔ GCP switching and the staged backend transition
-(CPU↔GPU, external API↔self-hosted) with zero code changes, queue / storage /
-inference / LLM access all sit behind interfaces:
+- Bound to a random port on 127.0.0.1 only; every request must carry a
+  secret the shell generates at each launch, so other programs on the PC and
+  web pages in a browser can't call the API. The Host header is checked too,
+  against DNS rebinding.
+
+#### 8.4.3 Interface abstraction
+
+So that changing the inference device (GPU/CPU) or the LLM connection (§3.1)
+never changes business logic, queue / storage / inference / LLM access all
+sit behind interfaces:
 
 ```
-pipeline & worker code
-  -> QueueClient interface -> PubSubQueueClient (prod) / local Redis-based impl (dev)
-  -> StorageClient interface -> GCSStorageClient
-  -> InferenceClient interface -> CPU impl / GPU impl
-  -> LLMClient interface -> external-API impl / self-hosted impl
+pipeline & job runner code
+  -> QueueClient interface -> local queue (SQLite)
+  -> StorageClient interface -> local files
+  -> InferenceClient interface -> ONNX Runtime GPU / ONNX Runtime CPU
+  -> LLMClient interface -> Sign in with ChatGPT / Anthropic API / OpenAI-compatible API (local servers too)
 ```
 
 - `QueueClient` exposes only `enqueue(job)` / `dequeue()` / `ack(job_id)` —
   business logic never knows the concrete implementation.
-- `InferenceClient` and `LLMClient` pick their implementation via
-  `INFERENCE_BACKEND=cpu|gpu` and `LLM_PROVIDER=external|self_hosted` env
-  vars. The judgment modules (§7.2) call only the interface, so staged
-  transitions (§8.5) require zero business-logic changes.
+- `StorageClient` stores illustrations etc. in the data folder (§8.1).
+- `InferenceClient` and `LLMClient` pick their implementation from the
+  settings (§2.5); the judgment modules (§7.2) call only the interface.
+- The same test suite runs against every implementation of an interface
+  (GPU/CPU, each LLM adapter).
 
-#### Worker code requirements
+#### 8.4.4 Job requirements
 
-- **Stateless**: a worker must complete a job using only the job payload and
-  DB reads — no local disk/memory state, since autoscaling can start/stop
-  instances at any time.
+- **Stateless**: a job completes using only its payload and DB reads.
 - **Idempotent**: every job gets a unique ID and completion is recorded in
-  DB, so at-least-once queue delivery can't cause duplicate side effects.
-- **Graceful shutdown**: on SIGTERM, finish the in-flight job or return it to
-  the queue (ack deadline) before exiting — avoid losing work on scale-in.
-- **Role branching**: one image, entrypoint chosen by `WORKER_TYPE=cpu|gpu`
-  env var, so the same code is reused for both instance types.
+  the DB, so running one twice can't change the result.
+- **Recoverable**: a job in progress when the app closes goes back on the
+  queue at the next launch.
 
-#### Autoscaling triggers
+### 8.5 Distribution & updates
 
-- CPU/LLM workers: scale on queue depth — Cloud Run autoscaling by
-  concurrency.
-- GPU workers: queue depth + GPU utilization combined signal; consider a
-  warm pool (min instances) since cold starts are expensive.
+#### 8.5.1 Installer
 
-### 8.5 Cost-minimized staged rollout
+- A Windows installer built by Tauri's bundler, published on GitHub
+  Releases.
+- It holds the app and the local backend only; the models are downloaded on
+  first run (§8.5.2), keeping the installer small and letting the models be
+  updated on their own.
+- Without code signing, Windows SmartScreen warns on install — how to sign is
+  decided in the pre-release checklist.
 
-Start with zero standing infra cost wherever possible, pay only for usage.
+#### 8.5.2 Models & attribution
 
-#### Initial cost-minimized config (GCP)
+- The NER, QA and NLI models are exported to ONNX and published in a public
+  Hugging Face repository; the app downloads them on first run and checks
+  their SHA-256. Each app version pins the model versions it downloads.
+- Their training data (KLUE, KorNLI) is CC BY-SA 4.0, so the models are
+  released under CC BY-SA 4.0, credited in the model cards and in the app's
+  About screen (§2.5).
 
-| Component | Initial choice | Note |
-|---|---|---|
-| LLM | External API | Avoids standing GPU hosting cost |
-| NLI / reranker | CPU-based Cloud Run | Lower accuracy, but no GPU cost |
-| CPU worker | Cloud Run, `min-instances=0` | $0 when idle |
-| Job queue | Pub/Sub | Within free tier |
-| Frontend / storage | Cloud Storage | Within free tier |
-| Illustration generation | Deferred | Matches its low-priority roadmap stage |
+#### 8.5.3 Updates & network use
 
-DB is the one exception with a standing cost: Cloud SQL bills even at rest.
-Early on, replace it with PostgreSQL + pgvector self-hosted on GCP's
-always-free e2-micro VM — low-spec, so migrate to Cloud SQL once traffic
-grows.
+- Tauri's updater checks GitHub Releases and installs signed updates only.
+- Nothing else is sent by the app on its own (no usage statistics); tuning
+  the NLI threshold from dismissals (§7.2) happens on the PC only.
 
-#### Staged transition
+#### 8.5.4 Schema migrations
 
-```
-Stage 1 (validate): fully serverless + external API, DB on self-hosted e2-micro
-  -> Stage 2 (user growth): move NLI/reranker to Cloud Run GPU
-  -> Stage 3 (predictable traffic): move DB to Cloud SQL, consider self-hosted LLM
-```
-
-#### Making the transition code-free
-
-- **Backend choice is entirely config**: flipping `INFERENCE_BACKEND`,
-  `LLM_PROVIDER`, `QUEUE_PROVIDER` env vars (§8.4) is the entire 1→2→3
-  transition. Judgment modules (§7.2) and pipeline code never need to know
-  which backend is active.
-- **DB connection is one config value (`DATABASE_URL`)**: code always
-  connects via a local socket/port; whether that's e2-micro Postgres or a
-  Cloud SQL Auth Proxy is purely an infra concern. Moving DBs only changes a
-  connection string.
-- **Autoscaling params live in deploy config (IaC), not code**: e.g.
-  Terraform, not app code — bumping `min-instances` or worker count doesn't
-  require redeploying the app.
-- **DB migration path decided up front**: e2-micro -> Cloud SQL via standard
-  `pg_dump`/`pg_restore` (or logical replication); use Alembic from day one
-  so schema state is reproducible in both environments.
-- **Both implementations tested per interface**: run the same test suite
-  against both the cpu/gpu and external/self-hosted implementations of
-  `InferenceClient`/`LLMClient`, so the transition isn't the first time
-  they're validated.
+- Alembic, as now; the app upgrades the schema at startup after backing up
+  the database file, and restores it if the upgrade fails.
+- SQLite's `ALTER TABLE` is limited, so migrations use Alembic's batch mode.
 
 ---
 
@@ -811,10 +761,10 @@ both merge into "Ep.22 reunion".
 
 - Both graphs are node/edge structures, so reuse the same force-graph /
   D3.js-family component on the frontend for both.
-- On screen entry, the server queries relation/event/link data scoped to
-  that `novel_id` and returns node/edge JSON for the graph.
-- Entry point is the My Page per-novel screen (§2.6) — not a separate
-  dashboard menu, always reached via "my novels" -> pick a novel.
+- On screen entry, the local backend queries relation/event/link data scoped
+  to that `novel_id` and returns node/edge JSON for the graph.
+- Entry point is the novel list (§2.5) — not a separate menu, always reached
+  via "my novels" -> pick a novel.
 
 ---
 
@@ -822,7 +772,7 @@ both merge into "Ep.22 reunion".
 
 - Independent module, separate from the core plausibility engine.
 - Flow: character setting card's fixed appearance attributes -> prompt
-  conversion -> text-to-image API call.
+  conversion -> a text-to-image API the author connects (like the LLM, §3).
 - Core challenge: visual consistency across generations for the same
   character (reference-image-based generation, character LoRA training,
   etc. need evaluation).
@@ -834,11 +784,14 @@ both merge into "Ep.22 reunion".
 
 | Stage | Content |
 |---|---|
-| 1 | Login/social login + My Page (novel mgmt, account deletion) + manuscript editor (local draft/save) + per-episode entity extraction, multi-tenancy-aware setting card schema |
+| 1 | Novel management + manuscript editor (local draft/save) + per-episode entity extraction, per-novel setting card schema (the web service's login and account deletion are removed in stage 6) |
 | 2 | Appearance mismatch + location contradiction detection (NLI-based) |
 | 3 | Re-validation after supplementing settings (per-flag re-judgment) |
 | 4 | Event timeline cross-check (state-history accumulation logic) |
-| 5 | OOC behavior detection (rules and NLI + LLM) |
-| 6 | Concurrency handling (job queue, RLS, etc.) fully adopted + cloud deployment, worker autoscaling |
+| 5 | OOC behavior detection (rules and NLI + the author's LLM connection, §3) |
+| 6 | Desktop app: accounts removed, local job queue, SQLite, ONNX Runtime (GPU/CPU), first-run model download, installer and updates (§8) |
 | 7 | Character relationship graph / story timeline visualization |
 | 8 (optional) | Character illustration generation |
+
+Stage 6 can come before stage 5: the LLM connection's key storage and settings
+screen (§3) assume the single-user desktop app.
