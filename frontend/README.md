@@ -21,6 +21,8 @@ npm run dev
 
 `vite.config.ts` proxies `/api` requests to `http://localhost:8000` (backend).
 
+Open the app at `localhost` (or `127.0.0.1`): the backend only answers requests addressed to this PC (`ALLOWED_HOSTS`, `backend/api/main.py`), so reaching the dev server from another device (`vite --host`, then the PC's LAN address) gets every API call refused with 400. That's deliberate — it's what keeps another website from using the local API (design doc 10.4.2).
+
 ## Site icon
 
 The browser tab / home-screen icon is `src/assets/favicon.png`, the only file to change — `index.html` points both `icon` and `apple-touch-icon` at it.

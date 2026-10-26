@@ -249,8 +249,7 @@ export function schedulePruneStaleDrafts(): void {
 // accounts put up for deletion. Dropped rather than carried over: the app was
 // never released, so they can only be a developer's own leftovers.
 const LEGACY_PREFIXES = ["retcona_drafts_wiped:"];
-// (retcona_storage_migrated: an earlier version of this cleanup marked itself done with it.)
-const LEGACY_KEYS = ["retcona_token", "retcona_user_id", "retcona_storage_migrated"];
+const LEGACY_KEYS = ["retcona_token", "retcona_user_id"];
 
 function isLegacyDraftKey(key: string): boolean {
   return key.slice(DRAFT_PREFIX.length).split(":").length !== 2;

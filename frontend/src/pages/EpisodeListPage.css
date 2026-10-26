@@ -37,11 +37,6 @@
   color: var(--color-danger);
 }
 
-.empty-state {
-  color: var(--color-text-muted);
-  font-size: 13px;
-}
-
 .episode-list {
   list-style: none;
   margin: 0;

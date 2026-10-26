@@ -38,6 +38,9 @@ def downgrade() -> None:
     # up again, then give them to that account by hand:
     #   UPDATE novels SET user_id = (SELECT id FROM users WHERE email = '<your email>');
     #   ALTER TABLE novels ALTER COLUMN user_id SET NOT NULL;
+    # The novels the upgrade moved to the trash (those of accounts put up for
+    # deletion) stay there, and that code has no way to restore them; to see
+    # one again: UPDATE novels SET deleted_at = NULL WHERE id = '<novel id>';
     op.create_table(
         'users',
         sa.Column('id', sa.UUID(), nullable=False),
