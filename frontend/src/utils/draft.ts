@@ -69,16 +69,25 @@ function newSlotId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-// This page load's slot for each episode it has opened.
-const slots = new Map<string, string>();
+// This page load's slot for each episode it has opened; null while the editor
+// is (re)loading the episode, when nothing is written (holdDraftSlot).
+const slots = new Map<string, string | null>();
 
-// Called when the editor opens an episode. What an earlier session left in
+// Called when the editor has the episode. What an earlier session left in
 // storage stays put, and this session writes to a slot of its own.
 export function startDraftSlot(episodeId: string): void {
   slots.set(episodeId, newSlotId());
 }
 
-function currentSlot(episodeId: string): string {
+// Called when the editor starts (re)loading the episode: until startDraftSlot,
+// no draft of it is written. A save still in flight from an earlier visit
+// would otherwise write into the new visit's slot, a copy that visit neither
+// tracks as its own nor lists as another's.
+export function holdDraftSlot(episodeId: string): void {
+  slots.set(episodeId, null);
+}
+
+function currentSlot(episodeId: string): string | null {
   let slot = slots.get(episodeId);
   if (slot === undefined) {
     slot = newSlotId();
@@ -91,13 +100,15 @@ function episodePrefix(episodeId: string): string {
   return `${DRAFT_PREFIX}${episodeId}:`;
 }
 
-function ownKey(episodeId: string): string {
-  return episodePrefix(episodeId) + currentSlot(episodeId);
+function ownKey(episodeId: string): string | null {
+  const slot = currentSlot(episodeId);
+  return slot === null ? null : episodePrefix(episodeId) + slot;
 }
 
 // This session's own draft of the episode.
 export function loadDraft(episodeId: string): Draft | null {
-  return readDraft(ownKey(episodeId));
+  const key = ownKey(episodeId);
+  return key === null ? null : readDraft(key);
 }
 
 // A slot that found the episode full isn't retried on every keystroke burst
@@ -107,6 +118,7 @@ const retryRoomAt = new Map<string, number>();
 
 export function saveDraft(episodeId: string, draft: DraftInput): boolean {
   const key = ownKey(episodeId);
+  if (key === null) return false;
   // Room is checked whenever the slot has to be created — not just the first
   // time, because a confirmed save removes it and other tabs or loads may have
   // filled the episode since. Rewriting an existing slot never needs room.
@@ -134,7 +146,8 @@ export function saveDraft(episodeId: string, draft: DraftInput): boolean {
 }
 
 export function clearDraft(episodeId: string): void {
-  storageRemove(ownKey(episodeId));
+  const key = ownKey(episodeId);
+  if (key !== null) storageRemove(key);
 }
 
 // Parsing a draft means parsing the whole manuscript, and the list is re-read
@@ -159,6 +172,7 @@ function readDraftCached(key: string): Draft | null {
 // load of this one), newest first. This session's own draft is not included.
 export function listOtherDrafts(episodeId: string): StoredDraft[] {
   const own = ownKey(episodeId);
+  if (own === null) return [];
   const prefix = episodePrefix(episodeId);
   const keys = storageKeys(prefix);
   const found: StoredDraft[] = [];
@@ -240,4 +254,30 @@ export function pruneStaleDrafts(now = Date.now()): void {
     const draft = readDraft(key);
     if (draft === null || now - draft.savedAt >= MAX_DRAFT_AGE_MS) discardDraft(key);
   }
+}
+
+// What the web-service version left in this browser's storage: drafts were
+// kept per account (retcona_draft:<user id>:<episode id>:<slot>), next to the
+// session token, the signed-in account's id and the markers of accounts put up
+// for deletion. Drafts move to their per-episode key, so unsaved text is still
+// offered back, except those of an account put up for deletion, which were
+// meant to be gone; the rest is dropped. Synchronous and cheap (keys only, no
+// manuscript is parsed): main.tsx runs it before the first render.
+const LEGACY_WIPED_PREFIX = "retcona_drafts_wiped:";
+const LEGACY_KEYS = ["retcona_token", "retcona_user_id"];
+
+export function migrateLegacyStorage(): void {
+  for (const key of storageKeys(DRAFT_PREFIX)) {
+    const parts = key.slice(DRAFT_PREFIX.length).split(":");
+    if (parts.length !== 3) continue; // already <episode id>:<slot>
+    const [userId, episodeId, slot] = parts;
+    const raw = storageGet(key);
+    const target = `${DRAFT_PREFIX}${episodeId}:${slot}`;
+    const wiped = storageGet(LEGACY_WIPED_PREFIX + userId) !== null;
+    // The old key goes only once the text is under the new one.
+    if (raw !== null && !wiped && storageGet(target) === null && !storageSet(target, raw)) continue;
+    storageRemove(key);
+  }
+  for (const key of storageKeys(LEGACY_WIPED_PREFIX)) storageRemove(key);
+  for (const key of LEGACY_KEYS) storageRemove(key);
 }

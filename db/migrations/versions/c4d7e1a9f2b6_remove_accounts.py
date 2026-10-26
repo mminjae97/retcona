@@ -25,8 +25,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # The schema only: the accounts themselves are gone, so novels.user_id comes
-    # back nullable and empty.
+    # The schema only: the accounts themselves are gone and can't be brought
+    # back, so novels.user_id returns empty (nullable). The code before this
+    # revision shows a novel only to its owner: to use the novels with it, sign
+    # up again, then give them to that account by hand:
+    #   UPDATE novels SET user_id = (SELECT id FROM users WHERE email = '<your email>');
+    #   ALTER TABLE novels ALTER COLUMN user_id SET NOT NULL;
     op.create_table(
         'users',
         sa.Column('id', sa.UUID(), nullable=False),

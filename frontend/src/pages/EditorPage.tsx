@@ -17,6 +17,7 @@ import {
   clearDraft,
   discardDraft,
   discardDraftIfContent,
+  holdDraftSlot,
   isDraftEventFor,
   listOtherDrafts,
   loadDraft,
@@ -342,9 +343,8 @@ export default function EditorPage() {
     setDraftBackupOk(true);
     showOtherDrafts([]);
     currentEpisodeIdRef.current = episodeId;
-    // This load writes to a slot of its own; drafts an earlier load left stay
-    // in storage and show up in the list.
-    startDraftSlot(episodeId);
+    // No draft is written until the episode has arrived below (see holdDraftSlot).
+    holdDraftSlot(episodeId);
     setServerVersion("", "");
     // Chained after saveChainRef instead of fired directly: a quick
     // A -> B -> A navigation can come back to A while the save the author
@@ -357,6 +357,9 @@ export default function EditorPage() {
       .then(() => (cancelled ? null : getEpisode(novelId, episodeId)))
       .then((ep) => {
         if (cancelled || ep === null) return;
+        // This load writes to a slot of its own; drafts an earlier load left
+        // stay in storage and show up in the list.
+        startDraftSlot(episodeId);
         ownDraftRef.current.delete(episodeId);
         setServerVersion(ep.updated_at, ep.content);
         setEpisode(ep);

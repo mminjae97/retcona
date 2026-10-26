@@ -13,6 +13,8 @@ def test_the_app_itself_is_served():
     assert client.get("/health").status_code == 200
     assert client.get("/health", headers={"Origin": "http://localhost:5173"}).status_code == 200
     assert TestClient(app, base_url="http://127.0.0.1:8000").get("/health").status_code == 200
+    # IPv6 loopback, port and all (an older Starlette cut the host at the first ':').
+    assert client.get("/health", headers={"Host": "[::1]:8000"}).status_code == 200
 
 
 def test_a_host_that_isnt_this_pc_is_refused():
