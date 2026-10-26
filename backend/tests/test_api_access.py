@@ -1,6 +1,8 @@
 """Who may use the local API (design doc 10.4.2): the Host check against DNS
 rebinding, the client header against other sites, no framing."""
 
+from fastapi.routing import APIRoute
+from fastapi.security import APIKeyHeader
 from fastapi.testclient import TestClient
 
 from api.main import CLIENT_HEADER, app
@@ -37,21 +39,15 @@ def test_a_request_without_the_client_header_is_refused():
 
 
 def test_a_route_added_later_needs_the_header_too():
-    # The header is the app's own dependency, not each router's.
-    from fastapi import APIRouter
-
-    router = APIRouter()
-
-    @router.get("/later")
-    def later() -> dict:
-        return {}
-
-    app.include_router(router)
-    try:
-        assert client.get("/later").status_code in (401, 403)
-        assert client.get("/later", headers=APP).status_code == 200
-    finally:
-        app.router.routes[:] = [route for route in app.router.routes if getattr(route, "path", None) != "/later"]
+    # The header is the app's own dependency, not each router's: every API route
+    # gets it, one added later too.
+    assert any(
+        isinstance(dependency.dependency, APIKeyHeader) and dependency.dependency.model.name == CLIENT_HEADER
+        for dependency in app.router.dependencies
+    )
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            assert any(isinstance(d.call, APIKeyHeader) for d in route.dependant.dependencies), route.path
 
 
 def test_no_page_can_be_framed():

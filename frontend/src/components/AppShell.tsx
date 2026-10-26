@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Link, NavLink, useMatch } from "react-router-dom";
-import { listNovels } from "../api/novels";
+import { getNovel } from "../api/novels";
 import logoUrl from "../assets/favicon.png";
 import "./AppShell.css";
 
@@ -26,8 +26,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
     setNovelTitle(null);
     if (!novelId) return;
     let ignore = false;
-    listNovels()
-      .then((novels) => !ignore && setNovelTitle(novels.find((novel) => novel.id === novelId)?.title ?? null))
+    getNovel(novelId)
+      .then((novel) => !ignore && setNovelTitle(novel.title))
       .catch(() => undefined);
     return () => {
       ignore = true;

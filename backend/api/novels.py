@@ -61,6 +61,11 @@ def list_novels(db: Session = Depends(get_db)) -> list[Novel]:
     )
 
 
+@router.get("/{novel_id}", response_model=NovelPublic)
+def get_novel(novel_id: uuid.UUID, db: Session = Depends(get_db)) -> Novel:
+    return _get_novel(db, novel_id)
+
+
 @router.post("", response_model=NovelPublic, status_code=status.HTTP_201_CREATED)
 def create_novel(
     body: NovelCreate, db: Session = Depends(get_db)

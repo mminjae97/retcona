@@ -87,13 +87,9 @@ export function holdDraftSlot(episodeId: string): void {
   slots.set(episodeId, null);
 }
 
+// No slot (the editor hasn't started one) means no draft, as when held.
 function currentSlot(episodeId: string): string | null {
-  let slot = slots.get(episodeId);
-  if (slot === undefined) {
-    slot = newSlotId();
-    slots.set(episodeId, slot);
-  }
-  return slot;
+  return slots.get(episodeId) ?? null;
 }
 
 function episodePrefix(episodeId: string): string {
