@@ -970,12 +970,15 @@ def _person_word(text: str) -> bool:
     """Whether text is a word for a person with its particles ("노인을", "공주님을", "노인들에게도",
     "아가씨께서는"), taken off one by one."""
     while True:
-        if _PERSON_HEAD_RE.fullmatch(text.removesuffix("들")):
+        # Both: "들" is a plural ("노인들") but also ends "아들".
+        if _PERSON_HEAD_RE.fullmatch(text) or _PERSON_HEAD_RE.fullmatch(text.removesuffix("들")):
             return True
         stripped = re.sub(rf"(?:{_AFTER_NAME_PARTICLES}|님)$", "", text)
         if stripped in (text, ""):
             return False
         text = stripped
+
+
 # An adnominal clause's connectives before its adnominal: "눈이 크고 붉은 소녀", "눈이 붉게
 # 빛나는 소녀". Not "빛나며", "빛나서": the clause ends there ("눈이 붉게 빛나며 다가오는
 # 병사를" is the topic's eyes).
