@@ -141,8 +141,8 @@ def _store(novel_id: uuid.UUID, claim_id: uuid.UUID, judged: _Judged) -> None:
         ):
             raise _Failed("novel_missing")
         claim = db.scalar(select(Claim).where(Claim.id == claim_id, Claim.novel_id == novel_id).with_for_update())
-        # Also a later pick of another card (this job was given up on as stuck
-        # meanwhile): that pick's own job judges it.
+        # Also a later pick of another card (this job was given up on as lost
+        # meanwhile, and the author picked again): that pick's own job judges it.
         if claim is None or claim.link_status != "judging" or claim.subject_id != judged.card_id:
             logger.warning("Claim %s was replaced (a new run, or a new pick) before it was judged; discarding", claim_id)
             return

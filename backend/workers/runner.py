@@ -16,12 +16,13 @@ process on the same database runs no jobs, so none runs in two places; the
 lock is checked again before each job — then queues again the jobs an earlier
 start was in the middle of (10.4.4), and loads the models before taking the
 first job. Taking the lock and recovering are tried once before the API serves
-anything (prepare), so a job an earlier start left isn't taken for stuck by the
-first request. A job is acked (leaves the queue) when
+anything (prepare), so the jobs an earlier start left are queued again before
+any request reads them. A job is acked (leaves the queue) when
 it returns or raises: the jobs record their own failures on their rows, and a
 row a job couldn't record on is failed by the API once no job for it is
-pending (api/episodes.py, abandoned). Closing the app in the middle of a job
-puts it back without counting the attempt.
+pending (api/episodes.py, abandoned). Closing the app normally (the server shut
+down) in the middle of a job puts it back without counting the attempt; a
+process killed outright can't, and the next start counts it as one.
 """
 
 import logging
@@ -217,8 +218,8 @@ class JobRunner:
 
     def _ack(self, job_id: uuid.UUID) -> None:
         # Retried rather than left: a job left running in the table stays
-        # pending to the API (until JOB_RUNNING_LIMIT), and the next one can't
-        # be taken while the database is down anyway.
+        # pending to the API for the rest of the session, and the next one
+        # can't be taken while the database is down anyway.
         while True:
             try:
                 self._queue.ack(job_id)

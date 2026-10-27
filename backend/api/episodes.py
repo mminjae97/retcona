@@ -40,11 +40,10 @@ from pipeline.judges import repeats
 router = APIRouter()
 
 # A run still queued or running with no job pending for it was lost (its job
-# failed in a way it couldn't record, was given up on, or has been running past
-# JOB_RUNNING_LIMIT: infra/queue_client.py, workers/runner.py) and is failed as
-# "abandoned", so the author can run validation again instead of waiting on it
-# forever. One whose job is still waiting in the queue, or was cut off by
-# closing the app (it runs again at the next start), isn't.
+# failed in a way it couldn't record, or was given up on: workers/runner.py) and
+# is failed as "abandoned", so the author can run validation again instead of
+# waiting on it forever. One whose job is still waiting in the queue, or was cut
+# off by closing the app (it runs again at the next start), isn't.
 _ACTIVE_STATUSES = ("queued", "running")
 # Attributes a flag can carry that aren't a card's (pipeline/judges.py): what the story says happened before.
 _HISTORY_ATTR_KEYS = STATE_ATTR_KEYS + SPACETIME_ATTR_KEYS
@@ -226,9 +225,8 @@ def _abandon_if_lost(db: Session, run: ValidationRun) -> None:
     if run.status not in _ACTIVE_STATUSES:
         return
     # Conditional, so a job finishing it at this moment wins: its
-    # succeeded/failed stays, and a job still going (stuck past
-    # JOB_RUNNING_LIMIT) discards its results (pipeline/validate_episode.py).
-    abandoned = db.scalar(
+    # succeeded/failed stays.
+    db.execute(
         update(ValidationRun)
         .where(
             ValidationRun.id == run.id,
@@ -236,10 +234,9 @@ def _abandon_if_lost(db: Session, run: ValidationRun) -> None:
             ~job_pending(ValidationRun.id),
         )
         .values(status="failed", error="abandoned", finished_at=func.now())
-        .returning(ValidationRun.id)
     )
-    if abandoned is not None:
-        db.refresh(run)
+    # Either way: the job may also have finished it since it was read.
+    db.refresh(run)
 
 
 @router.post(

@@ -6,8 +6,10 @@ runner (workers/runner.py) needs: hold_runner_lock() and recover() at startup
 wait_for_job() / wake() while idle. The API and the runner use only this
 interface; DatabaseQueueClient keeps the queue in a table of the app's own
 database (models/job.py), so jobs waiting survive closing the app and no other
-server is needed. Its runner lock is a PostgreSQL advisory lock; with SQLite
-(design doc 8.1) it becomes a lock on a file beside the database.
+server is needed. It is written for PostgreSQL (the runner lock is an advisory
+lock, the payload JSONB); moving to SQLite (design doc 8.1) means a new
+implementation of this interface, with a lock on a file beside the database
+in place of the advisory lock.
 
 Delivery is at least once (10.4.4): a job the app closed in the middle of is
 run again, so every job checks its row is still waiting for it before doing
@@ -19,36 +21,24 @@ import functools
 import threading
 import uuid
 from abc import ABC, abstractmethod
-from datetime import timedelta
 from typing import Any, NamedTuple
 
 from sqlalchemy import (
     ColumnElement,
     Connection,
-    and_,
     delete,
     event,
     exists,
     func,
-    or_,
     select,
     text,
     update,
 )
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session
 
 from models.db import SessionLocal, engine
 from models.job import Job
-
-# A job running this long is taken to be stuck (a model call or a download that
-# never returns), and the runner with it — it runs one job at a time, so the
-# jobs queued behind can't run either. What they all work on is failed as
-# abandoned (job_pending) rather than left waiting; the author can ask again,
-# and restarting the app clears it. Well past how long one job takes, even on
-# a CPU. If the stuck job does finish after all, its row was given up on and it
-# writes nothing.
-JOB_RUNNING_LIMIT = timedelta(minutes=30)
 
 
 class QueuedJob(NamedTuple):
@@ -102,22 +92,16 @@ class QueueClient(ABC):
 
 
 def job_pending(target_id: Any) -> ColumnElement[bool]:
-    """SQL: a job for this row (an id, or a column of the row's table) will
-    still run: running and not stuck (JOB_RUNNING_LIMIT), or queued while no
-    job is stuck ahead of it. A row waiting for a job with none of its jobs
-    pending was lost. The row is finished before its job is acked, so whatever
-    sees the job gone also sees the row finished, if it was. Times are the
-    database's (started_at is set by it)."""
-    cutoff = func.now() - JOB_RUNNING_LIMIT
-    stuck = aliased(Job)
-    runner_stuck = exists().where(stuck.status == "running", stuck.started_at <= cutoff)
-    return exists().where(
-        Job.target_id == target_id,
-        or_(
-            and_(Job.status == "queued", ~runner_stuck),
-            and_(Job.status == "running", Job.started_at > cutoff),
-        ),
-    )
+    """SQL: a job for this row (an id, or a column of the row's table) is still
+    queued or running. A row waiting for a job with none of its jobs left was
+    lost. The row is finished before its job is acked, so whatever sees the job
+    gone also sees the row finished, if it was.
+
+    How long a job has been running doesn't count: a slow one (on a CPU, or
+    while the PC slept) can't be told from one that will never return. A job
+    that never returns holds up the queue until the app restarts, which runs it
+    again, and gives up on it after a few starts (workers/runner.py)."""
+    return exists().where(Job.target_id == target_id)
 
 
 # Set when a session that enqueued a job commits, so an idle runner in this
