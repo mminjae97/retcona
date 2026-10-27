@@ -25,7 +25,9 @@ from models.db import SessionLocal
 from models.job import Job
 from models.novel import TRASH_KEPT, Novel
 from models.validation_run import ValidationRun
+from pipeline import validate_episode
 from pipeline.empty_trash import _purge, empty_trash, request_empty_trash
+from pipeline.extract_claims import Extraction
 from workers.runner import handle
 
 # Not as a context manager: no lifespan, so no runner of its own.
@@ -120,22 +122,43 @@ def test_a_novel_past_its_days_not_yet_deleted_can_still_be_restored(novel):
     assert _rows(novel) == rows
 
 
-def test_a_job_that_comes_up_while_its_novel_is_in_the_trash_leaves_its_row_to_run_again(novel):
-    client.delete(f"/novels/{novel}")
+def _run_its_job(novel: uuid.UUID) -> uuid.UUID:
+    """The novel's validation job, as the runner runs it: handled, then acked.
+    Returns the episode."""
     with SessionLocal() as db:
         run = db.scalar(select(ValidationRun).where(ValidationRun.novel_id == novel))
         job = db.scalar(select(Job).where(Job.target_id == run.id))
         episode_id = run.episode_id
         queued = QueuedJob(job.id, job.type, job.target_id, job.payload, job.attempts)
-    # As the runner does: handled, then acked.
     handle(queued)
     with SessionLocal() as db:
         db.execute(delete(Job).where(Job.id == queued.id))
         db.commit()
+    return episode_id
+
+
+def _latest_after_restore(novel: uuid.UUID, episode_id: uuid.UUID) -> tuple[str, str | None]:
     assert client.post(f"/novels/{novel}/restore").status_code == 200
     latest = client.get(f"/novels/{novel}/episodes/{episode_id}/validations/latest").json()
+    return latest["status"], latest["error"]
+
+
+def test_a_job_that_comes_up_while_its_novel_is_in_the_trash_leaves_its_row_to_run_again(novel):
+    client.delete(f"/novels/{novel}")
+    episode_id = _run_its_job(novel)
     # Not "episode missing": stopped, for the author to run again.
-    assert (latest["status"], latest["error"]) == ("failed", "abandoned")
+    assert _latest_after_restore(novel, episode_id) == ("failed", "abandoned")
+
+
+def test_a_novel_moved_to_the_trash_while_its_job_runs_leaves_its_row_to_run_again(novel, monkeypatch):
+    def extract_then_delete(*args):
+        # The author deletes the novel while the models work.
+        assert client.delete(f"/novels/{novel}").status_code == 204
+        return Extraction()
+
+    monkeypatch.setattr(validate_episode, "extract_claims", extract_then_delete)
+    episode_id = _run_its_job(novel)
+    assert _latest_after_restore(novel, episode_id) == ("failed", "abandoned")
 
 
 def test_a_novel_not_deleted_is_not_in_the_trash_and_cant_be_restored(novel):

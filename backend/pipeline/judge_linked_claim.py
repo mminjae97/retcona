@@ -21,7 +21,8 @@ like any other. Steps:
 
 A failure — the model couldn't run, the card was deleted, anything — puts the
 claim back to pending, with no card, for the author to pick again; the pick
-stays recorded, and the next run applies it.
+stays recorded, and the next run applies it. A novel found in the trash at
+step 4 leaves the claim as it is (pipeline/in_trash.py).
 
 Not done here: filling the card's empty attributes from the claim, which a
 run does for all its claims (pipeline/merge.py). The next run does.
@@ -37,11 +38,11 @@ from ai.nli_rerank import InferenceError
 from models.character import Character
 from models.claim import Claim, ContradictionFlag
 from models.db import SessionLocal
-from models.novel import Novel
 from pipeline.context_bundle import get_context_bundle
 from pipeline.dismissals import dismissal_key, dismissed_keys
 from pipeline.entities import Match, normalize_name
 from pipeline.extract_claims import ExtractedClaim
+from pipeline.in_trash import NovelInTrash, lock_novel
 from pipeline.judges import Flag, judge_appearance
 from pipeline.statements import CHARACTER_ATTR_TOPICS, character_statement
 
@@ -134,12 +135,7 @@ def _judge(novel_id: uuid.UUID, claim_id: uuid.UUID) -> _Judged:
 
 def _store(novel_id: uuid.UUID, claim_id: uuid.UUID, judged: _Judged) -> None:
     with SessionLocal() as db:
-        # A soft-deleted novel has nowhere to show the result.
-        if (
-            db.scalar(select(Novel.id).where(Novel.id == novel_id, Novel.deleted_at.is_(None)).with_for_update())
-            is None
-        ):
-            raise _Failed("novel_missing")
+        lock_novel(db, novel_id)
         claim = db.scalar(select(Claim).where(Claim.id == claim_id, Claim.novel_id == novel_id).with_for_update())
         # The card judged, still: only defensive, as a pick is put back (and can
         # be made again) only once no job is left for it. That pick's own job
@@ -187,6 +183,8 @@ def judge_linked_claim(novel_id: uuid.UUID, claim_id: uuid.UUID) -> None:
         return
     try:
         _store(novel_id, claim_id, _judge(novel_id, claim_id))
+    except NovelInTrash:
+        logger.info("Claim %s: its novel is in the trash; left as it is", claim_id)
     except _Failed as exc:
         logger.warning("Claim %s couldn't be judged (%s); back to pending", claim_id, exc)
         _put_back(novel_id, claim_id)
