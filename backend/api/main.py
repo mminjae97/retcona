@@ -76,6 +76,7 @@ async def lifespan(app: FastAPI):
     # The job queue's runner (design doc 10.2), in this process. It loads the
     # models in its own thread, so requests are served meanwhile.
     runner = JobRunner(get_queue_client())
+    await asyncio.to_thread(runner.prepare)
     runner.start()
     yield
     await asyncio.to_thread(runner.stop)

@@ -228,7 +228,7 @@ def _abandon_if_lost(db: Session, run: ValidationRun) -> None:
     # Conditional, so a job finishing it at this moment wins: its
     # succeeded/failed stays, and a job still going (stuck past
     # JOB_RUNNING_LIMIT) discards its results (pipeline/validate_episode.py).
-    db.execute(
+    abandoned = db.scalar(
         update(ValidationRun)
         .where(
             ValidationRun.id == run.id,
@@ -236,8 +236,10 @@ def _abandon_if_lost(db: Session, run: ValidationRun) -> None:
             ~job_pending(ValidationRun.id),
         )
         .values(status="failed", error="abandoned", finished_at=func.now())
+        .returning(ValidationRun.id)
     )
-    db.refresh(run)
+    if abandoned is not None:
+        db.refresh(run)
 
 
 @router.post(
@@ -268,9 +270,7 @@ def request_validation(
     db.add(run)
     db.flush()
     # Committed together: the run is never there without its job.
-    get_queue_client().enqueue(
-        db, "validate_episode", run.id, {"novel_id": str(novel_id), "episode_id": str(episode_id)}
-    )
+    get_queue_client().enqueue(db, "validate_episode", run.id, {"novel_id": str(novel_id)})
     db.commit()
     db.refresh(run)
     return _run_public(db, novel_id, run)

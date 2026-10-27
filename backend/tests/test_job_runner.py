@@ -193,5 +193,31 @@ def test_stopping_wakes_an_idle_runner():
     assert queue.released == []
 
 
+def test_prepare_locks_and_recovers_before_the_runner_starts(monkeypatch):
+    _ran(monkeypatch)
+    queue = FakeQueue([_job()])
+    job_runner = JobRunner(queue, load=lambda: None)
+    job_runner.prepare()
+    assert queue.events == ["lock", "recover"]
+    job_runner.start()
+    _until(lambda: len(queue.acked) == 1)
+    job_runner.stop(timeout=5)
+    # Not recovered a second time once started.
+    assert queue.events.count("recover") == 1
+
+
+def test_a_lost_lock_is_taken_again_with_a_recovery_before_the_next_job(monkeypatch):
+    calls = _ran(monkeypatch)
+    queue = FakeQueue([_job()])
+    held = iter([True, False, True])
+    queue.hold_runner_lock = lambda: queue.events.append("lock") or next(held, True)
+    job_runner = JobRunner(queue, load=lambda: None)
+    job_runner.start()
+    _until(lambda: len(queue.acked) == 1)
+    job_runner.stop(timeout=5)
+    assert queue.events[:5] == ["lock", "recover", "lock", "lock", "recover"]
+    assert len(calls) == 1
+
+
 def test_every_job_the_api_enqueues_has_a_handler():
     assert set(runner.HANDLERS) == {"validate_episode", "revalidate_flag", "judge_linked_claim"}

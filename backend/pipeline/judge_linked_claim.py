@@ -78,7 +78,7 @@ def _put_back(novel_id: uuid.UUID, claim_id: uuid.UUID) -> None:
     with SessionLocal() as db:
         db.execute(
             update(Claim)
-            .where(Claim.id == claim_id, Claim.novel_id == novel_id, Claim.link_status.in_(("queued", "judging")))
+            .where(Claim.id == claim_id, Claim.novel_id == novel_id, Claim.link_status == "judging")
             .values(link_status="pending", subject_id=None, link_requested_at=None)
         )
         db.commit()
@@ -141,8 +141,10 @@ def _store(novel_id: uuid.UUID, claim_id: uuid.UUID, judged: _Judged) -> None:
         ):
             raise _Failed("novel_missing")
         claim = db.scalar(select(Claim).where(Claim.id == claim_id, Claim.novel_id == novel_id).with_for_update())
-        if claim is None or claim.link_status != "judging":
-            logger.warning("Claim %s was replaced by a new run before it was judged; discarding", claim_id)
+        # Also a later pick of another card (this job was given up on as stuck
+        # meanwhile): that pick's own job judges it.
+        if claim is None or claim.link_status != "judging" or claim.subject_id != judged.card_id:
+            logger.warning("Claim %s was replaced (a new run, or a new pick) before it was judged; discarding", claim_id)
             return
         # The card, still: one deleted meanwhile has nothing to hold the claim to.
         if (

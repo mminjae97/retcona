@@ -596,7 +596,7 @@ flowchart TD
     LI --> OC[OpenAI 호환 API<br/>로컬 서버 포함]
 ```
 
-- `QueueClient`는 `enqueue(job)` / `dequeue()` / `ack(job_id)`와 시작할 때의 `recover()`만 노출 — 비즈니스 로직은 이 인터페이스만 사용하고 구현체를 알지 못함. 작업은 그 작업이 다룰 행(검증 실행 기록 등)과 같은 트랜잭션에서 큐에 넣어, 둘 중 하나만 있는 상태가 생기지 않는다
+- `QueueClient`는 `enqueue(job)` / `dequeue()` / `ack(job_id)`와, 작업 실행기용으로 `hold_runner_lock()`(DB마다 실행기 하나), 시작할 때의 `recover()`, 끝낼 때의 `release(job_id)`(10.4.4), 쉴 때의 `wait_for_job()` / `wake()`를 노출 — 비즈니스 로직은 이 인터페이스만 사용하고 구현체를 알지 못함. 작업은 그 작업이 다룰 행(검증 실행 기록 등)과 같은 트랜잭션에서 큐에 넣어, 둘 중 하나만 있는 상태가 생기지 않는다
 - `StorageClient`는 일러스트 이미지 등을 데이터 폴더(10.1)에 저장
 - `InferenceClient`(NLI·NER·질의응답·리랭커)와 `LLMClient`도 같은 패턴 — 설정 화면에서 고른 추론 장치와 LLM 연결에 따라 구현체가 정해진다. 7장의 판단 모듈은 인터페이스만 호출한다
 - 같은 인터페이스의 구현체들(GPU/CPU, 각 LLM 어댑터)에 같은 테스트를 돌린다

@@ -45,7 +45,7 @@ type BusyAction = FlagAction | "revalidate";
 
 // Why a revalidation failed (FlagRevalidation.error).
 const REVALIDATION_ERRORS: Record<string, string> = {
-  abandoned: "재검증이 중간에 멈췄습니다. 다시 시도해 주세요.",
+  abandoned: "재검증이 중간에 멈췄습니다. 다시 시도해 주세요. 계속 멈추면 앱을 다시 시작해 주세요.",
   superseded: "새 재검증 요청으로 대체되었습니다.",
   flag_missing: "검증 결과가 바뀌었습니다. 새로고침해 주세요.",
   flag_handled: "재검증 중에 항목이 처리되었습니다.",

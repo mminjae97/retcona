@@ -18,7 +18,7 @@ export function isRunActive(run: ValidationRun | null): boolean {
 export function describeRunError(code: string | null): string {
   switch (code) {
     case "abandoned":
-      return "검증이 중간에 멈췄습니다. 다시 실행해 주세요.";
+      return "검증이 중간에 멈췄습니다. 다시 실행해 주세요. 계속 멈추면 앱을 다시 시작해 주세요.";
     case "episode_missing":
       return "이 화를 찾을 수 없어 검증하지 못했습니다.";
     case "empty_manuscript":
