@@ -14,6 +14,9 @@ isn't waiting for it any more is skipped.
   again when it starts (10.4.4)
 - attempts: how many times it has been started, so a job the app keeps
   closing or crashing in the middle of is given up on after a few
+- started_at: when it was last taken. Nothing reads it (how long a job has
+  been running doesn't count: infra/queue_client.py, job_pending); it's for
+  looking at the table
 
 Not novel-scoped (NovelScopedMixin): the queue is the app's, and a job's
 novel_id is in its payload, which the job filters by.

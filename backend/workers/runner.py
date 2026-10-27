@@ -12,8 +12,8 @@ Jobs (each takes its row: a job whose row isn't waiting for it is skipped, 10.4.
   a card for (7.1.1), judged against it; enqueued by api/episodes.py
 
 At startup the runner takes the database's runner lock — a second backend
-process on the same database runs no jobs, so none runs in two places; the
-lock is checked again before each job — then queues again the jobs an earlier
+process on the same database runs no jobs (but see infra/queue_client.py on
+a database restart mid-job); the lock is checked again before each job — then queues again the jobs an earlier
 start was in the middle of (10.4.4), and loads the models before taking the
 first job. Taking the lock and recovering are tried once before the API serves
 anything (prepare), so the jobs an earlier start left are queued again before

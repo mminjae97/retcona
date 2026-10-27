@@ -14,7 +14,10 @@ in place of the advisory lock.
 Delivery is at least once (10.4.4): a job the app closed in the middle of is
 run again, so every job checks its row is still waiting for it before doing
 anything (its idempotency record). Only one runner takes jobs from a database
-(hold_runner_lock), so a job is never running in two places at once.
+(hold_runner_lock). One edge is left: a second backend process on the same
+database that takes the lock after a database restart can run again a job the
+first is still in the middle of; each job writes its results only while its
+row is still waiting for it, under a row lock, so the later one is discarded.
 """
 
 import functools
