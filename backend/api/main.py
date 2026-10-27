@@ -71,9 +71,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Retcona API", lifespan=lifespan, dependencies=_CLIENT)
-app.add_middleware(NoFramingMiddleware)
-# Added last, so it runs first.
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+# Added last, so it wraps the host check too: its 400 isn't framable either.
+app.add_middleware(NoFramingMiddleware)
 
 
 async def health(request: Request) -> JSONResponse:

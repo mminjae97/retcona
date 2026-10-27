@@ -51,8 +51,8 @@ def test_a_route_added_later_needs_the_header_too():
 
 
 def test_no_page_can_be_framed():
-    for path in ("/health", "/docs"):
-        response = client.get(path)
+    for path, headers in (("/health", {}), ("/docs", {}), ("/health", {"Host": "evil.example"})):
+        response = client.get(path, headers=headers)
         assert response.headers["x-frame-options"] == "DENY"
         assert response.headers["content-security-policy"] == "frame-ancestors 'none'"
 
