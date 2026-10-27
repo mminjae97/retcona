@@ -2,18 +2,20 @@
 
 The top level: there are no accounts, so a novel belongs to no one but the app's
 one author.
-deleted_at: soft-delete timestamp (2.6), the trash. Permanently deleting it after 30
-days is the local job queue's to come (roadmap stage 6); until then it stays.
+deleted_at: soft-delete timestamp (2.6), the trash. Restorable for TRASH_KEPT,
+then deleted for good with everything under it (pipeline/empty_trash.py).
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import DateTime, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, TimestampMixin
+
+TRASH_KEPT = timedelta(days=30)
 
 
 class Novel(Base, TimestampMixin):

@@ -41,6 +41,10 @@ Claim extraction (design doc 7.1.1) runs two more models in the same process, th
 
 The LLM isn't chosen yet (chapter 5). It's used for OOC judgment only, set in `LLM_MODEL_JUDGMENT` (`infra/llm_client.py`); claim extraction doesn't use one. Until then `LLM_PROVIDER=mock` (`infra/mock_llm.py`) is a stand-in that judges nothing. Failures are recorded on the run as a code: `abandoned`, `episode_missing`, `empty_manuscript`, `inference_failed` (the NLI, NER or QA model couldn't be downloaded, loaded or run), `internal`.
 
+## Trash
+
+Deleting a novel (`DELETE /novels/{id}`) moves it to the trash (`novels.deleted_at`). `GET /novels/trash` lists those, with `purge_after`, 30 days later (`TRASH_KEPT`, `models/novel.py`); `POST /novels/{id}/restore` brings one back until then. The `empty_trash` job (`pipeline/empty_trash.py`) deletes the novels past their 30 days for good, with every row under their `novel_id`, one novel per transaction; the API server queues it right after it starts and then once a day (`api/main.py`), so a novel past its 30 days while the app was closed goes at the next start, and can still be restored until then.
+
 ## Design principles (must follow)
 
 - Every `models/`, `pipeline/` function takes `novel_id` as a required argument (10.1) — blocks isolation gaps at the code level

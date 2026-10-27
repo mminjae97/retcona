@@ -5,6 +5,7 @@ import EditorPage from "./pages/EditorPage";
 import SettingsPage from "./pages/SettingsPage";
 import ValidationResultPage from "./pages/ValidationResultPage";
 import GraphPage from "./pages/GraphPage";
+import TrashPage from "./pages/TrashPage";
 import AppShell from "./components/AppShell";
 
 // A data router (createBrowserRouter, below) rather than plain <BrowserRouter>
@@ -32,6 +33,7 @@ const router = createBrowserRouter([
     // if it repeated the parent's own path, which this layout doesn't have.
     children: [
       { index: true, element: <NovelListPage /> },
+      { path: "trash", element: <TrashPage /> },
       { path: "novels/:novelId/settings", element: <SettingsPage /> },
       { path: "novels/:novelId/episodes", element: <EpisodeListPage /> },
       { path: "novels/:novelId/episodes/:episodeId", element: <EditorPage /> },

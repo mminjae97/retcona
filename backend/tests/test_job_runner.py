@@ -87,6 +87,16 @@ def test_a_job_runs_with_its_novel_and_row_and_leaves_the_queue(monkeypatch):
     assert queue.acked == [job.id]
 
 
+def test_an_app_job_runs_with_no_novel_or_row(monkeypatch):
+    calls = []
+    monkeypatch.setitem(runner.APP_HANDLERS, "empty_trash", lambda: calls.append("emptied"))
+    job = QueuedJob(uuid.uuid4(), "empty_trash", None, {}, 1)
+    queue = FakeQueue([job])
+    JobRunner(queue, load=lambda: None).run_once()
+    assert calls == ["emptied"]
+    assert queue.acked == [job.id]
+
+
 def test_a_job_that_raises_still_leaves_the_queue(monkeypatch):
     def fail():
         raise RuntimeError("the database is gone")
