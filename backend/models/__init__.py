@@ -8,6 +8,7 @@ from models import (  # noqa: F401
     episode,
     flag_dismissal,
     flag_revalidation,
+    job,
     location,
     novel,
     relation,

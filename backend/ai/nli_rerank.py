@@ -18,7 +18,7 @@ class InferenceError(Exception):
 
 
 def load_models() -> str:
-    """Loads the models now rather than on first use (worker startup); says which."""
+    """Loads the models now rather than on first use (job runner startup); says which."""
     return get_inference_client().load()
 
 

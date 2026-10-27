@@ -2,21 +2,20 @@
 
 Saving (PATCH) never triggers the AI pipeline — that's the separate "run
 validation" step (POST .../validations), which records a run and hands it to
-the CPU worker through the job queue (10.2); the editor then polls the run.
+the job runner through the job queue (10.2); the editor then polls the run.
 What the latest run found contradicting the settings is listed by GET .../flags,
 and the author acts on each flag with PATCH .../flags/{id} (2.4), or has one
 judged again after supplementing its setting, POST .../flags/{id}/revalidate
-(7.5) — a job for the CPU worker too.
+(7.5) — a job for the job runner too.
 Claims the extraction couldn't tie to one card wait in GET .../pending-links
-for the author to pick one, POST .../pending-links/{id} (7.1.1); the worker
-judges the pick as well.
+for the author to pick one, POST .../pending-links/{id} (7.1.1); the job
+runner judges the pick as well.
 Editing a `submitted` episode's content flips it back to `draft` (2.2),
 leaving existing validation results in place.
 """
 
-import logging
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -25,7 +24,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, load_only
 
 from api.deps import require_novel
-from infra.queue_client import get_queue_client
+from infra.queue_client import get_queue_client, job_pending
 from models.character import SPACETIME_ATTR_KEYS, Character
 from models.claim import Claim, ContradictionFlag
 from models.db import get_db
@@ -38,16 +37,13 @@ from pipeline.dismissals import dismissal_key, record_dismissal, remove_dismissa
 from pipeline.entities import normalize_name
 from pipeline.judges import repeats
 
-logger = logging.getLogger(__name__)
-
 router = APIRouter()
 
-# A run still queued or running this long after it was requested is taken to
-# be lost (no worker running, or one that died mid-job — the local Redis queue
-# doesn't redeliver) and is failed as "abandoned", so the author can run
-# validation again instead of waiting on it forever. Well past how long one
-# extraction takes.
-RUN_ABANDON_AFTER = timedelta(minutes=15)
+# A run still queued or running with no job pending for it was lost (its job
+# failed in a way it couldn't record, or was given up on: workers/runner.py) and
+# is failed as "abandoned", so the author can run validation again instead of
+# waiting on it forever. One whose job is still waiting in the queue, or was cut
+# off by closing the app (it runs again at the next start), isn't.
 _ACTIVE_STATUSES = ("queued", "running")
 # Attributes a flag can carry that aren't a card's (pipeline/judges.py): what the story says happened before.
 _HISTORY_ATTR_KEYS = STATE_ATTR_KEYS + SPACETIME_ATTR_KEYS
@@ -175,7 +171,7 @@ class ValidationRunPublic(BaseModel):
     id: uuid.UUID
     episode_id: uuid.UUID
     status: str  # queued | running | succeeded | failed
-    # failed only: abandoned | queue_unavailable | episode_missing |
+    # failed only: abandoned | episode_missing |
     # empty_manuscript | inference_failed | internal
     error: str | None
     # succeeded only: {claims, dropped_claims, new_characters, new_locations,
@@ -224,18 +220,22 @@ def _latest_run(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID) -> Vali
     )
 
 
-def _abandon_if_stale(db: Session, run: ValidationRun) -> None:
-    """Fails a run that has been queued or running too long; the caller commits."""
-    if run.status not in _ACTIVE_STATUSES or datetime.now(UTC) - run.created_at < RUN_ABANDON_AFTER:
+def _abandon_if_lost(db: Session, run: ValidationRun) -> None:
+    """Fails a run that is queued or running with no job pending for it; the caller commits."""
+    if run.status not in _ACTIVE_STATUSES:
         return
-    # Conditional, so a worker finishing it at this moment wins: its
-    # succeeded/failed stays, and a worker still going discards its results
-    # (pipeline/validate_episode.py).
+    # Conditional, so a job finishing it at this moment wins: its
+    # succeeded/failed stays.
     db.execute(
         update(ValidationRun)
-        .where(ValidationRun.id == run.id, ValidationRun.status.in_(_ACTIVE_STATUSES))
+        .where(
+            ValidationRun.id == run.id,
+            ValidationRun.status.in_(_ACTIVE_STATUSES),
+            ~job_pending(ValidationRun.id),
+        )
         .values(status="failed", error="abandoned", finished_at=func.now())
     )
+    # Either way: the job may also have finished it since it was read.
     db.refresh(run)
 
 
@@ -259,27 +259,17 @@ def request_validation(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The manuscript is empty")
     latest = _latest_run(db, novel_id, episode_id)
     if latest is not None:
-        _abandon_if_stale(db, latest)
+        _abandon_if_lost(db, latest)
         if latest.status in _ACTIVE_STATUSES:
             return _run_public(db, novel_id, latest)
 
     run = ValidationRun(novel_id=novel_id, episode_id=episode_id, status="queued")
     db.add(run)
-    # Committed (with an abandoned run's new status) before it's enqueued, so
-    # the worker can't pick the job up before the run it names exists.
+    db.flush()
+    # Committed together: the run is never there without its job.
+    get_queue_client().enqueue(db, "validate_episode", run.id, {"novel_id": str(novel_id)})
     db.commit()
     db.refresh(run)
-    try:
-        get_queue_client().enqueue(
-            {"job_id": str(run.id), "type": "validate_episode", "novel_id": str(novel_id), "episode_id": str(episode_id)}
-        )
-    except Exception:
-        logger.exception("Could not enqueue validation run %s", run.id)
-        run.status = "failed"
-        run.error = "queue_unavailable"
-        run.finished_at = func.now()
-        db.commit()
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Validation is unavailable right now")
     return _run_public(db, novel_id, run)
 
 
@@ -297,7 +287,7 @@ def get_latest_validation(
     run = _latest_run(db, novel_id, episode_id)
     if run is None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
-    _abandon_if_stale(db, run)
+    _abandon_if_lost(db, run)
     db.commit()
     return _run_public(db, novel_id, run)
 
@@ -311,7 +301,7 @@ class FlagRevalidationPublic(BaseModel):
     model_config = {"from_attributes": True}
 
     status: str  # queued | running | succeeded | failed
-    # failed: abandoned | queue_unavailable | superseded | flag_missing |
+    # failed: abandoned | superseded | flag_missing |
     # flag_handled | card_missing | setting_changed | inference_failed | internal
     error: str | None
     outcome: str | None  # succeeded: resolved | contradicts
@@ -364,9 +354,8 @@ def list_flags(
 def _latest_revalidations(
     db: Session, novel_id: uuid.UUID, flag_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, FlagRevalidation]:
-    """Each flag's latest revalidation; one still queued or running long past
-    when it should have finished is failed as abandoned first (as runs are).
-    The caller commits."""
+    """Each flag's latest revalidation; one still queued or running with no job
+    pending for it is failed as abandoned first (as runs are). The caller commits."""
     if not flag_ids:
         return {}
     db.execute(
@@ -375,7 +364,7 @@ def _latest_revalidations(
             FlagRevalidation.novel_id == novel_id,
             FlagRevalidation.flag_id.in_(flag_ids),
             FlagRevalidation.status.in_(_ACTIVE_STATUSES),
-            FlagRevalidation.created_at < func.now() - RUN_ABANDON_AFTER,
+            ~job_pending(FlagRevalidation.id),
         )
         .values(status="failed", error="abandoned", finished_at=func.now())
     )
@@ -507,7 +496,7 @@ def _raise_if_run_active(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID
     # run's flags when it finishes.
     latest = _latest_run(db, novel_id, episode_id)
     if latest is not None:
-        _abandon_if_stale(db, latest)
+        _abandon_if_lost(db, latest)
         if latest.status in _ACTIVE_STATUSES:
             raise HTTPException(status.HTTP_409_CONFLICT, FLAG_RUN_ACTIVE)
 
@@ -619,7 +608,7 @@ def revalidate_flag(
     db: Session = Depends(get_db),
 ) -> FlagPublic:
     """Judges an open flag again against its card (7.5): only the judgment
-    that raised it, by the CPU worker (pipeline/revalidate_flag.py). With a
+    that raised it, by the job runner (pipeline/revalidate_flag.py). With a
     setting, the card's value for the flag's attribute becomes it first — the
     author's value — and the episode's other open flags on that attribute,
     judged against the old value, are judged again too. Without one, while
@@ -692,25 +681,12 @@ def revalidate_flag(
     )
     revalidations = [FlagRevalidation(novel_id=novel_id, flag_id=each.id, status="queued") for each in to_judge]
     db.add_all(revalidations)
-    # Committed (with the setting) before they're enqueued, so the worker
-    # can't pick a job up before the row it names exists.
+    db.flush()
+    # Committed together (with the setting): no revalidation is there without its job.
+    queue = get_queue_client()
+    for revalidation in revalidations:
+        queue.enqueue(db, "revalidate_flag", revalidation.id, {"novel_id": str(novel_id)})
     db.commit()
-    try:
-        queue = get_queue_client()
-        for revalidation in revalidations:
-            queue.enqueue({"job_id": str(revalidation.id), "type": "revalidate_flag", "novel_id": str(novel_id)})
-    except Exception:
-        logger.exception("Could not enqueue revalidation of flag %s", flag.id)
-        db.execute(
-            update(FlagRevalidation)
-            .where(
-                FlagRevalidation.id.in_([revalidation.id for revalidation in revalidations]),
-                FlagRevalidation.status == "queued",
-            )
-            .values(status="failed", error="queue_unavailable", finished_at=func.now())
-        )
-        db.commit()
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Revalidation is unavailable right now")
     db.refresh(revalidations[0])
     return _flag_public(flag, claim, revalidations[0])
 
@@ -722,10 +698,8 @@ LINK_HANDLED = "link_handled"  # the claim isn't waiting for a pick (picked alre
 LINK_NOT_A_CANDIDATE = "link_not_a_candidate"  # the card isn't one the claim could be
 LINK_CARD_MISSING = "link_card_missing"  # the card was deleted
 LINK_RUN_ACTIVE = "link_run_active"  # a run is validating the episode and would replace the claim
-# A pick still queued or judging this long after it was made is taken to be lost
-# (no worker running), and the claim goes back to pending, as an abandoned run
-# fails (RUN_ABANDON_AFTER).
-LINK_ABANDON_AFTER = RUN_ABANDON_AFTER
+# A pick still queued or judging with no job pending for it was lost, and the
+# claim goes back to pending, as an abandoned run fails (_abandon_if_lost).
 _LINK_ACTIVE = ("queued", "judging")
 
 
@@ -759,16 +733,16 @@ class LinkPickResult(BaseModel):
     outcome: Literal["judging", "skipped"]
 
 
-def _put_back_stale_picks(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID) -> None:
+def _put_back_lost_picks(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID) -> None:
     db.execute(
         update(Claim)
         .where(
             Claim.novel_id == novel_id,
             Claim.episode_id == episode_id,
             Claim.link_status.in_(_LINK_ACTIVE),
-            Claim.link_requested_at < datetime.now(UTC) - LINK_ABANDON_AFTER,
+            ~job_pending(Claim.id),
         )
-        .values(link_status="pending", subject_id=None, link_requested_at=None)
+        .values(link_status="pending", subject_id=None)
     )
 
 
@@ -812,7 +786,7 @@ def list_pending_links(
     for the author to pick a card for (7.1.1), with the picks being judged. A
     new run replaces them."""
     episode = _get_episode(db, novel_id, episode_id)
-    _put_back_stale_picks(db, novel_id, episode_id)
+    _put_back_lost_picks(db, novel_id, episode_id)
     claims = list(
         db.scalars(
             select(Claim).where(
@@ -846,7 +820,7 @@ def pick_pending_link(
     db: Session = Depends(get_db),
 ) -> LinkPickResult:
     """The author's pick for a claim waiting for one (7.1.1): a card among its
-    candidates, which the CPU worker judges the claim against now
+    candidates, which the job runner judges the claim against now
     (pipeline/judge_linked_claim.py), or none ("해당 없음"), which drops it.
     Either is kept, so the next run applies it and doesn't ask again."""
     _get_episode(db, novel_id, episode_id, for_update=True)
@@ -856,14 +830,14 @@ def pick_pending_link(
     if claim is None:
         # A new run replaced it (or it was handled and dropped): not a claim that was never there.
         raise HTTPException(status.HTTP_409_CONFLICT, LINK_HANDLED)
-    _put_back_stale_picks(db, novel_id, episode_id)
+    _put_back_lost_picks(db, novel_id, episode_id)
     db.refresh(claim)
     if claim.link_status != "pending":
         raise HTTPException(status.HTTP_409_CONFLICT, LINK_HANDLED)
     # A run in progress replaces the claim when it finishes.
     latest = _latest_run(db, novel_id, episode_id)
     if latest is not None:
-        _abandon_if_stale(db, latest)
+        _abandon_if_lost(db, latest)
         if latest.status in _ACTIVE_STATUSES:
             raise HTTPException(status.HTTP_409_CONFLICT, LINK_RUN_ACTIVE)
 
@@ -882,23 +856,11 @@ def pick_pending_link(
         raise HTTPException(status.HTTP_409_CONFLICT, LINK_CARD_MISSING)
     record_choice(db, novel_id, episode_id, key, card.id)
     # The name it came with stays (it's part of the key the pick is kept under,
-    # and what the claim goes back to if it isn't judged); the worker renames it
+    # and what the claim goes back to if it isn't judged); the job renames it
     # for the card once it's judged.
     claim.subject_id = card.id
     claim.link_status = "queued"
-    claim.link_requested_at = func.now()
-    # Committed before it's enqueued, so the worker can't pick the job up
-    # before the state it expects exists.
+    # Committed together: the claim is never queued without its job.
+    get_queue_client().enqueue(db, "judge_linked_claim", claim_id, {"novel_id": str(novel_id)})
     db.commit()
-    try:
-        get_queue_client().enqueue({"job_id": str(claim_id), "type": "judge_linked_claim", "novel_id": str(novel_id)})
-    except Exception:
-        logger.exception("Could not enqueue the judgment of claim %s", claim_id)
-        db.execute(
-            update(Claim)
-            .where(Claim.id == claim_id, Claim.link_status == "queued")
-            .values(link_status="pending", subject_id=None, link_requested_at=None)
-        )
-        db.commit()
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Judging is unavailable right now")
     return LinkPickResult(id=claim_id, outcome="judging")

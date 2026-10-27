@@ -5,11 +5,11 @@
 // open flag can be accepted (the manuscript is right: its value replaces the
 // setting card's) or dismissed as a false positive; a dismissal can be undone.
 // Or the setting it was judged against can be supplemented right there and the
-// flag alone judged again (7.5) — the worker does it; the page polls until it's
+// flag alone judged again (7.5) — the backend's job runner does it; the page polls until it's
 // done.
 // Above the flags, the sentences the extraction couldn't tie to one character —
 // a "그" that fits several, a name several share — ask the author which it is
-// (7.1.1); the pick is judged by the worker like a revalidation.
+// (7.1.1); the pick is judged by the job runner like a revalidation.
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -45,8 +45,7 @@ type BusyAction = FlagAction | "revalidate";
 
 // Why a revalidation failed (FlagRevalidation.error).
 const REVALIDATION_ERRORS: Record<string, string> = {
-  abandoned: "재검증이 너무 오래 걸려 중단되었습니다. 다시 시도해 주세요.",
-  queue_unavailable: "지금은 재검증을 요청할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+  abandoned: "재검증이 중간에 멈췄습니다. 다시 시도해 주세요.",
   superseded: "새 재검증 요청으로 대체되었습니다.",
   flag_missing: "검증 결과가 바뀌었습니다. 새로고침해 주세요.",
   flag_handled: "재검증 중에 항목이 처리되었습니다.",

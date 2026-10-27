@@ -746,7 +746,7 @@ def _kiwi() -> Kiwi:
 
 
 def load_tagger() -> None:
-    """Loads the part-of-speech tagger now rather than on first use (worker startup)."""
+    """Loads the part-of-speech tagger now rather than on first use (job runner startup)."""
     _kiwi()
 
 

@@ -1,4 +1,4 @@
-"""One "judge the claim the author picked a card for" job (design doc 7.1.1), as the CPU worker runs it.
+"""One "judge the claim the author picked a card for" job (design doc 7.1.1), as the job runner runs it.
 
 A claim the extraction couldn't tie to one card — a pronoun that fits two
 characters, a name two share — waits on the result screen for the author to
@@ -9,8 +9,9 @@ judges the claim now, against the card picked, the way a run would have
 The claim row carries the job (models/claim.py link_status): pending ->
 queued (the API, which picked the card) -> judging (here) -> none, a claim
 like any other. Steps:
-1. Claim it: queued -> judging, in one conditional UPDATE, so a job delivered
-   twice runs once (10.4.4).
+1. Claim it: queued -> judging, in one conditional UPDATE, so a claim
+   already judged or replaced isn't judged again (10.4.4). Judging too: the app
+   closed in the middle of it, and the queue runs its job again.
 2. Read the claim, its card (the claim as the card's name would have said it),
    and the names of the episode's other subjects.
 3. Judge with no transaction open (NLI, pipeline/judges.judge_appearance).
@@ -64,7 +65,7 @@ def _take(novel_id: uuid.UUID, claim_id: uuid.UUID) -> bool:
     with SessionLocal() as db:
         taken = db.scalar(
             update(Claim)
-            .where(Claim.id == claim_id, Claim.novel_id == novel_id, Claim.link_status == "queued")
+            .where(Claim.id == claim_id, Claim.novel_id == novel_id, Claim.link_status.in_(("queued", "judging")))
             .values(link_status="judging")
             .returning(Claim.id)
         )
@@ -77,8 +78,8 @@ def _put_back(novel_id: uuid.UUID, claim_id: uuid.UUID) -> None:
     with SessionLocal() as db:
         db.execute(
             update(Claim)
-            .where(Claim.id == claim_id, Claim.novel_id == novel_id, Claim.link_status.in_(("queued", "judging")))
-            .values(link_status="pending", subject_id=None, link_requested_at=None)
+            .where(Claim.id == claim_id, Claim.novel_id == novel_id, Claim.link_status == "judging")
+            .values(link_status="pending", subject_id=None)
         )
         db.commit()
 
@@ -140,8 +141,11 @@ def _store(novel_id: uuid.UUID, claim_id: uuid.UUID, judged: _Judged) -> None:
         ):
             raise _Failed("novel_missing")
         claim = db.scalar(select(Claim).where(Claim.id == claim_id, Claim.novel_id == novel_id).with_for_update())
-        if claim is None or claim.link_status != "judging":
-            logger.warning("Claim %s was replaced by a new run before it was judged; discarding", claim_id)
+        # The card judged, still: only defensive, as a pick is put back (and can
+        # be made again) only once no job is left for it. That pick's own job
+        # would judge the new card.
+        if claim is None or claim.link_status != "judging" or claim.subject_id != judged.card_id:
+            logger.warning("Claim %s was replaced (a new run, or a new pick) before it was judged; discarding", claim_id)
             return
         # The card, still: one deleted meanwhile has nothing to hold the claim to.
         if (
@@ -174,7 +178,6 @@ def _store(novel_id: uuid.UUID, claim_id: uuid.UUID, judged: _Judged) -> None:
         claim.subject_name = judged.card_name
         claim.candidates = []
         claim.link_status = None
-        claim.link_requested_at = None
         db.commit()
 
 

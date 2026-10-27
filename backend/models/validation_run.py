@@ -1,11 +1,11 @@
 """validation_runs table (design doc 2.2, 10.2, 10.4.4).
 
 One row per "run validation" request on an episode. The API creates it
-(queued) and enqueues a job carrying its id; the worker moves it to running,
-then succeeded or failed. It is also the worker's idempotency record (10.4.4):
-a job whose run isn't queued any more was already taken, and is skipped.
+(queued) with a job for it (models/job.py); the job moves it to running, then
+succeeded or failed. It is also the job's idempotency record (10.4.4): a job
+whose run is finished already (or was given up on) is skipped.
 
-- content_updated_at: the episode's updated_at as of the content the worker
+- content_updated_at: the episode's updated_at as of the content the job
   validated — a later save makes this result out of date (2.2)
 - summary: what the run found, for the editor to show (claim count, the
   characters/locations it registered as new)

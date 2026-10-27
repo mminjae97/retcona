@@ -1,7 +1,9 @@
 """API server entry point.
 
 Design doc 6.1 architecture: frontend -> local backend -> {pipeline, models(DB)}
-Run: uvicorn api.main:app --reload  (binds 127.0.0.1 unless told otherwise; keep it so)
+Run: uvicorn api.main:app --reload  (binds 127.0.0.1 unless told otherwise; keep it so).
+It runs the queued jobs too (workers/runner.py): one process, no --workers (a second
+one on the same database runs no jobs).
 """
 
 import asyncio
@@ -19,7 +21,9 @@ from api.events import router as events_router
 from api.novels import router as novels_router
 from api.relations import router as relations_router
 from api.settings import router as settings_router
+from infra.queue_client import get_queue_client
 from models.db import check_database
+from workers.runner import JobRunner
 
 # With no accounts, these keep a web page open in the author's browser from
 # using this API (design doc 10.4.2):
@@ -69,7 +73,13 @@ async def lifespan(app: FastAPI):
     # but this still shouldn't set the precedent of blocking it from
     # lifespan).
     await asyncio.to_thread(check_database)
+    # The job queue's runner (design doc 10.2), in this process. It loads the
+    # models in its own thread, so requests are served meanwhile.
+    runner = JobRunner(get_queue_client())
+    await asyncio.to_thread(runner.prepare)
+    runner.start()
     yield
+    await asyncio.to_thread(runner.stop)
 
 
 app = FastAPI(title="Retcona API", lifespan=lifespan, dependencies=_CLIENT)

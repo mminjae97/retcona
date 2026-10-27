@@ -61,15 +61,23 @@
 
 .novel-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .rename-form {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   width: 100%;
 }
 
 .rename-form input {
   flex: 1;
+  min-width: 0;
+}
+
+/* The error goes on a line of its own, under the field and its buttons. */
+.rename-form .novel-list-error {
+  flex-basis: 100%;
 }

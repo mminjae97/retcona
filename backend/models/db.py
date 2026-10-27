@@ -183,7 +183,7 @@ def check_schema_is_current(connection: Connection) -> None:
 
 def check_database() -> None:
     """The startup check, over one connection: every entry point that talks to
-    the database (the API server's lifespan, the CPU worker) runs this before
+    the database (the API server's lifespan) runs this before
     doing anything else. Blocking — the API server runs it in a thread.
     """
     with engine.connect() as connection:

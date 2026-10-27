@@ -13,12 +13,5 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
 
-  # 10.2: job queue — local dev Redis implementation (production uses GCP Pub/Sub)
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-
 volumes:
   db_data:
