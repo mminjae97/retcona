@@ -13,9 +13,8 @@ claims: verification-target claim units extracted from the manuscript by the ext
     with the cards it could be, [{"kind", "id", "name", "aliases"}], and link_status
     "pending": the result screen has the author pick one, and then it's judged
     (pipeline/judge_linked_claim.py): "queued" once picked, "judging" while the
-    job does, link_requested_at when it was picked (a claim left waiting with no
-    job for it goes back to pending, as an abandoned run fails). None for every
-    other claim. What the
+    job does (a claim left waiting with no job for it goes back to pending, as
+    an abandoned run fails). None for every other claim. What the
     author picked is kept across runs (models/claim_link_choice.py).
   - evidence_text: the manuscript sentence the claim came from (shown as the
     basis on the result screen, 2.4)
@@ -39,9 +38,8 @@ contradiction_flags: a claim that contradicts the novel's settings (7.2)
 """
 
 import uuid
-from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, String, Text
+from sqlalchemy import Float, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -63,7 +61,6 @@ class Claim(Base, NovelScopedMixin, TimestampMixin):
     attributes: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}", nullable=False)
     candidates: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]", nullable=False)
     link_status: Mapped[str | None] = mapped_column(String)  # None | pending | queued | judging
-    link_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ContradictionFlag(Base, NovelScopedMixin, TimestampMixin):

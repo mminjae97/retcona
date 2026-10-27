@@ -742,7 +742,7 @@ def _put_back_lost_picks(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID
             Claim.link_status.in_(_LINK_ACTIVE),
             ~job_pending(Claim.id),
         )
-        .values(link_status="pending", subject_id=None, link_requested_at=None)
+        .values(link_status="pending", subject_id=None)
     )
 
 
@@ -860,7 +860,6 @@ def pick_pending_link(
     # for the card once it's judged.
     claim.subject_id = card.id
     claim.link_status = "queued"
-    claim.link_requested_at = func.now()
     # Committed together: the claim is never queued without its job.
     get_queue_client().enqueue(db, "judge_linked_claim", claim_id, {"novel_id": str(novel_id)})
     db.commit()

@@ -133,9 +133,9 @@ _STILL_HELD = text(
 
 class DatabaseQueueClient(QueueClient):
     def __init__(self) -> None:
-        # The connection holding the runner lock, kept open (out of the pool)
-        # for the process's lifetime: the lock goes with it, also when the
-        # process dies.
+        # The connection holding the runner lock, one of the engine's pool kept
+        # checked out for the process's lifetime: the lock goes with it, also
+        # when the process dies.
         self._lock_connection: Connection | None = None
 
     def enqueue(self, db: Session, type: str, target_id: uuid.UUID | None, payload: dict[str, Any]) -> uuid.UUID:

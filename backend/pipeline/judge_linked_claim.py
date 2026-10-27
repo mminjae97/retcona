@@ -79,7 +79,7 @@ def _put_back(novel_id: uuid.UUID, claim_id: uuid.UUID) -> None:
         db.execute(
             update(Claim)
             .where(Claim.id == claim_id, Claim.novel_id == novel_id, Claim.link_status == "judging")
-            .values(link_status="pending", subject_id=None, link_requested_at=None)
+            .values(link_status="pending", subject_id=None)
         )
         db.commit()
 
@@ -177,7 +177,6 @@ def _store(novel_id: uuid.UUID, claim_id: uuid.UUID, judged: _Judged) -> None:
         claim.subject_name = judged.card_name
         claim.candidates = []
         claim.link_status = None
-        claim.link_requested_at = None
         db.commit()
 
 
