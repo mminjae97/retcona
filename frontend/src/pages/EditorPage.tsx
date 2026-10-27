@@ -201,8 +201,16 @@ export default function EditorPage() {
       // anything this tab did) — ownDraftRef wouldn't otherwise learn its
       // slot is gone until its next write, overcounting the "drafts nearly
       // full" warning below in the meantime. loadDraft() re-checks storage
-      // directly rather than assuming which key changed.
-      if (e.newValue === null && ownDraftRef.current.has(id) && loadDraft(id) === null) {
+      // directly rather than assuming which key changed. Not while the slot
+      // is held (reloading): loadDraft() is null then whatever storage holds,
+      // and the entry still belongs to the earlier visit's slot, which its
+      // in-flight save clears or rebases from it; the load resets it anyway.
+      if (
+        e.newValue === null &&
+        ownDraftRef.current.has(id) &&
+        draftKeyOf(id) !== null &&
+        loadDraft(id) === null
+      ) {
         ownDraftRef.current.delete(id);
         // Mutating the ref alone doesn't schedule a render, and the other-
         // drafts list below is unaffected (it already excludes this tab's own

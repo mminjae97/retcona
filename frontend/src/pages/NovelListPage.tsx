@@ -31,6 +31,10 @@ export default function NovelListPage() {
   // disable the button.
   const novelsLoadingRef = useRef(false);
 
+  function dropNovel(id: string) {
+    setNovels((prev) => prev?.filter((n) => n.id !== id) ?? null);
+  }
+
   function loadNovels() {
     if (novelsLoadingRef.current) return;
     novelsLoadingRef.current = true;
@@ -97,7 +101,7 @@ export default function NovelListPage() {
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         // Deleted meanwhile (in another tab): no title to keep.
-        setNovels((prev) => prev?.filter((n) => n.id !== id) ?? null);
+        dropNovel(id);
         setRenaming(null);
       } else {
         setRenameError(describeError(err));
@@ -114,14 +118,11 @@ export default function NovelListPage() {
     setDeleting(novel.id);
     try {
       await deleteNovel(novel.id);
-      setNovels((prev) => prev?.filter((n) => n.id !== novel.id) ?? null);
+      dropNovel(novel.id);
     } catch (err) {
       // 404: already deleted (in another tab), which is what was asked.
-      if (err instanceof ApiError && err.status === 404) {
-        setNovels((prev) => prev?.filter((n) => n.id !== novel.id) ?? null);
-      } else {
-        setError(describeError(err));
-      }
+      if (err instanceof ApiError && err.status === 404) dropNovel(novel.id);
+      else setError(describeError(err));
     } finally {
       setDeleting(null);
     }

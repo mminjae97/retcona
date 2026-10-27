@@ -96,14 +96,18 @@ function episodePrefix(episodeId: string): string {
   return `${DRAFT_PREFIX}${episodeId}:`;
 }
 
-function ownKey(episodeId: string): string | null {
+// This session's draft key of the episode now (null: no slot, or held). A save
+// keeps it to rebase or clear the draft it was made from when it completes,
+// even if the editor has moved to a new slot since (left the episode and came
+// back while the save was in flight).
+export function draftKeyOf(episodeId: string): string | null {
   const slot = currentSlot(episodeId);
   return slot === null ? null : episodePrefix(episodeId) + slot;
 }
 
 // This session's own draft of the episode.
 export function loadDraft(episodeId: string): Draft | null {
-  const key = ownKey(episodeId);
+  const key = draftKeyOf(episodeId);
   return key === null ? null : readDraft(key);
 }
 
@@ -112,15 +116,7 @@ export function loadDraft(episodeId: string): Draft | null {
 const ROOM_RETRY_MS = 30_000;
 const retryRoomAt = new Map<string, number>();
 
-// This session's draft key of the episode now (null: no slot, or held). A save
-// keeps it to rebase or clear the draft it was made from when it completes,
-// even if the editor has moved to a new slot since (left the episode and came
-// back while the save was in flight).
-export function draftKeyOf(episodeId: string): string | null {
-  return ownKey(episodeId);
-}
-
-export function saveDraft(episodeId: string, draft: DraftInput, key: string | null = ownKey(episodeId)): boolean {
+export function saveDraft(episodeId: string, draft: DraftInput, key: string | null = draftKeyOf(episodeId)): boolean {
   if (key === null) return false;
   // Room is checked whenever the slot has to be created — not just the first
   // time, because a confirmed save removes it and other tabs or loads may have
@@ -148,7 +144,7 @@ export function saveDraft(episodeId: string, draft: DraftInput, key: string | nu
   return true;
 }
 
-export function clearDraft(episodeId: string, key: string | null = ownKey(episodeId)): void {
+export function clearDraft(episodeId: string, key: string | null = draftKeyOf(episodeId)): void {
   if (key !== null) storageRemove(key);
 }
 
@@ -173,7 +169,7 @@ function readDraftCached(key: string): Draft | null {
 // Drafts of this episode that other sessions left (another tab, or an earlier
 // load of this one), newest first. This session's own draft is not included.
 export function listOtherDrafts(episodeId: string): StoredDraft[] {
-  const own = ownKey(episodeId);
+  const own = draftKeyOf(episodeId);
   if (own === null) return [];
   const prefix = episodePrefix(episodeId);
   const keys = storageKeys(prefix);
