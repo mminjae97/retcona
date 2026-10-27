@@ -18,7 +18,7 @@ import pytest
 pytestmark = pytest.mark.skipif(os.environ.get("RETCONA_DB_TESTS") != "1", reason="needs RETCONA_DB_TESTS=1 and a database")
 
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select, text, update
 
 from api.main import CLIENT_HEADER, app
 from infra.queue_client import DatabaseQueueClient
@@ -61,14 +61,22 @@ def _latest(novel_id, episode_id) -> dict:
 
 
 def _take(queue: DatabaseQueueClient, target: uuid.UUID):
-    # Only this test's job: another test's, or one left from an earlier run, could be older.
-    for _ in range(50):
-        job = queue.dequeue()
-        assert job is not None, "the test's job is in the queue"
-        if job.target_id == target:
-            return job
-        queue.release(job.id)
-    raise AssertionError("never dequeued the test's job")
+    # Only this test's job: another test's, or one left from an earlier run,
+    # could be older. Those are taken too, and put back as they were.
+    others = []
+    try:
+        while (job := queue.dequeue()) is not None:
+            if job.target_id == target:
+                return job
+            others.append(job)
+        raise AssertionError("the test's job is in the queue")
+    finally:
+        with SessionLocal() as db:
+            for other in others:
+                db.execute(
+                    update(Job).where(Job.id == other.id).values(status="queued", attempts=other.attempts - 1)
+                )
+            db.commit()
 
 
 def test_a_run_is_queued_with_its_job_and_a_second_request_returns_it(episode):
@@ -99,13 +107,15 @@ def test_a_job_left_running_is_recovered_and_its_run_claimed_again(episode):
     assert _jobs(novel_id) == []
 
 
-def test_release_puts_a_job_back_without_counting_it(episode):
+def test_a_job_the_app_closed_in_the_middle_of_counts_as_an_attempt(episode):
     novel_id, episode_id = episode
     run_id = uuid.UUID(_validate(novel_id, episode_id)["id"])
     queue = DatabaseQueueClient()
-    job = _take(queue, run_id)
-    queue.release(job.id)
-    assert _take(queue, run_id).attempts == 1
+    attempts = []
+    for _ in range(3):
+        attempts.append(_take(queue, run_id).attempts)
+        queue.recover()
+    assert attempts == [1, 2, 3]
 
 
 def test_a_run_whose_job_is_gone_is_abandoned_but_one_still_running_is_not(episode):

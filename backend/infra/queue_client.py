@@ -2,8 +2,8 @@
 
 enqueue(db, ...) / dequeue() / ack(job_id), and around them what the job
 runner (workers/runner.py) needs: hold_runner_lock() and recover() at startup
-(and the lock checked again before each job), release() at shutdown,
-wait_for_job() / wake() while idle. The API and the runner use only this
+(and the lock checked again before each job), wait_for_job() / wake()
+while idle. The API and the runner use only this
 interface; DatabaseQueueClient keeps the queue in a table of the app's own
 database (models/job.py), so jobs waiting survive closing the app and no other
 server is needed. It is written for PostgreSQL (the runner lock is an advisory
@@ -64,11 +64,6 @@ class QueueClient(ABC):
     @abstractmethod
     def ack(self, job_id: uuid.UUID) -> None:
         """The job is done (whatever its outcome): it leaves the queue."""
-
-    @abstractmethod
-    def release(self, job_id: uuid.UUID) -> None:
-        """Put a running job back, not counted as an attempt: the app is closing
-        in the middle of it, which isn't the job's fault."""
 
     @abstractmethod
     def hold_runner_lock(self) -> bool:
@@ -166,15 +161,6 @@ class DatabaseQueueClient(QueueClient):
     def ack(self, job_id: uuid.UUID) -> None:
         with SessionLocal() as db:
             db.execute(delete(Job).where(Job.id == job_id))
-            db.commit()
-
-    def release(self, job_id: uuid.UUID) -> None:
-        with SessionLocal() as db:
-            db.execute(
-                update(Job)
-                .where(Job.id == job_id, Job.status == "running")
-                .values(status="queued", attempts=Job.attempts - 1)
-            )
             db.commit()
 
     def hold_runner_lock(self) -> bool:

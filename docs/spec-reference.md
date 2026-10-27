@@ -671,8 +671,7 @@ pipeline & job runner code
 
 - `QueueClient` exposes `enqueue(job)` / `dequeue()` / `ack(job_id)`, and for
   the job runner `hold_runner_lock()` (one runner per database), `recover()` at
-  startup and `release(job_id)` at shutdown (§8.4.4), `wait_for_job()` /
-  `wake()` while idle — business logic never knows the concrete
+  startup (§8.4.4), `wait_for_job()` / `wake()` while idle — business logic never knows the concrete
   implementation. A job is enqueued in the same transaction as the row it
   works on (a validation run, ...), so neither exists without the other.
 - `StorageClient` stores illustrations etc. in the data folder (§8.1).

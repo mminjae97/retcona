@@ -18,7 +18,6 @@ class FakeQueue(QueueClient):
         self.jobs = list(jobs)
         self.events: list[str] = []
         self.acked: list[uuid.UUID] = []
-        self.released: list[uuid.UUID] = []
         self.lock = lock
         # Method names to fail once each.
         self.fail = set(fail)
@@ -40,10 +39,6 @@ class FakeQueue(QueueClient):
     def ack(self, job_id):
         self._maybe_fail("ack")
         self.acked.append(job_id)
-
-    def release(self, job_id):
-        self.events.append("release")
-        self.released.append(job_id)
 
     def hold_runner_lock(self):
         self._maybe_fail("lock")
@@ -164,7 +159,7 @@ def test_without_the_lock_the_runner_takes_no_job(monkeypatch):
     assert calls == []
 
 
-def test_closing_in_the_middle_of_a_job_puts_it_back(monkeypatch):
+def test_closing_in_the_middle_of_a_job_leaves_it_for_the_next_start(monkeypatch):
     started, finish = threading.Event(), threading.Event()
 
     def slow():
@@ -178,7 +173,9 @@ def test_closing_in_the_middle_of_a_job_puts_it_back(monkeypatch):
     job_runner.start()
     assert started.wait(5)
     job_runner.stop(timeout=0.05)
-    assert queue.released == [job.id]
+    # Not acked: still in the queue, running, for the next start's recover()
+    # to queue again as one attempt.
+    assert queue.acked == []
     finish.set()
 
 
@@ -190,7 +187,6 @@ def test_stopping_wakes_an_idle_runner():
     job_runner.stop(timeout=5)
     assert queue.woken.is_set()
     assert not job_runner._thread.is_alive()
-    assert queue.released == []
 
 
 def test_prepare_locks_and_recovers_before_the_runner_starts(monkeypatch):

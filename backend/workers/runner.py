@@ -20,9 +20,11 @@ anything (prepare), so the jobs an earlier start left are queued again before
 any request reads them. A job is acked (leaves the queue) when
 it returns or raises: the jobs record their own failures on their rows, and a
 row a job couldn't record on is failed by the API once no job for it is
-pending (api/episodes.py, abandoned). Closing the app normally (the server shut
-down) in the middle of a job puts it back without counting the attempt; a
-process killed outright can't, and the next start counts it as one.
+pending (api/episodes.py, abandoned). A job the app closed in the middle of,
+normally or not, is left running and queued again by the next start's
+recovery, which counts it as an attempt: a job that hangs every time is given
+up on after MAX_ATTEMPTS starts however the app was closed, so the jobs behind
+it run.
 """
 
 import logging
@@ -47,8 +49,8 @@ POLL_SECONDS = 5.0
 QUEUE_RETRY_SECONDS = 5.0
 # How often a runner without the lock (another backend process has it) tries again.
 LOCK_RETRY_SECONDS = 10.0
-# A job started this many times without finishing (the app crashed, or was
-# killed, in the middle of it each time) isn't started again.
+# A job started this many times without finishing (the app closed in the
+# middle of it each time) isn't started again.
 MAX_ATTEMPTS = 3
 
 HANDLERS: dict[str, Callable[[uuid.UUID, uuid.UUID], None]] = {
@@ -91,8 +93,6 @@ class JobRunner:
         self._load = load
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="job-runner", daemon=True)
-        # The job being run, for stop() to put back.
-        self._current: uuid.UUID | None = None
         # Holding the lock, with the jobs an earlier start left queued again.
         self._ready = False
 
@@ -111,18 +111,11 @@ class JobRunner:
 
     def stop(self, timeout: float = 5.0) -> None:
         """Takes no further job and waits a little for the current one. One
-        still going then is put back on the queue, not counted as an attempt,
-        and is cut off with the process (a daemon thread): it runs again at the
-        next start."""
+        still going then is cut off with the process (a daemon thread), left
+        running in the queue: the next start queues it again, as one attempt."""
         self._stop.set()
         self._queue.wake()
         self._thread.join(timeout)
-        if self._thread.is_alive() and (job_id := self._current) is not None:
-            try:
-                self._queue.release(job_id)
-            except Exception:
-                # Left running: the next start queues it again, as one attempt.
-                logger.exception("Could not put job %s back on the queue", job_id)
 
     def _run(self) -> None:
         if not self._get_ready():
@@ -198,23 +191,17 @@ class JobRunner:
         if job is None:
             self._queue.wait_for_job(POLL_SECONDS)
             return
-        self._current = job.id
-        try:
-            if job.attempts > MAX_ATTEMPTS:
-                logger.error(
-                    "Giving up on job %s (%s): started %d times without finishing", job.id, job.type, MAX_ATTEMPTS
-                )
-            else:
-                try:
-                    handle(job)
-                except Exception:
-                    # The jobs record their own failures (on the run / the
-                    # revalidation / the claim); this is what they couldn't (a
-                    # malformed job, the database gone).
-                    logger.exception("Job %s failed", job.id)
-            self._ack(job.id)
-        finally:
-            self._current = None
+        if job.attempts > MAX_ATTEMPTS:
+            logger.error("Giving up on job %s (%s): started %d times without finishing", job.id, job.type, MAX_ATTEMPTS)
+        else:
+            try:
+                handle(job)
+            except Exception:
+                # The jobs record their own failures (on the run / the
+                # revalidation / the claim); this is what they couldn't (a
+                # malformed job, the database gone).
+                logger.exception("Job %s failed", job.id)
+        self._ack(job.id)
 
     def _ack(self, job_id: uuid.UUID) -> None:
         # Retried rather than left: a job left running in the table stays
