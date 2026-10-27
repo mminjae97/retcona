@@ -39,7 +39,7 @@ export interface TrashedNovel {
   id: string;
   title: string;
   deleted_at: string;
-  // When it's deleted for good (the first daily pass after this).
+  // When it's deleted for good (the first hourly pass after this).
   purge_after: string;
 }
 

@@ -11,7 +11,7 @@ Jobs (each takes its row: a job whose row isn't waiting for it is skipped, 10.4.
 - judge_linked_claim {novel_id}, target = the claim: a claim the author picked
   a card for (7.1.1), judged against it; enqueued by api/episodes.py
 - empty_trash {}, no target: novels in the trash past their 30 days deleted for
-  good (2.6); enqueued at startup and daily by api/main.py
+  good (2.6); enqueued at startup and hourly by api/main.py
 
 At startup the runner takes the database's runner lock — a second backend
 process on the same database runs no jobs (but see infra/queue_client.py on

@@ -11,7 +11,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 // What the row says about when it goes for good. Past the date it's still
 // here (the app was closed): the next pass, which runs when the app starts and
-// daily, deletes it.
+// hourly, deletes it.
 function describePurge(purgeAfter: string, now: number): string {
   const days = Math.ceil((new Date(purgeAfter).getTime() - now) / DAY_MS);
   return days > 0 ? `${days}일 뒤 영구 삭제` : "곧 영구 삭제";

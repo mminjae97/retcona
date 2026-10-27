@@ -58,7 +58,7 @@ class TrashedNovel(BaseModel):
     title: str
     deleted_at: datetime
     # When it's deleted for good: the first pass of the empty_trash job after
-    # this (one runs at startup and daily), so possibly a little later.
+    # this (one runs at startup and hourly), so possibly a little later.
     purge_after: datetime
 
 

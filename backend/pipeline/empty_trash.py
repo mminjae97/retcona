@@ -4,7 +4,7 @@ A deleted novel stays in the trash (novels.deleted_at) for TRASH_KEPT, and can
 be restored meanwhile (api/novels.py). After that this job deletes it for good,
 with everything under its novel_id — every other table carries one
 (NovelScopedMixin, 4.1), so that's the whole scope. It's enqueued while the app
-runs: right after it starts, then once a day (api/main.py, request_empty_trash).
+runs: right after it starts, then every hour (api/main.py, request_empty_trash).
 
 Each novel goes in its own transaction, under its row lock with the trash
 re-checked: a restore that got there first wins, and one novel that fails

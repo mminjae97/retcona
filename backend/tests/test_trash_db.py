@@ -123,9 +123,10 @@ def test_a_novel_not_deleted_is_not_in_the_trash_and_cant_be_restored(novel):
 
 
 def test_a_pass_is_queued_only_while_none_is_queued_or_running():
-    def passes() -> set[uuid.UUID]:
+    def passes() -> dict[uuid.UUID, str]:
         with SessionLocal() as db:
-            return set(db.scalars(select(Job.id).where(Job.type == "empty_trash")))
+            rows = db.execute(select(Job.id, Job.status).where(Job.type == "empty_trash"))
+            return {job_id: status for job_id, status in rows}
 
     before = passes()
     request_empty_trash()
@@ -133,13 +134,15 @@ def test_a_pass_is_queued_only_while_none_is_queued_or_running():
     after = passes()
     try:
         assert after == before if before else len(after) == 1
-        # Ours still running (the daily timer fired mid-pass): none more.
+        # All of them running (the timer fired mid-pass): none more.
         with SessionLocal() as db:
-            db.execute(update(Job).where(Job.id.in_(after - before)).values(status="running"))
+            db.execute(update(Job).where(Job.id.in_(after)).values(status="running"))
             db.commit()
         request_empty_trash()
-        assert passes() == after
+        assert passes().keys() == after.keys()
     finally:
         with SessionLocal() as db:
-            db.execute(delete(Job).where(Job.id.in_(passes() - before)))
+            db.execute(delete(Job).where(Job.id.in_(passes().keys() - before.keys())))
+            for job_id, status in before.items():
+                db.execute(update(Job).where(Job.id == job_id).values(status=status))
             db.commit()

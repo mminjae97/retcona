@@ -41,10 +41,12 @@ export default function NovelListPage() {
     setNovels((prev) => prev?.filter((n) => n.id !== id) ?? null);
   }
 
+  // The trash count comes along, so "다시 시도" retries it too.
   function loadNovels() {
     if (novelsLoadingRef.current) return;
     novelsLoadingRef.current = true;
     setNovelsError(null);
+    loadTrashCount();
     listNovels()
       .then(setNovels)
       .catch((err) => setNovelsError(describeError(err)))
@@ -66,7 +68,6 @@ export default function NovelListPage() {
 
   useEffect(() => {
     loadNovels();
-    loadTrashCount();
   }, []);
 
   async function handleCreate(e: FormEvent) {
