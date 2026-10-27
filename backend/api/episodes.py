@@ -39,11 +39,12 @@ from pipeline.judges import repeats
 
 router = APIRouter()
 
-# A run still queued or running with no job left for it was lost (its job
-# failed in a way it couldn't record, or was given up on: workers/runner.py)
-# and is failed as "abandoned", so the author can run validation again instead
-# of waiting on it forever. One whose job is still waiting in the queue, or was
-# cut off by closing the app (it runs again at the next start), isn't.
+# A run still queued or running with no job pending for it was lost (its job
+# failed in a way it couldn't record, was given up on, or has been running past
+# JOB_RUNNING_LIMIT: infra/queue_client.py, workers/runner.py) and is failed as
+# "abandoned", so the author can run validation again instead of waiting on it
+# forever. One whose job is still waiting in the queue, or was cut off by
+# closing the app (it runs again at the next start), isn't.
 _ACTIVE_STATUSES = ("queued", "running")
 # Attributes a flag can carry that aren't a card's (pipeline/judges.py): what the story says happened before.
 _HISTORY_ATTR_KEYS = STATE_ATTR_KEYS + SPACETIME_ATTR_KEYS
@@ -221,15 +222,19 @@ def _latest_run(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID) -> Vali
 
 
 def _abandon_if_lost(db: Session, run: ValidationRun) -> None:
-    """Fails a run that is queued or running with no job left for it; the caller commits."""
-    if run.status not in _ACTIVE_STATUSES or db.scalar(select(job_pending(run.id))):
+    """Fails a run that is queued or running with no job pending for it; the caller commits."""
+    if run.status not in _ACTIVE_STATUSES:
         return
     # Conditional, so a job finishing it at this moment wins: its
-    # succeeded/failed stays, and a job still going discards its results
-    # (pipeline/validate_episode.py).
+    # succeeded/failed stays, and a job still going (stuck past
+    # JOB_RUNNING_LIMIT) discards its results (pipeline/validate_episode.py).
     db.execute(
         update(ValidationRun)
-        .where(ValidationRun.id == run.id, ValidationRun.status.in_(_ACTIVE_STATUSES))
+        .where(
+            ValidationRun.id == run.id,
+            ValidationRun.status.in_(_ACTIVE_STATUSES),
+            ~job_pending(ValidationRun.id),
+        )
         .values(status="failed", error="abandoned", finished_at=func.now())
     )
     db.refresh(run)
@@ -353,7 +358,7 @@ def _latest_revalidations(
     db: Session, novel_id: uuid.UUID, flag_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, FlagRevalidation]:
     """Each flag's latest revalidation; one still queued or running with no job
-    left for it is failed as abandoned first (as runs are). The caller commits."""
+    pending for it is failed as abandoned first (as runs are). The caller commits."""
     if not flag_ids:
         return {}
     db.execute(
@@ -696,7 +701,7 @@ LINK_HANDLED = "link_handled"  # the claim isn't waiting for a pick (picked alre
 LINK_NOT_A_CANDIDATE = "link_not_a_candidate"  # the card isn't one the claim could be
 LINK_CARD_MISSING = "link_card_missing"  # the card was deleted
 LINK_RUN_ACTIVE = "link_run_active"  # a run is validating the episode and would replace the claim
-# A pick still queued or judging with no job left for it was lost, and the
+# A pick still queued or judging with no job pending for it was lost, and the
 # claim goes back to pending, as an abandoned run fails (_abandon_if_lost).
 _LINK_ACTIVE = ("queued", "judging")
 

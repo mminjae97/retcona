@@ -1,5 +1,7 @@
 """The job runner (workers/runner.py): what it does with each job the queue hands it."""
 
+import threading
+import time
 import uuid
 
 from infra.queue_client import QueueClient, QueuedJob
@@ -10,24 +12,52 @@ NOVEL = uuid.uuid4()
 
 
 class FakeQueue(QueueClient):
-    def __init__(self, jobs=(), recovered=0):
+    """In memory; `events` records the calls in order."""
+
+    def __init__(self, jobs=(), lock=True, fail=()):
         self.jobs = list(jobs)
+        self.events: list[str] = []
         self.acked: list[uuid.UUID] = []
-        self.recovered = recovered
-        self.recover_calls = 0
+        self.released: list[uuid.UUID] = []
+        self.lock = lock
+        # Method names to fail once each.
+        self.fail = set(fail)
+        self.woken = threading.Event()
+
+    def _maybe_fail(self, name):
+        self.events.append(name)
+        if name in self.fail:
+            self.fail.discard(name)
+            raise RuntimeError(f"{name} failed")
 
     def enqueue(self, db, type, target_id, payload):
         raise NotImplementedError
 
     def dequeue(self):
+        self._maybe_fail("dequeue")
         return self.jobs.pop(0) if self.jobs else None
 
     def ack(self, job_id):
+        self._maybe_fail("ack")
         self.acked.append(job_id)
 
+    def release(self, job_id):
+        self.events.append("release")
+        self.released.append(job_id)
+
+    def hold_runner_lock(self):
+        self._maybe_fail("lock")
+        return self.lock
+
     def recover(self):
-        self.recover_calls += 1
-        return self.recovered
+        self._maybe_fail("recover")
+        return 0
+
+    def wait_for_job(self, timeout):
+        self.woken.wait(min(timeout, 0.05))
+
+    def wake(self):
+        self.woken.set()
 
 
 def _job(type="validate_episode", attempts=1):
@@ -44,6 +74,13 @@ def _ran(monkeypatch, handler=None):
 
     monkeypatch.setitem(runner.HANDLERS, "validate_episode", record)
     return calls
+
+
+def _until(condition, seconds=5.0):
+    deadline = time.monotonic() + seconds
+    while not condition():
+        assert time.monotonic() < deadline, "timed out"
+        time.sleep(0.01)
 
 
 def test_a_job_runs_with_its_novel_and_row_and_leaves_the_queue(monkeypatch):
@@ -63,6 +100,16 @@ def test_a_job_that_raises_still_leaves_the_queue(monkeypatch):
     job = _job()
     queue = FakeQueue([job])
     JobRunner(queue, load=lambda: None).run_once()
+    assert queue.acked == [job.id]
+
+
+def test_an_ack_that_fails_is_tried_again(monkeypatch):
+    _ran(monkeypatch)
+    monkeypatch.setattr(runner, "QUEUE_RETRY_SECONDS", 0.01)
+    job = _job()
+    queue = FakeQueue([job], fail={"ack"})
+    JobRunner(queue, load=lambda: None).run_once()
+    assert queue.events.count("ack") == 2
     assert queue.acked == [job.id]
 
 
@@ -88,18 +135,62 @@ def test_a_job_of_an_unknown_type_is_dropped(monkeypatch):
     assert queue.acked == [job.id]
 
 
-def test_the_runner_queues_again_what_an_earlier_start_left_then_stops_when_told(monkeypatch):
+def test_the_runner_locks_recovers_and_loads_before_taking_jobs(monkeypatch):
     calls = _ran(monkeypatch)
+    monkeypatch.setattr(runner, "QUEUE_RETRY_SECONDS", 0.01)
+    jobs = [_job(), _job()]
+    # A failed recovery is tried again before any job is taken.
+    queue = FakeQueue(jobs, fail={"recover"})
     loaded = []
-    queue = FakeQueue([_job(), _job()], recovered=1)
-    job_runner = JobRunner(queue, load=lambda: loaded.append(True))
+    job_runner = JobRunner(queue, load=lambda: loaded.append(queue.events[-1]))
     job_runner.start()
+    _until(lambda: len(queue.acked) == 2)
     job_runner.stop(timeout=5)
-    assert queue.recover_calls == 1
-    assert loaded == [True]
     assert not job_runner._thread.is_alive()
-    # It ran what it took before being told to stop.
-    assert len(calls) == len(queue.acked)
+    assert queue.events[:3] == ["lock", "recover", "recover"]
+    assert loaded == ["recover"]
+    assert calls == [(NOVEL, job.target_id) for job in jobs]
+
+
+def test_without_the_lock_the_runner_takes_no_job(monkeypatch):
+    calls = _ran(monkeypatch)
+    monkeypatch.setattr(runner, "LOCK_RETRY_SECONDS", 0.01)
+    queue = FakeQueue([_job()], lock=False)
+    job_runner = JobRunner(queue, load=lambda: None)
+    job_runner.start()
+    _until(lambda: queue.events.count("lock") >= 3)
+    job_runner.stop(timeout=5)
+    assert set(queue.events) == {"lock"}
+    assert calls == []
+
+
+def test_closing_in_the_middle_of_a_job_puts_it_back(monkeypatch):
+    started, finish = threading.Event(), threading.Event()
+
+    def slow():
+        started.set()
+        finish.wait(5)
+
+    _ran(monkeypatch, slow)
+    job = _job()
+    queue = FakeQueue([job])
+    job_runner = JobRunner(queue, load=lambda: None)
+    job_runner.start()
+    assert started.wait(5)
+    job_runner.stop(timeout=0.05)
+    assert queue.released == [job.id]
+    finish.set()
+
+
+def test_stopping_wakes_an_idle_runner():
+    queue = FakeQueue()
+    job_runner = JobRunner(queue, load=lambda: None)
+    job_runner.start()
+    _until(lambda: "dequeue" in queue.events)
+    job_runner.stop(timeout=5)
+    assert queue.woken.is_set()
+    assert not job_runner._thread.is_alive()
+    assert queue.released == []
 
 
 def test_every_job_the_api_enqueues_has_a_handler():

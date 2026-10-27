@@ -7,8 +7,8 @@ revalidation, a claim), which is also its idempotency record: a job whose row
 isn't waiting for it any more is skipped.
 
 - target_id: that row's id. A row still waiting for a job when no job for it is
-  left was lost (its job failed in a way it couldn't record), which the API
-  tells the author (api/episodes.py, abandoned)
+  pending (infra/queue_client.py, job_pending) was lost, which the API tells the
+  author (api/episodes.py, abandoned)
 - payload: what the job needs besides target_id (novel_id, ...)
 - status: queued | running. A job left running when the app closed is queued
   again when it starts (10.4.4)

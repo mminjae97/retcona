@@ -1,26 +1,47 @@
 """QueueClient interface (design doc 10.4.3, 10.2): the local job queue.
 
-enqueue(db, ...) / dequeue() / ack(job_id), and recover() at startup. The API
-and the job runner (workers/runner.py) use only this interface;
-DatabaseQueueClient keeps the queue in a table of the app's own database
-(models/job.py), so jobs waiting survive closing the app and no other server
-is needed.
+enqueue(db, ...) / dequeue() / ack(job_id), and around them what the job
+runner (workers/runner.py) needs: hold_runner_lock() and recover() at startup,
+release() at shutdown, wait_for_job() while idle. The API and the runner use
+only this interface; DatabaseQueueClient keeps the queue in a table of the
+app's own database (models/job.py), so jobs waiting survive closing the app
+and no other server is needed.
 
 Delivery is at least once (10.4.4): a job the app closed in the middle of is
 run again, so every job checks its row is still waiting for it before doing
-anything (its idempotency record).
+anything (its idempotency record). Only one runner takes jobs from a database
+(hold_runner_lock), so a job is never running in two places at once.
 """
 
 import functools
+import threading
 import uuid
 from abc import ABC, abstractmethod
+from datetime import UTC, datetime, timedelta
 from typing import Any, NamedTuple
 
-from sqlalchemy import ColumnElement, delete, exists, func, select, update
+from sqlalchemy import (
+    ColumnElement,
+    Connection,
+    delete,
+    event,
+    exists,
+    func,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.orm import Session
 
-from models.db import SessionLocal
+from models.db import SessionLocal, engine
 from models.job import Job
+
+# A job running this long is taken to be stuck (a model call or a download that
+# never returns): what it works on is failed as abandoned (job_pending), so the
+# author can ask again rather than wait on it. Well past how long one job takes,
+# even on a CPU. If it does finish after all, its row was given up on and it
+# writes nothing.
+JOB_RUNNING_LIMIT = timedelta(minutes=30)
 
 
 class QueuedJob(NamedTuple):
@@ -48,24 +69,75 @@ class QueueClient(ABC):
         """The job is done (whatever its outcome): it leaves the queue."""
 
     @abstractmethod
+    def release(self, job_id: uuid.UUID) -> None:
+        """Put a running job back, not counted as an attempt: the app is closing
+        in the middle of it, which isn't the job's fault."""
+
+    @abstractmethod
+    def hold_runner_lock(self) -> bool:
+        """Become the one runner of this database, for as long as this process
+        lives; False if another process is. Only the holder may recover and
+        take jobs."""
+
+    @abstractmethod
     def recover(self) -> int:
         """Queue again the jobs left running by an earlier start of the app, and
-        return how many. Only when no job is running: at startup, before the
-        runner takes any."""
+        return how many. Only while holding the runner lock, before taking any."""
+
+    @abstractmethod
+    def wait_for_job(self, timeout: float) -> None:
+        """Wait until a job may have been queued (one was committed here, or
+        wake() was called), or the timeout passes."""
+
+    @abstractmethod
+    def wake(self) -> None:
+        """End a wait_for_job now."""
 
 
 def job_pending(target_id: Any) -> ColumnElement[bool]:
     """SQL: a job for this row (an id, or a column of the row's table) is still
-    queued or running. A row waiting for a job with none of its jobs left was
-    lost. The row is finished before its job is acked, so whatever sees the job
-    gone also sees the row finished, if it was."""
-    return exists().where(Job.target_id == target_id)
+    queued, or running and not stuck (JOB_RUNNING_LIMIT). A row waiting for a
+    job with none of its jobs pending was lost. The row is finished before its
+    job is acked, so whatever sees the job gone also sees the row finished, if
+    it was."""
+    return exists().where(
+        Job.target_id == target_id,
+        or_(Job.status == "queued", Job.started_at > datetime.now(UTC) - JOB_RUNNING_LIMIT),
+    )
+
+
+# Set when a session that enqueued a job commits, so an idle runner in this
+# process starts it at once instead of at its next look.
+_job_committed = threading.Event()
+_ENQUEUED = "retcona_job_enqueued"
+
+
+@event.listens_for(Session, "after_commit")
+def _wake_runner(session: Session) -> None:
+    if session.info.pop(_ENQUEUED, False):
+        _job_committed.set()
+
+
+@event.listens_for(Session, "after_rollback")
+def _forget_enqueued(session: Session) -> None:
+    session.info.pop(_ENQUEUED, None)
+
+
+# pg_try_advisory_lock's key: any number no other lock in this database uses.
+_RUNNER_LOCK_KEY = 0x7265_7463  # "retc"
 
 
 class DatabaseQueueClient(QueueClient):
+    def __init__(self) -> None:
+        # The connection holding the runner lock, kept open (out of the pool)
+        # for the process's lifetime: the lock goes with it, also when the
+        # process dies.
+        self._lock_connection: Connection | None = None
+
     def enqueue(self, db: Session, type: str, target_id: uuid.UUID | None, payload: dict[str, Any]) -> uuid.UUID:
         job = Job(id=uuid.uuid4(), type=type, target_id=target_id, payload=payload, status="queued")
         db.add(job)
+        db.info[_ENQUEUED] = True
         return job.id
 
     def dequeue(self) -> QueuedJob | None:
@@ -77,9 +149,7 @@ class DatabaseQueueClient(QueueClient):
             .scalar_subquery()
         )
         with SessionLocal() as db:
-            # Conditional, so a job is only ever taken once. (Another process
-            # taking the same one first leaves this with none; the runner looks
-            # again shortly.)
+            # Conditional, so a job is only ever taken once.
             row = db.execute(
                 update(Job)
                 .where(Job.id == oldest, Job.status == "queued")
@@ -94,6 +164,33 @@ class DatabaseQueueClient(QueueClient):
             db.execute(delete(Job).where(Job.id == job_id))
             db.commit()
 
+    def release(self, job_id: uuid.UUID) -> None:
+        with SessionLocal() as db:
+            db.execute(
+                update(Job)
+                .where(Job.id == job_id, Job.status == "running")
+                .values(status="queued", attempts=Job.attempts - 1)
+            )
+            db.commit()
+
+    def hold_runner_lock(self) -> bool:
+        if self._lock_connection is not None:
+            return True
+        connection = engine.connect()
+        try:
+            held = bool(connection.scalar(select(func.pg_try_advisory_lock(_RUNNER_LOCK_KEY))))
+            # Ends the transaction the query opened; the lock is the session's,
+            # and outlasts it.
+            connection.commit()
+        except Exception:
+            connection.close()
+            raise
+        if not held:
+            connection.close()
+            return False
+        self._lock_connection = connection
+        return True
+
     def recover(self) -> int:
         with SessionLocal() as db:
             requeued = db.scalars(
@@ -101,6 +198,15 @@ class DatabaseQueueClient(QueueClient):
             ).all()
             db.commit()
         return len(requeued)
+
+    def wait_for_job(self, timeout: float) -> None:
+        _job_committed.wait(timeout)
+        # Cleared after waking, not before waiting: a job committed meanwhile is
+        # found by the dequeue that follows.
+        _job_committed.clear()
+
+    def wake(self) -> None:
+        _job_committed.set()
 
 
 @functools.cache

@@ -2,7 +2,8 @@
 
 Design doc 6.1 architecture: frontend -> local backend -> {pipeline, models(DB)}
 Run: uvicorn api.main:app --reload  (binds 127.0.0.1 unless told otherwise; keep it so).
-It runs the queued jobs too (workers/runner.py): one process, no --workers.
+It runs the queued jobs too (workers/runner.py): one process, no --workers (a second
+one on the same database runs no jobs).
 """
 
 import asyncio

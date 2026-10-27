@@ -11,14 +11,14 @@ Jobs (each takes its row: a job whose row isn't waiting for it is skipped, 10.4.
 - judge_linked_claim {novel_id}, target = the claim: a claim the author picked
   a card for (7.1.1), judged against it; enqueued by api/episodes.py
 
-At startup the jobs an earlier start was in the middle of are queued again
-(10.4.4), and the models are loaded before the first job is taken. A job is
-acked (leaves the queue) when it returns or raises: the jobs record their own
-failures on their rows, and a row a job couldn't record on is failed by the
-API once no job for it is left (api/episodes.py, abandoned).
-
-One backend process per database: a second one's startup would queue again
-the jobs the first is running.
+At startup the runner takes the database's runner lock — a second backend
+process on the same database runs no jobs, so none runs in two places — then
+queues again the jobs an earlier start was in the middle of (10.4.4), and loads
+the models before taking the first job. A job is acked (leaves the queue) when
+it returns or raises: the jobs record their own failures on their rows, and a
+row a job couldn't record on is failed by the API once no job for it is
+pending (api/episodes.py, abandoned). Closing the app in the middle of a job
+puts it back without counting the attempt.
 """
 
 import logging
@@ -35,13 +35,15 @@ from pipeline.validate_episode import validate_episode
 
 logger = logging.getLogger(__name__)
 
-# How often an idle runner looks at the queue: a job waits at most this long
-# to start, and an idle look is one small query.
-POLL_SECONDS = 1.0
+# How often an idle runner looks at the queue anyway. A job committed in this
+# process wakes it at once (QueueClient.wait_for_job); this is the fallback.
+POLL_SECONDS = 30.0
 # How long to wait before trying the queue again after it failed (the database down).
 QUEUE_RETRY_SECONDS = 5.0
-# A job started this many times without finishing (the app closed, or crashed,
-# in the middle of it each time) isn't started again.
+# How often a runner without the lock (another backend process has it) tries again.
+LOCK_RETRY_SECONDS = 10.0
+# A job started this many times without finishing (the app crashed, or was
+# killed, in the middle of it each time) isn't started again.
 MAX_ATTEMPTS = 3
 
 HANDLERS: dict[str, Callable[[uuid.UUID, uuid.UUID], None]] = {
@@ -69,8 +71,11 @@ def load_resources() -> None:
 
 def handle(job: QueuedJob) -> None:
     handler = HANDLERS.get(job.type)
-    if handler is None or job.target_id is None:
+    if handler is None:
         logger.warning("Dropping job %s of unknown type %r", job.id, job.type)
+        return
+    if job.target_id is None:
+        logger.warning("Dropping job %s (%s): it names no row to work on", job.id, job.type)
         return
     handler(uuid.UUID(job.payload["novel_id"]), job.target_id)
 
@@ -81,32 +86,71 @@ class JobRunner:
         self._load = load
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="job-runner", daemon=True)
+        # The job being run, for stop() to put back.
+        self._current: uuid.UUID | None = None
 
     def start(self) -> None:
         self._thread.start()
 
     def stop(self, timeout: float = 5.0) -> None:
         """Takes no further job and waits a little for the current one. One
-        still going then is cut off with the process (a daemon thread) and
-        runs again at the next start."""
+        still going then is put back on the queue, not counted as an attempt,
+        and is cut off with the process (a daemon thread): it runs again at the
+        next start."""
         self._stop.set()
+        self._queue.wake()
         self._thread.join(timeout)
+        if self._thread.is_alive() and (job_id := self._current) is not None:
+            try:
+                self._queue.release(job_id)
+            except Exception:
+                # Left running: the next start queues it again, as one attempt.
+                logger.exception("Could not put job %s back on the queue", job_id)
 
     def _run(self) -> None:
-        try:
-            if requeued := self._queue.recover():
-                logger.info("Queued again %d job(s) an earlier start didn't finish", requeued)
-        except Exception:
-            # They stay running (and pending to the API) until a start that can.
-            logger.exception("Could not queue again the jobs an earlier start didn't finish")
+        if not self._take_lock() or not self._recover():
+            return
         self._load()
         logger.info("Job runner started")
         while not self._stop.is_set():
             self.run_once()
         logger.info("Job runner stopped")
 
+    def _take_lock(self) -> bool:
+        told = False
+        while not self._stop.is_set():
+            try:
+                if self._queue.hold_runner_lock():
+                    return True
+                if not told:
+                    logger.warning(
+                        "Another backend process is running this database's jobs; this one runs none while it does"
+                    )
+                    told = True
+                self._stop.wait(LOCK_RETRY_SECONDS)
+            except Exception:
+                logger.exception("Could not take the job runner lock; retrying in %d s", QUEUE_RETRY_SECONDS)
+                self._stop.wait(QUEUE_RETRY_SECONDS)
+        return False
+
+    def _recover(self) -> bool:
+        # Before taking any job: until it succeeds, those jobs would stay
+        # running, pending to the API, and never run.
+        while not self._stop.is_set():
+            try:
+                if requeued := self._queue.recover():
+                    logger.info("Queued again %d job(s) an earlier start didn't finish", requeued)
+                return True
+            except Exception:
+                logger.exception(
+                    "Could not queue again the jobs an earlier start didn't finish; retrying in %d s",
+                    QUEUE_RETRY_SECONDS,
+                )
+                self._stop.wait(QUEUE_RETRY_SECONDS)
+        return False
+
     def run_once(self) -> None:
-        """Takes and runs one job, or waits a little if there's none."""
+        """Takes and runs one job, or waits for one if there's none."""
         try:
             job = self._queue.dequeue()
         except Exception:
@@ -114,21 +158,37 @@ class JobRunner:
             self._stop.wait(QUEUE_RETRY_SECONDS)
             return
         if job is None:
-            self._stop.wait(POLL_SECONDS)
+            self._queue.wait_for_job(POLL_SECONDS)
             return
-        if job.attempts > MAX_ATTEMPTS:
-            logger.error("Giving up on job %s (%s): started %d times without finishing", job.id, job.type, MAX_ATTEMPTS)
-        else:
-            try:
-                handle(job)
-            except Exception:
-                # The jobs record their own failures (on the run / the
-                # revalidation / the claim); this is what they couldn't (a
-                # malformed job, the database gone).
-                logger.exception("Job %s failed", job.id)
+        self._current = job.id
         try:
-            self._queue.ack(job.id)
-        except Exception:
-            # Still running in the table: queued again at the next start, where
-            # its row (finished by now) makes it a no-op.
-            logger.exception("Could not take job %s off the queue", job.id)
+            if job.attempts > MAX_ATTEMPTS:
+                logger.error(
+                    "Giving up on job %s (%s): started %d times without finishing", job.id, job.type, MAX_ATTEMPTS
+                )
+            else:
+                try:
+                    handle(job)
+                except Exception:
+                    # The jobs record their own failures (on the run / the
+                    # revalidation / the claim); this is what they couldn't (a
+                    # malformed job, the database gone).
+                    logger.exception("Job %s failed", job.id)
+            self._ack(job.id)
+        finally:
+            self._current = None
+
+    def _ack(self, job_id: uuid.UUID) -> None:
+        # Retried rather than left: a job left running in the table stays
+        # pending to the API (until JOB_RUNNING_LIMIT), and the next one can't
+        # be taken while the database is down anyway.
+        while True:
+            try:
+                self._queue.ack(job_id)
+                return
+            except Exception:
+                logger.exception("Could not take job %s off the queue; retrying in %d s", job_id, QUEUE_RETRY_SECONDS)
+            if self._stop.wait(QUEUE_RETRY_SECONDS):
+                # Closing: left running, queued again at the next start (its
+                # row tells the job whether anything is left to do).
+                return
