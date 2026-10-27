@@ -27,6 +27,12 @@ normally or not, is left running and queued again by the next start's
 recovery, which counts it as an attempt: a job that hangs every time is given
 up on after MAX_ATTEMPTS starts however the app was closed, so the jobs behind
 it run.
+
+A novel's job whose novel is in the trash (or deleted for good) is skipped
+without touching its row: run, it would fail it as gone, and that failure would
+outlast a restore. Left with no job, the row is failed as abandoned when it's
+next read — after a restore, a run or revalidation to start again, a pick back
+to pending.
 """
 
 import logging
@@ -34,8 +40,12 @@ import threading
 import uuid
 from collections.abc import Callable
 
+from sqlalchemy import select
+
 from ai.nli_rerank import load_models
 from infra.queue_client import QueueClient, QueuedJob
+from models.db import SessionLocal
+from models.novel import Novel
 from pipeline.empty_trash import empty_trash
 from pipeline.extraction_rules import load_tagger
 from pipeline.judge_linked_claim import judge_linked_claim
@@ -94,7 +104,17 @@ def handle(job: QueuedJob) -> None:
     if job.target_id is None:
         logger.warning("Dropping job %s (%s): it names no row to work on", job.id, job.type)
         return
-    handler(uuid.UUID(job.payload["novel_id"]), job.target_id)
+    novel_id = uuid.UUID(job.payload["novel_id"])
+    if not novel_in_place(novel_id):
+        logger.info("Skipping job %s (%s): its novel is in the trash or deleted", job.id, job.type)
+        return
+    handler(novel_id, job.target_id)
+
+
+def novel_in_place(novel_id: uuid.UUID) -> bool:
+    """The novel exists and isn't in the trash."""
+    with SessionLocal() as db:
+        return db.scalar(select(Novel.id).where(Novel.id == novel_id, Novel.deleted_at.is_(None))) is not None
 
 
 class JobRunner:

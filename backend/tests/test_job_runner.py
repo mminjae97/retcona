@@ -4,11 +4,21 @@ import threading
 import time
 import uuid
 
+import pytest
+
 from infra.queue_client import QueueClient, QueuedJob
 from workers import runner
 from workers.runner import MAX_ATTEMPTS, JobRunner
 
 NOVEL = uuid.uuid4()
+# The novels in the trash (or deleted for good), in place of the database.
+TRASHED: set[uuid.UUID] = set()
+
+
+@pytest.fixture(autouse=True)
+def _novels(monkeypatch):
+    TRASHED.clear()
+    monkeypatch.setattr(runner, "novel_in_place", lambda novel_id: novel_id not in TRASHED)
 
 
 class FakeQueue(QueueClient):
@@ -94,6 +104,16 @@ def test_an_app_job_runs_with_no_novel_or_row(monkeypatch):
     queue = FakeQueue([job])
     JobRunner(queue, load=lambda: None).run_once()
     assert calls == ["emptied"]
+    assert queue.acked == [job.id]
+
+
+def test_a_job_of_a_novel_in_the_trash_is_skipped_without_running(monkeypatch):
+    calls = _ran(monkeypatch)
+    TRASHED.add(NOVEL)
+    job = _job()
+    queue = FakeQueue([job])
+    JobRunner(queue, load=lambda: None).run_once()
+    assert calls == []
     assert queue.acked == [job.id]
 
 

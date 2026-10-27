@@ -19,11 +19,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, func, select, update
 
 from api.main import CLIENT_HEADER, app
+from infra.queue_client import QueuedJob
 from models.base import Base
 from models.db import SessionLocal
 from models.job import Job
 from models.novel import TRASH_KEPT, Novel
+from models.validation_run import ValidationRun
 from pipeline.empty_trash import _purge, empty_trash, request_empty_trash
+from workers.runner import handle
 
 # Not as a context manager: no lifespan, so no runner of its own.
 client = TestClient(app, base_url="http://localhost:8000", headers={CLIENT_HEADER: "1"})
@@ -115,6 +118,24 @@ def test_a_novel_past_its_days_not_yet_deleted_can_still_be_restored(novel):
     rows = _rows(novel)
     empty_trash()
     assert _rows(novel) == rows
+
+
+def test_a_job_that_comes_up_while_its_novel_is_in_the_trash_leaves_its_row_to_run_again(novel):
+    client.delete(f"/novels/{novel}")
+    with SessionLocal() as db:
+        run = db.scalar(select(ValidationRun).where(ValidationRun.novel_id == novel))
+        job = db.scalar(select(Job).where(Job.target_id == run.id))
+        episode_id = run.episode_id
+        queued = QueuedJob(job.id, job.type, job.target_id, job.payload, job.attempts)
+    # As the runner does: handled, then acked.
+    handle(queued)
+    with SessionLocal() as db:
+        db.execute(delete(Job).where(Job.id == queued.id))
+        db.commit()
+    assert client.post(f"/novels/{novel}/restore").status_code == 200
+    latest = client.get(f"/novels/{novel}/episodes/{episode_id}/validations/latest").json()
+    # Not "episode missing": stopped, for the author to run again.
+    assert (latest["status"], latest["error"]) == ("failed", "abandoned")
 
 
 def test_a_novel_not_deleted_is_not_in_the_trash_and_cant_be_restored(novel):
