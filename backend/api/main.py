@@ -39,11 +39,12 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]"]
 CLIENT_HEADER = "X-Retcona-Client"
 _CLIENT = [Security(APIKeyHeader(name=CLIENT_HEADER))]
 _NO_FRAMING = [(b"x-frame-options", b"DENY"), (b"content-security-policy", b"frame-ancestors 'none'")]
+_NO_FRAMING_NAMES = {name for name, _ in _NO_FRAMING}
 
 
 class NoFramingMiddleware:
-    """Adds the no-framing headers to every response (plain ASGI: nothing else
-    is wrapped)."""
+    """Sets the no-framing headers on every response, in place of any the
+    response set itself (plain ASGI: nothing else is wrapped)."""
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -55,7 +56,8 @@ class NoFramingMiddleware:
 
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
-                message["headers"] = [*message.get("headers", []), *_NO_FRAMING]
+                kept = [h for h in message.get("headers", []) if h[0].lower() not in _NO_FRAMING_NAMES]
+                message["headers"] = [*kept, *_NO_FRAMING]
             await send(message)
 
         await self.app(scope, receive, send_with_headers)

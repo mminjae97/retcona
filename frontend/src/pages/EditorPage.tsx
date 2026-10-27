@@ -38,15 +38,20 @@ const DRAFT_DEBOUNCE_MS = 300;
 const OTHER_DRAFTS_REFRESH_DEBOUNCE_MS = 1000;
 // How long the "draft loaded" notice stays up.
 const NOTICE_DURATION_MS = 6000;
-// Chains save requests so a later one (e.g. a save pressed for an episode
-// reopened while its previous save is still in flight) always waits for the
-// previous request to finish before sending — otherwise two in-flight PATCHes for the same episode
-// could commit out of order and the older one would silently overwrite
-// the newer content server-side, which seq alone (client-side response
-// ordering only) can't prevent. Episode loads wait on it too. Module-level,
-// not per component: leaving the editor for another page and coming back
-// mounts a new one, whose load must still wait for the save pressed before.
-const saveChain = { current: Promise.resolve() as Promise<unknown> };
+// Chains each episode's save requests so a later one (e.g. a save pressed for
+// an episode reopened while its previous save is still in flight) always waits
+// for the previous request to finish before sending — otherwise two in-flight
+// PATCHes for the same episode could commit out of order and the older one
+// would silently overwrite the newer content server-side, which seq alone
+// (client-side response ordering only) can't prevent. Loads of the episode
+// wait on it too. Module-level, not per component: leaving the editor for
+// another page and coming back mounts a new one, whose load must still wait
+// for the save pressed before. Per episode, so a stalled save doesn't hold up
+// opening any other episode.
+const saveChains = new Map<string, Promise<unknown>>();
+function saveChainOf(episodeId: string): Promise<unknown> {
+  return saveChains.get(episodeId) ?? Promise.resolve();
+}
 const LEAVE_UNSAVED_CONFIRM = "저장하지 않은 변경이 있고 이 브라우저에 임시저장되지 않았습니다. 나가면 내용이 사라집니다. 나갈까요?";
 
 // First characters of a draft, counted in code points so an emoji isn't cut in half.
@@ -274,13 +279,13 @@ export default function EditorPage() {
         setSaveState("saving");
         setSaveError(null);
       }
-      const saved = saveChain.current
+      const saved = saveChainOf(targetEpisodeId)
         .catch(() => {})
         .then(() => saveEpisode(targetNovelId, targetEpisodeId, nextContent))
         .then((updated) => {
-          // Episode identity, not seq: saveChain fully serializes calls (a
-          // second save's saveEpisode() doesn't even start until this whole
-          // .then() has run), so responses can never arrive out of order —
+          // Episode identity, not seq: the episode's chain fully serializes its
+          // saves (a second save's saveEpisode() doesn't even start until this
+          // whole .then() has run), so responses can never arrive out of order —
           // seq would false-skip this block whenever a next save has already
           // been *called* (even if still queued behind this one), which is
           // the common case for back-to-back saves, not a rare race.
@@ -329,7 +334,11 @@ export default function EditorPage() {
           // Save again when ready. Nothing is sent on its own.
           return false;
         });
-      saveChain.current = saved;
+      saveChains.set(targetEpisodeId, saved);
+      // Settled and nothing queued behind it: the entry is no longer needed.
+      void saved.then(() => {
+        if (saveChains.get(targetEpisodeId) === saved) saveChains.delete(targetEpisodeId);
+      });
       return saved;
     },
     [showOtherDrafts, setServerVersion, refreshOtherDrafts]
@@ -360,13 +369,13 @@ export default function EditorPage() {
     // No draft is written until the episode has arrived below (see holdDraftSlot).
     holdDraftSlot(episodeId);
     setServerVersion("", "");
-    // Chained after saveChain instead of fired directly: a quick
+    // Chained after the episode's saves instead of fired directly: a quick
     // A -> B -> A navigation can come back to A while the save the author
     // pressed there is still in flight. Without waiting for it, this GET could
     // race that PATCH and win, loading pre-edit content over what was just
     // saved — the user would then keep editing from a stale baseline and the
     // next save would silently drop the saved edit.
-    saveChain.current
+    saveChainOf(episodeId)
       .catch(() => {})
       .then(() => (cancelled ? null : getEpisode(novelId, episodeId)))
       .then((ep) => {

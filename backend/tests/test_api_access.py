@@ -4,8 +4,11 @@ rebinding, the client header against other sites, no framing."""
 from fastapi.routing import APIRoute
 from fastapi.security import APIKeyHeader
 from fastapi.testclient import TestClient
+from starlette.applications import Starlette
+from starlette.responses import PlainTextResponse
+from starlette.routing import Route
 
-from api.main import CLIENT_HEADER, app
+from api.main import CLIENT_HEADER, NoFramingMiddleware, app
 
 # Not as a context manager: the lifespan (the database check) isn't needed here.
 client = TestClient(app, base_url="http://localhost:8000")
@@ -55,6 +58,16 @@ def test_no_page_can_be_framed():
         response = client.get(path, headers=headers)
         assert response.headers["x-frame-options"] == "DENY"
         assert response.headers["content-security-policy"] == "frame-ancestors 'none'"
+
+
+def test_a_page_setting_its_own_framing_headers_gets_ours_once():
+    def page(request):
+        return PlainTextResponse("", headers={"X-Frame-Options": "SAMEORIGIN", "Content-Security-Policy": "default-src 'self'"})
+
+    inner = Starlette(routes=[Route("/", page)])
+    response = TestClient(NoFramingMiddleware(inner)).get("/")
+    assert response.headers.get_list("x-frame-options") == ["DENY"]
+    assert response.headers.get_list("content-security-policy") == ["frame-ancestors 'none'"]
 
 
 def test_the_docs_know_the_header():
