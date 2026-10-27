@@ -30,8 +30,7 @@ from pydantic import (
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
-from api.deps import get_owned_novel as _get_owned_novel
-from auth.dependencies import get_current_user
+from api.deps import require_novel
 from models.character import Character, CharacterStateHistory
 from models.claim import Claim
 from models.claim_link_choice import ClaimLinkChoice
@@ -39,7 +38,6 @@ from models.db import get_db
 from models.flag_dismissal import FlagDismissal
 from models.relation import Relation
 from models.story_event import EventParticipant
-from models.user import User
 from models.world_setting import WorldSetting
 from pipeline.entities import normalize_name
 
@@ -94,9 +92,9 @@ def _get_world_setting(db: Session, novel_id: uuid.UUID, setting_id: uuid.UUID) 
 
 @router.get("/{novel_id}/world-settings", response_model=list[WorldSettingPublic])
 def list_world_settings(
-    novel_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+    novel_id: uuid.UUID, db: Session = Depends(get_db)
 ) -> list[WorldSetting]:
-    _get_owned_novel(db, novel_id, user)
+    require_novel(db, novel_id)
     return list(
         db.scalars(
             select(WorldSetting)
@@ -111,9 +109,8 @@ def create_world_setting(
     novel_id: uuid.UUID,
     body: WorldSettingInput,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> WorldSetting:
-    _get_owned_novel(db, novel_id, user, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     setting = WorldSetting(novel_id=novel_id, **body.model_dump())
     db.add(setting)
     db.commit()
@@ -127,9 +124,8 @@ def update_world_setting(
     setting_id: uuid.UUID,
     body: WorldSettingInput,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> WorldSetting:
-    _get_owned_novel(db, novel_id, user, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     setting = _get_world_setting(db, novel_id, setting_id)
     for field, value in body.model_dump().items():
         setattr(setting, field, value)
@@ -143,9 +139,8 @@ def delete_world_setting(
     novel_id: uuid.UUID,
     setting_id: uuid.UUID,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> None:
-    _get_owned_novel(db, novel_id, user, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     db.delete(_get_world_setting(db, novel_id, setting_id))
     db.commit()
 
@@ -329,11 +324,11 @@ def _apply(character: Character, body: CharacterInput) -> None:
 
 @router.get("/{novel_id}/characters", response_model=list[CharacterPublic])
 def list_characters(
-    novel_id: uuid.UUID, db: Session = Depends(get_db), user: User = Depends(get_current_user)
+    novel_id: uuid.UUID, db: Session = Depends(get_db)
 ) -> list[Character]:
     # Whole cards, not summaries: a novel has tens of characters at most, and
     # the settings screen edits them in place without a fetch per card.
-    _get_owned_novel(db, novel_id, user)
+    require_novel(db, novel_id)
     return list(
         db.scalars(select(Character).where(Character.novel_id == novel_id).order_by(Character.created_at, Character.id))
     )
@@ -344,9 +339,8 @@ def create_character(
     novel_id: uuid.UUID,
     body: CharacterInput,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> Character:
-    _get_owned_novel(db, novel_id, user, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     _reject_indistinguishable(db, novel_id, body)
     character = Character(novel_id=novel_id, source="manual")
     _apply(character, body)
@@ -362,9 +356,8 @@ def update_character(
     character_id: uuid.UUID,
     body: CharacterInput,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> Character:
-    _get_owned_novel(db, novel_id, user, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     character = _get_character(db, novel_id, character_id)
     _reject_indistinguishable(db, novel_id, body, except_id=character_id)
     if character.name != body.name:
@@ -389,9 +382,8 @@ def delete_character(
     novel_id: uuid.UUID,
     character_id: uuid.UUID,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
 ) -> None:
-    _get_owned_novel(db, novel_id, user, for_update=True)
+    require_novel(db, novel_id, for_update=True)
     character = _get_character(db, novel_id, character_id)
     # What's derived from this character goes with it: its state history and
     # event participation reference it by foreign key, and relations by id

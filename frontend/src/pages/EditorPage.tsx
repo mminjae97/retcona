@@ -5,12 +5,10 @@
 // what's saved; a worker does it in the background while the author keeps writing, and the page polls the run
 // (utils/validationRun.ts) and shows what it found — or that a later save has made it out of date.
 // Editing a submitted episode flips its status back to draft (2.2).
-// The draft is dropped once a save confirms it, so it survives an expired session, a network failure or a
-// closed tab. Every tab (every page load) keeps its own draft and rewrites only that one; the drafts other tabs
+// The draft is dropped once a save confirms it, so it survives a failed save, a crash or a closed window. Every tab (every page load) keeps its own draft and rewrites only that one; the drafts other tabs
 // or earlier loads left are listed on the page and the author loads whichever one they want.
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Link, useBlocker, useParams } from "react-router-dom";
-import { fetchCurrentUserId } from "../api/auth";
 import { describeError } from "../api/client";
 import { getEpisode, saveEpisode } from "../api/episodes";
 import type { EpisodePublic, ValidationRun } from "../api/episodes";
@@ -19,8 +17,9 @@ import {
   clearDraft,
   discardDraft,
   discardDraftIfContent,
+  draftKeyOf,
+  holdDraftSlot,
   isDraftEventFor,
-  isDraftsWipedEventFor,
   listOtherDrafts,
   loadDraft,
   releaseDraftCache,
@@ -39,6 +38,20 @@ const DRAFT_DEBOUNCE_MS = 300;
 const OTHER_DRAFTS_REFRESH_DEBOUNCE_MS = 1000;
 // How long the "draft loaded" notice stays up.
 const NOTICE_DURATION_MS = 6000;
+// Chains each episode's save requests so a later one (e.g. a save pressed for
+// an episode reopened while its previous save is still in flight) always waits
+// for the previous request to finish before sending — otherwise two in-flight
+// PATCHes for the same episode could commit out of order and the older one
+// would silently overwrite the newer content server-side, which seq alone
+// (client-side response ordering only) can't prevent. Loads of the episode
+// wait on it too. Module-level, not per component: leaving the editor for
+// another page and coming back mounts a new one, whose load must still wait
+// for the save pressed before. Per episode, so a stalled save doesn't hold up
+// opening any other episode.
+const saveChains = new Map<string, Promise<unknown>>();
+function saveChainOf(episodeId: string): Promise<unknown> {
+  return saveChains.get(episodeId) ?? Promise.resolve();
+}
 const LEAVE_UNSAVED_CONFIRM = "저장하지 않은 변경이 있고 이 브라우저에 임시저장되지 않았습니다. 나가면 내용이 사라집니다. 나갈까요?";
 
 // First characters of a draft, counted in code points so an emoji isn't cut in half.
@@ -77,13 +90,6 @@ export default function EditorPage() {
   // Tracks in-flight/most-recent save to avoid an out-of-order save response
   // clobbering a newer one's result.
   const saveSeqRef = useRef(0);
-  // Chains save requests so a later one (e.g. a save pressed for an episode
-  // reopened while its previous save is still in flight) always waits for the
-  // previous request to finish before sending — otherwise two in-flight PATCHes for the same episode
-  // could commit out of order and the older one would silently overwrite
-  // the newer content server-side, which seq alone (client-side response
-  // ordering only) can't prevent.
-  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
   // True only while the component is actually mounted — separate from the
   // per-episode "cancelled" flag in the load effect below, since a save still
   // in flight when the editor is left is deliberately let finish (and still
@@ -196,18 +202,22 @@ export default function EditorPage() {
     const onStorage = (e: StorageEvent) => {
       const id = currentEpisodeIdRef.current;
       if (!id) return;
-      // Another tab just wiped this account's drafts (a deletion request went
-      // through): this tab's own slot is gone too, so its backup is gone right
-      // now, not just as of its next write.
-      if (isDraftsWipedEventFor(id, e.key)) setDraftBackupOk(false);
       if (!isDraftEventFor(id, e.key)) return;
       // A removal under this episode's prefix can be another tab's makeRoom()
       // reclaiming *this* session's own stale slot (evicted for room, not by
       // anything this tab did) — ownDraftRef wouldn't otherwise learn its
       // slot is gone until its next write, overcounting the "drafts nearly
       // full" warning below in the meantime. loadDraft() re-checks storage
-      // directly rather than assuming which key changed.
-      if (e.newValue === null && ownDraftRef.current.has(id) && loadDraft(id) === null) {
+      // directly rather than assuming which key changed. Not while the slot
+      // is held (reloading): loadDraft() is null then whatever storage holds,
+      // and the entry still belongs to the earlier visit's slot, which its
+      // in-flight save clears or rebases from it; the load resets it anyway.
+      if (
+        e.newValue === null &&
+        ownDraftRef.current.has(id) &&
+        draftKeyOf(id) !== null &&
+        loadDraft(id) === null
+      ) {
         ownDraftRef.current.delete(id);
         // Mutating the ref alone doesn't schedule a render, and the other-
         // drafts list below is unaffected (it already excludes this tab's own
@@ -245,9 +255,8 @@ export default function EditorPage() {
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [atRisk]);
-  // Same guard for a navigation within the app: the back-link, an App.tsx
-  // route change, or AuthExpiryRedirect forcing everyone to /login when the
-  // session ends — and, because this runs through the data router, browser
+  // Same guard for a navigation within the app: the back-link or an App.tsx
+  // route change — and, because this runs through the data router, browser
   // back/forward too, which a Link-only guard can't reach (the URL has
   // already changed by the time a popstate handler would see it).
   const blocker = useBlocker(atRisk);
@@ -263,17 +272,20 @@ export default function EditorPage() {
   const save = useCallback(
     (targetNovelId: string, targetEpisodeId: string, nextContent: string): Promise<boolean> => {
       const seq = ++saveSeqRef.current;
+      // The draft this save backs up: its follow-up below goes there, even if
+      // the episode has been left and reopened (a new, held slot) meanwhile.
+      const draftKey = draftKeyOf(targetEpisodeId);
       if (mountedRef.current) {
         setSaveState("saving");
         setSaveError(null);
       }
-      const saved = saveChainRef.current
+      const saved = saveChainOf(targetEpisodeId)
         .catch(() => {})
         .then(() => saveEpisode(targetNovelId, targetEpisodeId, nextContent))
         .then((updated) => {
-          // Episode identity, not seq: saveChainRef fully serializes calls (a
-          // second save's saveEpisode() doesn't even start until this whole
-          // .then() has run), so responses can never arrive out of order —
+          // Episode identity, not seq: the episode's chain fully serializes its
+          // saves (a second save's saveEpisode() doesn't even start until this
+          // whole .then() has run), so responses can never arrive out of order —
           // seq would false-skip this block whenever a next save has already
           // been *called* (even if still queued behind this one), which is
           // the common case for back-to-back saves, not a rare race.
@@ -286,14 +298,14 @@ export default function EditorPage() {
           const ownContent = ownDraftRef.current.get(targetEpisodeId);
           if (ownContent !== undefined) {
             if (ownContent === updated.content) {
-              clearDraft(targetEpisodeId);
+              clearDraft(targetEpisodeId, draftKey);
               ownDraftRef.current.delete(targetEpisodeId);
             } else {
               // Newer text was typed here while this save was in flight: keep
               // it, now based on the version this save produced. (If this
               // write fails the draft keeps its old base, so loading it later
               // is flagged as older than the server's copy.)
-              saveDraft(targetEpisodeId, { content: ownContent, baseUpdatedAt: updated.updated_at });
+              saveDraft(targetEpisodeId, { content: ownContent, baseUpdatedAt: updated.updated_at }, draftKey);
             }
           }
           if (targetEpisodeId === currentEpisodeIdRef.current) {
@@ -322,7 +334,11 @@ export default function EditorPage() {
           // Save again when ready. Nothing is sent on its own.
           return false;
         });
-      saveChainRef.current = saved;
+      saveChains.set(targetEpisodeId, saved);
+      // Settled and nothing queued behind it: the entry is no longer needed.
+      void saved.then(() => {
+        if (saveChains.get(targetEpisodeId) === saved) saveChains.delete(targetEpisodeId);
+      });
       return saved;
     },
     [showOtherDrafts, setServerVersion, refreshOtherDrafts]
@@ -350,29 +366,23 @@ export default function EditorPage() {
     setDraftBackupOk(true);
     showOtherDrafts([]);
     currentEpisodeIdRef.current = episodeId;
-    // Owner unknown until the account id arrives below: without this, ownerOf()
-    // would fall back to the live getUserId() for storage events that land in
-    // the gap, which can point at a different account by the time it resolves
-    // (another tab signing in as someone else, or this account being deleted).
-    startDraftSlot(episodeId, null);
+    // No draft is written until the episode has arrived below (see holdDraftSlot).
+    holdDraftSlot(episodeId);
     setServerVersion("", "");
-    // Chained after saveChainRef instead of fired directly: a quick
+    // Chained after the episode's saves instead of fired directly: a quick
     // A -> B -> A navigation can come back to A while the save the author
     // pressed there is still in flight. Without waiting for it, this GET could
     // race that PATCH and win, loading pre-edit content over what was just
     // saved — the user would then keep editing from a stale baseline and the
     // next save would silently drop the saved edit.
-    saveChainRef.current
+    saveChainOf(episodeId)
       .catch(() => {})
-      // Together: the account (drafts are keyed by the one this token is for)
-      // isn't needed until the episode has arrived.
-      .then(() => (cancelled ? null : Promise.all([fetchCurrentUserId(), getEpisode(novelId, episodeId)])))
-      .then((loaded) => {
-        if (cancelled || loaded === null) return;
-        const [userId, ep] = loaded;
+      .then(() => (cancelled ? null : getEpisode(novelId, episodeId)))
+      .then((ep) => {
+        if (cancelled || ep === null) return;
         // This load writes to a slot of its own; drafts an earlier load left
         // stay in storage and show up in the list.
-        startDraftSlot(episodeId, userId);
+        startDraftSlot(episodeId);
         ownDraftRef.current.delete(episodeId);
         setServerVersion(ep.updated_at, ep.content);
         setEpisode(ep);
@@ -387,8 +397,7 @@ export default function EditorPage() {
     return () => {
       cancelled = true;
       // Nothing goes to the server on leaving: unsaved text stays in the local
-      // draft, which this writes now — it is also what runs when an expired
-      // session routes away from the editor.
+      // draft, which this writes now.
       flushDraft();
       releaseDraftCache(episodeId);
     };

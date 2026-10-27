@@ -5,7 +5,6 @@ from models import (  # noqa: F401
     character,
     claim_link_choice,
     claim,
-    email_verification,
     episode,
     flag_dismissal,
     flag_revalidation,
@@ -13,7 +12,6 @@ from models import (  # noqa: F401
     novel,
     relation,
     story_event,
-    user,
     validation_run,
     world_setting,
 )

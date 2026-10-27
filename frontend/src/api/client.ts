@@ -1,40 +1,9 @@
-// Thin client for talking to backend/api (FastAPI).
-// The auth token (JWE, 3.3) is sent via the Authorization header.
-
-import { persistedValue } from "../utils/safeStorage";
-import { announceSignedIn } from "../utils/session";
+// Thin client for talking to backend/api (FastAPI), the local backend.
 
 const BASE_URL = "/api";
-
-// The auth token. Storage failures are handled by persistedValue: a token whose
-// write was refused (blocked or full storage) is kept in memory, so the login
-// that just went through (the server has already acted on it, e.g. cancelled a
-// pending deletion) still gives a session for this page load instead of
-// reporting a failure. The first read runs while the module loads, where a
-// throw would take the whole app down with it, which is why nothing here throws.
-const tokenStore = persistedValue("retcona_token");
-
-export const getToken = (): string | null => tokenStore.get();
-
-export function setToken(value: string, userId: string): void {
-  sessionSeen = true;
-  announceSignedIn(userId);
-  tokenStore.set(value);
-  // A fresh login means any earlier expiry this page load already announced
-  // no longer applies — a future 401 is about this new token, and deserves
-  // its own announcement.
-  expiryAnnounced = false;
-}
-
-export const clearToken = (): void => tokenStore.clear();
-
-// The author signs out. Unlike a session that ends under them (a 401), nothing
-// has been lost: a later call that finds no token is a visitor's, not an
-// expired session's, and the login screen shouldn't say otherwise.
-export function signOut(): void {
-  tokenStore.clear();
-  sessionSeen = false;
-}
+// Sent on every request: the local API refuses one without it, which another
+// site's page can't send (backend/api/main.py, CLIENT_HEADER).
+const CLIENT_HEADER = "X-Retcona-Client";
 
 export class ApiError extends Error {
   status: number;
@@ -46,8 +15,8 @@ export class ApiError extends Error {
 }
 
 // Generic fallback for turning a caught error into user-facing Korean text.
-// Callers that want per-status messages (e.g. login's 401/409) should check
-// `err instanceof ApiError` themselves first and fall back to this.
+// Callers that want per-status messages should check `err instanceof
+// ApiError` themselves first and fall back to this.
 //
 // Deliberately doesn't surface `err.message` for an ApiError: that's the
 // backend's HTTPException detail (or a pydantic validation message), always
@@ -77,95 +46,24 @@ function extractDetail(body: unknown): string | undefined {
   return undefined;
 }
 
-// Login and signup answer 401 for a wrong password (or a rejected Google code,
-// an expired Google signup token), which their own screens handle — every
-// other 401 on an authenticated call means the session is over.
-const AUTH_ENTRY_PATHS = ["/auth/login", "/auth/signup", "/auth/google/login", "/auth/google/signup"];
-
-const AUTH_EXPIRED_EVENT = "retcona:auth-expired";
-
-export interface AuthExpiredInfo {
-  // True if this page load had a session that has now ended; false for a
-  // visitor who never signed in (who should still be sent to log in, but not
-  // told a session "ended").
-  sessionEnded: boolean;
-}
-
-// Whether this page load has ever held a token — set by setToken and by any
-// request that carried one.
-let sessionSeen = getToken() !== null;
-
-// Whether an auth-expired event has already been dispatched for the current
-// wave of requests, so a second, third, ... 401 — whether it's another
-// concurrent request on the same now-cleared token, or a later request that
-// started only after clearToken() had already run and so carried no token at
-// all — doesn't each fire its own event. Not keyed by the specific token
-// value: once the session is known to be over, every further 401 in the same
-// wave is the same news, however it's shaped.
-//
-// "Wave" is bounded by requestsInFlight, not a fixed timeout: reset once
-// every request that was in flight when the event fired has settled, not on
-// a guessed delay — a short timeout could still miss a slow straggler
-// (re-triggering the double-navigate/double-dialog bug this exists to
-// prevent), while a long one would swallow a later, genuinely new 401 (e.g.
-// the user retries after declining the first redirect via useBlocker) for
-// too long. Also reset by setToken, so a later expiry of a new session
-// still fires even with nothing in flight at that moment.
-let expiryAnnounced = false;
-let requestsInFlight = 0;
-
-// Fired when an authenticated call comes back 401: the token expired, was
-// revoked (e.g. by an account-deletion request from another device, 3.5), or
-// is gone altogether (another tab's session ended, or the page was reached
-// again via Back after signing out).
-// The API layer only announces it; the app decides how to leave the page
-// (App.tsx routes to /login), so pages holding unsaved work aren't torn down
-// by a hard reload behind their back.
-export function onAuthExpired(listener: (info: AuthExpiredInfo) => void): () => void {
-  const handler = (e: Event) => listener((e as CustomEvent<AuthExpiredInfo>).detail);
-  window.addEventListener(AUTH_EXPIRED_EVENT, handler);
-  return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handler);
-}
-
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const token = getToken();
-  if (token) sessionSeen = true;
-  requestsInFlight++;
-  try {
-    const res = await fetch(`${BASE_URL}${path}`, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...options?.headers,
-      },
-    });
-    // Skipped only if a *different, still-present* token has shown up since:
-    // another tab logged in again while this request was in flight, and its
-    // fresh token must not be wiped — or its session bounced to /login — by this
-    // stale response. A token that's merely gone (cleared by another tab, or by
-    // this same response's own race with another request) still means the
-    // session is over and the event still needs to fire.
-    const currentToken = getToken();
-    const supersededByFresherLogin = currentToken !== null && currentToken !== token;
-    if (res.status === 401 && !supersededByFresherLogin && !expiryAnnounced && !AUTH_ENTRY_PATHS.includes(path)) {
-      expiryAnnounced = true;
-      clearToken();
-      window.dispatchEvent(new CustomEvent<AuthExpiredInfo>(AUTH_EXPIRED_EVENT, { detail: { sessionEnded: sessionSeen } }));
-    }
-    if (!res.ok) {
-      const detail = await res
-        .json()
-        .then(extractDetail)
-        .catch(() => undefined);
-      throw new ApiError(res.status, detail ?? `API error: ${res.status}`);
-    }
-    if (res.status === 204) {
-      return undefined as T;
-    }
-    return await res.json();
-  } finally {
-    requestsInFlight--;
-    if (requestsInFlight === 0) expiryAnnounced = false;
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      [CLIENT_HEADER]: "1",
+      ...options?.headers,
+    },
+  });
+  if (!res.ok) {
+    const detail = await res
+      .json()
+      .then(extractDetail)
+      .catch(() => undefined);
+    throw new ApiError(res.status, detail ?? `API error: ${res.status}`);
   }
+  if (res.status === 204) {
+    return undefined as T;
+  }
+  return await res.json();
 }

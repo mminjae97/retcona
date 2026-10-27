@@ -1,4 +1,4 @@
-"""Log output for this app's own packages (api, auth, models, workers, ...).
+"""Log output for this app's own packages (api, models, pipeline, workers, ...).
 
 Nothing else sets it up: uvicorn only configures its own loggers, so a module
 logger here (logging.getLogger(__name__)) would have no handler. Its warnings
@@ -7,8 +7,9 @@ message (no level, no logger name, so `grep WARNING` misses them), and
 anything below WARNING would be dropped.
 
 Called from api/__init__.py and workers/__init__.py, i.e. before any module in
-those packages is imported, because some of what they import logs at import
-time (models.nickname_rules warns about a bad shared/nickname-rules.json).
+those packages is imported, so that whatever they import is set up before it
+first logs (nothing logs at import time now, but a module that does shouldn't
+lose it).
 """
 
 import logging
@@ -19,7 +20,7 @@ from uvicorn.logging import DefaultFormatter
 # The top-level packages in pyproject.toml's [tool.setuptools.packages.find]
 # include — keep the two in sync: a package missing here logs only WARNING and
 # up.
-APP_PACKAGES = ("ai", "api", "auth", "infra", "models", "pipeline", "workers")
+APP_PACKAGES = ("ai", "api", "infra", "models", "pipeline", "workers")
 
 
 def _app_log_level() -> int:
@@ -27,7 +28,7 @@ def _app_log_level() -> int:
     # this app's logs used to go through) before it imports the app; follow
     # it. Effective level, so a level a --log-config put on the parent
     # "uvicorn" logger counts too. When uvicorn configured nothing (the
-    # standalone purge worker; or gunicorn --preload, which imports the app
+    # CPU worker; or gunicorn --preload, which imports the app
     # before its workers set the level), INFO.
     uvicorn_error = logging.getLogger("uvicorn.error")
     configured = any(

@@ -1,8 +1,9 @@
 """Shared FastAPI route helpers.
 
 Kept separate from any single router module so novels.py, episodes.py, and
-future per-novel-scoped routers can all resolve "does this user own this
-novel" the same way instead of drifting apart with copy-pasted checks.
+future per-novel-scoped routers can all resolve "does this novel exist (and
+isn't in the trash)" the same way instead of drifting apart with copy-pasted
+checks.
 """
 
 import uuid
@@ -12,11 +13,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from models.novel import Novel
-from models.user import User
 
 
-def get_owned_novel(db: Session, novel_id: uuid.UUID, user: User, *, for_update: bool = False) -> Novel:
-    query = select(Novel).where(Novel.id == novel_id, Novel.user_id == user.id, Novel.deleted_at.is_(None))
+def require_novel(db: Session, novel_id: uuid.UUID, *, for_update: bool = False) -> Novel:
+    query = select(Novel).where(Novel.id == novel_id, Novel.deleted_at.is_(None))
     if for_update:
         # Locks the row for the rest of the transaction, re-checking deleted_at
         # under the lock rather than trusting a separate unlocked read — so a

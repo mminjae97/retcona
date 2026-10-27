@@ -1,103 +1,90 @@
 """API server entry point.
 
-Design doc 6.1 architecture: frontend -> API server -> {auth, pipeline, models(DB)}
-Run: uvicorn api.main:app --reload
+Design doc 6.1 architecture: frontend -> local backend -> {pipeline, models(DB)}
+Run: uvicorn api.main:app --reload  (binds 127.0.0.1 unless told otherwise; keep it so)
 """
 
 import asyncio
-import logging
-import os
-import threading
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Security
+from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.requests import Request
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from api.episodes import router as episodes_router
 from api.events import router as events_router
 from api.novels import router as novels_router
 from api.relations import router as relations_router
 from api.settings import router as settings_router
-from auth.email_verification import router as signup_verification_router
-from auth.jwe import validate_keys
-from auth.oauth import router as google_router
-from auth.router import router as auth_router
 from models.db import check_database
-from workers.purge import (
-    SCHEDULE_FAILURE_DELAY_SECONDS,
-    PassSchedule,
-    purge_pass,
-    seconds_until_next_midnight,
-)
 
-logger = logging.getLogger(__name__)
-
-# The API server purges accounts past their deletion grace period (3.5) every
-# day at midnight (PURGE_TIMEZONE, see workers/purge.py). Set this to 0 to turn
-# that off, e.g. when a separate worker or scheduler does it.
-PURGE_ENABLED_ENV = "PURGE_ENABLED"
-_FALSE_VALUES = {"0", "false", "no", "off"}
-
-
-def _purge_enabled() -> bool:
-    return os.environ.get(PURGE_ENABLED_ENV, "1").strip().lower() not in _FALSE_VALUES
-
-
-# Let startup (migrations, warm-up) settle before the catch-up pass.
-PURGE_STARTUP_DELAY_SECONDS = 60.0
+# With no accounts, these keep a web page open in the author's browser from
+# using this API (design doc 10.4.2):
+# - only these Host names are served, so a site whose DNS name is pointed at
+#   127.0.0.1 (DNS rebinding) is refused;
+# - every API route needs CLIENT_HEADER (an app-wide dependency, so a route added
+#   later is covered too), which the app's own frontend sends (api/client.ts).
+#   A page on another site can't: a custom header needs
+#   a CORS preflight that neither this API nor the dev server's proxy approves,
+#   and what needs none (a form, an <img>, a link) can't set it. The desktop
+#   shell will make its value a per-launch secret, for programs on the PC too.
+#   The API docs (/docs) list it as the API key: "Authorize" there, any value.
+#   Not needed by the liveness check (/health) or the docs themselves, which
+#   are plain routes and change nothing;
+# - no page of this server may be framed (the docs could be clickjacked).
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]"]
+CLIENT_HEADER = "X-Retcona-Client"
+_CLIENT = [Security(APIKeyHeader(name=CLIENT_HEADER))]
+_NO_FRAMING = [(b"x-frame-options", b"DENY"), (b"content-security-policy", b"frame-ancestors 'none'")]
+_NO_FRAMING_NAMES = {name for name, _ in _NO_FRAMING}
 
 
-async def _purge_daily(stop: threading.Event) -> None:
-    schedule = PassSchedule()
-    delay = PURGE_STARTUP_DELAY_SECONDS
-    while True:
-        try:
-            await asyncio.sleep(delay)
-            # Blocking DB work, off the event loop. Safe alongside other
-            # instances running the same loop: see workers/purge.py. The pass
-            # and what comes after it (the next midnight, or a retry after a
-            # failed pass) are the standalone worker's too. `stop` ends the
-            # pass between accounts at shutdown: cancelling this task can't
-            # stop the thread.
-            delay = schedule.after(await asyncio.to_thread(purge_pass, stop.is_set))
-        except Exception:
-            # Anything that would end this task (it is only awaited at shutdown,
-            # so it would die unnoticed and the purge never run again) — e.g.
-            # working out the next midnight failing.
-            logger.exception("Account purge schedule failed")
-            delay = SCHEDULE_FAILURE_DELAY_SECONDS
+class NoFramingMiddleware:
+    """Sets the no-framing headers on every response, in place of any the
+    response set itself (plain ASGI: nothing else is wrapped)."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                kept = [h for h in message.get("headers", []) if h[0].lower() not in _NO_FRAMING_NAMES]
+                message["headers"] = [*kept, *_NO_FRAMING]
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    validate_keys()
     # Blocking DB work, off the event loop (nothing else is being served yet,
     # but this still shouldn't set the precedent of blocking it from
-    # lifespan) — same reasoning as the purge pass below.
+    # lifespan).
     await asyncio.to_thread(check_database)
-    purge_task = None
-    purge_stop = threading.Event()
-    if _purge_enabled():
-        seconds_until_next_midnight()  # a bad PURGE_TIMEZONE fails startup, not the first midnight
-        purge_task = asyncio.create_task(_purge_daily(purge_stop))
     yield
-    if purge_task is not None:
-        purge_stop.set()
-        purge_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await purge_task
 
 
-app = FastAPI(title="Retcona API", lifespan=lifespan)
+app = FastAPI(title="Retcona API", lifespan=lifespan, dependencies=_CLIENT)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+# Added last, so it wraps the host check too: its 400 isn't framable either.
+app.add_middleware(NoFramingMiddleware)
 
 
-@app.get("/health")
-def health() -> dict:
-    return {"status": "ok"}
+async def health(request: Request) -> JSONResponse:
+    return JSONResponse({"status": "ok"})
 
 
-app.include_router(auth_router, prefix="/auth", tags=["auth"])
-app.include_router(google_router, prefix="/auth/google", tags=["auth"])
-app.include_router(signup_verification_router, prefix="/auth/signup", tags=["auth"])
+# A plain route, outside the API (and its header): a liveness check.
+app.add_route("/health", health, methods=["GET"])
+
 app.include_router(novels_router, prefix="/novels", tags=["novels"])
 app.include_router(episodes_router, prefix="/novels", tags=["episodes"])
 app.include_router(settings_router, prefix="/novels", tags=["settings"])

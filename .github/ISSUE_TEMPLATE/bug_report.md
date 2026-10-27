@@ -18,7 +18,6 @@ labels: bug
 
 - [ ] frontend
 - [ ] backend/api
-- [ ] backend/auth
 - [ ] backend/pipeline
 - [ ] backend/models
 - [ ] backend/ai

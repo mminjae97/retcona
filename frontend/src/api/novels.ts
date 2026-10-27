@@ -12,6 +12,10 @@ export function listNovels(): Promise<NovelPublic[]> {
   return apiFetch<NovelPublic[]>("/novels");
 }
 
+export function getNovel(id: string): Promise<NovelPublic> {
+  return apiFetch<NovelPublic>(`/novels/${id}`);
+}
+
 export function createNovel(title: string): Promise<NovelPublic> {
   return apiFetch<NovelPublic>("/novels", {
     method: "POST",
