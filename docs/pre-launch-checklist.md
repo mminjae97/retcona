@@ -80,7 +80,7 @@ Code: `backend/infra/llm_client.py`, `backend/ai/llm.py`.
 ## 4. Installer, signing and updates
 
 **Now:** no installer; the app runs from the development setup (Docker
-PostgreSQL and Redis, `uvicorn`, `vite`).
+PostgreSQL, `uvicorn`, `vite`).
 
 **To do:**
 - [ ] Code signing. Unsigned, the installer gets a SmartScreen warning that

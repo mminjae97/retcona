@@ -1,8 +1,8 @@
 // Local backup of manuscript text that hasn't been confirmed saved yet (design
 // doc 2.2: work in progress must never be lost). The editor writes it while
 // typing and drops it once a save confirms it, so it only survives when
-// something got in the way — a failed save, a crash, a closed window. Best effort throughout: storage can be full, blocked or absent (see
-// safeStorage.ts).
+// something got in the way — a failed save, a crash, a closed window. Best
+// effort throughout: storage can be full, blocked or absent (see safeStorage.ts).
 //
 // Drafts are kept per episode and per editor session ("slot"): a
 // tab rewrites its own slot every time and never touches another's, so two tabs

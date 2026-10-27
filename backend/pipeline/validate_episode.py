@@ -1,4 +1,4 @@
-"""One "run validation" job on an episode (design doc 2.2, 7.1), as the CPU worker runs it.
+"""One "run validation" job on an episode (design doc 2.2, 7.1), as the job runner runs it.
 
 The pipeline (7.1): claim extraction, then the context bundle, the judgment
 modules (appearance and location so far, pipeline/judges.py) and the merge,
@@ -7,8 +7,10 @@ to the settings (7.4).
 
 The run row (models/validation_run.py) carries the job through
 queued -> running -> succeeded | failed. Steps:
-1. Claim the run: queued -> running, in one conditional UPDATE, so a job
-   delivered twice runs once (10.4.4).
+1. Claim the run: queued -> running, in one conditional UPDATE, so a run
+   already finished (or given up on) isn't run again (10.4.4). Running too: the
+   app closed in the middle of it, and the queue runs its job again (the queue
+   runs a job in one place at a time, so it isn't running anywhere else).
 2. Read the episode and the novel's known characters (each with a ref for
    the claim to carry, its name and aliases) and location names, in a
    short transaction.
@@ -67,7 +69,11 @@ def _claim_run(novel_id: uuid.UUID, run_id: uuid.UUID) -> uuid.UUID | None:
     with SessionLocal() as db:
         episode_id = db.scalar(
             update(ValidationRun)
-            .where(ValidationRun.id == run_id, ValidationRun.novel_id == novel_id, ValidationRun.status == "queued")
+            .where(
+                ValidationRun.id == run_id,
+                ValidationRun.novel_id == novel_id,
+                ValidationRun.status.in_(("queued", "running")),
+            )
             .values(status="running", started_at=func.now())
             .returning(ValidationRun.episode_id)
         )

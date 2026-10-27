@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # The NLI model is the one trained in ml/nli (klue/roberta-base on KorNLI +
 # KLUE-NLI, "mixed" in ml/nli/RESULTS.md), which is kept on the machine that
 # trained it for now: this directory, or wherever NLI_MODEL points (a local
-# directory or a Hugging Face id). Without it, the worker falls back to a
+# directory or a Hugging Face id). Without it, the job runner falls back to a
 # public checkpoint (klue-roberta on KLUE-NLI, downloaded on first use,
 # ~440 MB) that misses about half the contradictions in novel prose.
 LOCAL_NLI_MODEL = Path(__file__).resolve().parents[2] / "ml" / "nli" / "runs" / "mixed"
@@ -52,7 +52,7 @@ class NLIScores:
 class InferenceClient(ABC):
     def load(self) -> str:
         """Loads the models ahead of the first call, where that means anything,
-        and says which they are (for the worker's startup log)."""
+        and says which they are (for the job runner's startup log)."""
         return type(self).__name__
 
     @abstractmethod
@@ -216,7 +216,7 @@ def _trained_model(env_var: str, local: Path) -> str | None:
 
 
 def _nli_model() -> str:
-    # A directory is best given as an absolute path: the worker runs from
+    # A directory is best given as an absolute path: the backend runs from
     # backend/, and a relative one that isn't found there reads as a Hugging
     # Face id.
     if configured := os.environ.get("NLI_MODEL", "").strip():

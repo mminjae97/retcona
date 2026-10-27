@@ -3,9 +3,9 @@
 One row per "revalidate this flag" request: the author supplemented the
 setting a flag was judged against (or changed it on the settings screen) and
 has only that flag judged again, not the whole episode. The API creates it
-(queued) and enqueues a job carrying its id; the CPU worker moves it to
-running, then succeeded or failed (pipeline/revalidate_flag.py). As with
-validation_runs, it is also the worker's idempotency record (10.4.4).
+(queued) with a job for it (models/job.py); the job moves it to running, then
+succeeded or failed (pipeline/revalidate_flag.py). As with validation_runs, it
+is also the job's idempotency record (10.4.4).
 
 - outcome (succeeded only): resolved — the flag no longer contradicts the
   setting (it becomes resolved_by_revalidation) | contradicts — it still does

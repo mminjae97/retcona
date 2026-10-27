@@ -35,13 +35,12 @@ export function saveEpisode(novelId: string, episodeId: string, content: string)
   });
 }
 
-// "Run validation" (2.2): the server records a run and a worker processes it;
+// "Run validation" (2.2): the server records a run and its job queue processes it;
 // the editor polls the latest run until it finishes.
 export type ValidationRunStatus = "queued" | "running" | "succeeded" | "failed";
 
 export type ValidationRunError =
   | "abandoned"
-  | "queue_unavailable"
   | "episode_missing"
   | "empty_manuscript"
   | "inference_failed"
@@ -95,10 +94,10 @@ export async function getLatestValidation(novelId: string, episodeId: string): P
 export type FlagStatus = "open" | "accepted" | "dismissed" | "resolved" | "resolved_by_revalidation";
 
 // A flag judged again after its setting was supplemented (design doc 7.5),
-// by the worker: queued -> running -> succeeded | failed.
+// by the backend's job runner: queued -> running -> succeeded | failed.
 export interface FlagRevalidation {
   status: "queued" | "running" | "succeeded" | "failed";
-  // failed: abandoned | queue_unavailable | superseded | flag_missing |
+  // failed: abandoned | superseded | flag_missing |
   // flag_handled | card_missing | setting_changed | inference_failed | internal
   error: string | null;
   // succeeded: resolved (the flag is resolved_by_revalidation) | contradicts (still open)
@@ -166,7 +165,7 @@ export function actOnFlag(novelId: string, episodeId: string, flagId: string, ac
 // Claims the extraction couldn't tie to one card (design doc 7.1.1) — a
 // pronoun that fits several characters, a name several share — wait for the
 // author to pick one of the candidates, or none. A pick is judged by the
-// worker: judging until it's done, and then it's gone from the list (and its
+// job runner: judging until it's done, and then it's gone from the list (and its
 // contradictions, if any, are among the flags).
 export interface PendingCandidate {
   id: string;

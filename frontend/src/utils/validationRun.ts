@@ -1,6 +1,6 @@
 // "Run validation" state for one episode (design doc 2.2): the latest run, a
-// request in flight, and polling while a run is queued or running (the worker
-// processes it in the background; the author can keep writing meanwhile).
+// request in flight, and polling while a run is queued or running (the
+// backend's job runner processes it; the author can keep writing meanwhile).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, describeError } from "../api/client";
 import { getLatestValidation, requestValidation } from "../api/episodes";
@@ -18,9 +18,7 @@ export function isRunActive(run: ValidationRun | null): boolean {
 export function describeRunError(code: string | null): string {
   switch (code) {
     case "abandoned":
-      return "검증이 제시간에 끝나지 않았습니다. 다시 실행해 주세요.";
-    case "queue_unavailable":
-      return "검증을 시작하지 못했습니다. 잠시 후 다시 시도해주세요.";
+      return "검증이 중간에 멈췄습니다. 다시 실행해 주세요.";
     case "episode_missing":
       return "이 화를 찾을 수 없어 검증하지 못했습니다.";
     case "empty_manuscript":
@@ -34,7 +32,6 @@ export function describeRunError(code: string | null): string {
 
 function describeRequestError(err: unknown): string {
   if (err instanceof ApiError && err.status === 422) return "원고가 비어 있어 검증할 수 없습니다.";
-  if (err instanceof ApiError && err.status === 503) return "지금은 검증을 시작할 수 없습니다. 잠시 후 다시 시도해주세요.";
   return describeError(err);
 }
 

@@ -13,8 +13,8 @@ claims: verification-target claim units extracted from the manuscript by the ext
     with the cards it could be, [{"kind", "id", "name", "aliases"}], and link_status
     "pending": the result screen has the author pick one, and then it's judged
     (pipeline/judge_linked_claim.py): "queued" once picked, "judging" while the
-    worker does, link_requested_at when it was picked (a claim stuck in the
-    queue goes back to pending, as an abandoned run fails). None for every
+    job does, link_requested_at when it was picked (a claim left waiting with no
+    job for it goes back to pending, as an abandoned run fails). None for every
     other claim. What the
     author picked is kept across runs (models/claim_link_choice.py).
   - evidence_text: the manuscript sentence the claim came from (shown as the

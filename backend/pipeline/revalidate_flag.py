@@ -1,4 +1,4 @@
-"""One "revalidate this flag" job (design doc 7.5), as the CPU worker runs it.
+"""One "revalidate this flag" job (design doc 7.5), as the job runner runs it.
 
 The author supplemented the setting a flag was judged against (on the result
 screen, or the settings screen) and asked for that flag alone to be judged
@@ -7,8 +7,9 @@ now — not the whole pipeline.
 
 The revalidation row (models/flag_revalidation.py) carries the job through
 queued -> running -> succeeded | failed. Steps:
-1. Claim it: queued -> running, in one conditional UPDATE, so a job
-   delivered twice runs once (10.4.4).
+1. Claim it: queued -> running, in one conditional UPDATE, so one already
+   finished, given up on or replaced isn't run again (10.4.4). Running too:
+   the app closed in the middle of it, and the queue runs its job again.
 2. Read the flag, its claim, the card, and the episode's other subjects.
 3. Judge with no transaction open (NLI, pipeline/judges.rejudge).
 4. Write under the novel's row lock: resolved -> the flag becomes
@@ -68,7 +69,7 @@ def _claim(novel_id: uuid.UUID, revalidation_id: uuid.UUID) -> uuid.UUID | None:
             .where(
                 FlagRevalidation.id == revalidation_id,
                 FlagRevalidation.novel_id == novel_id,
-                FlagRevalidation.status == "queued",
+                FlagRevalidation.status.in_(("queued", "running")),
             )
             .values(status="running", started_at=func.now())
             .returning(FlagRevalidation.flag_id)

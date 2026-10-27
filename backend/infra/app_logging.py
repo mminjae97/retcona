@@ -28,7 +28,7 @@ def _app_log_level() -> int:
     # this app's logs used to go through) before it imports the app; follow
     # it. Effective level, so a level a --log-config put on the parent
     # "uvicorn" logger counts too. When uvicorn configured nothing (the
-    # CPU worker; or gunicorn --preload, which imports the app
+    # app run without uvicorn; or gunicorn --preload, which imports the app
     # before its workers set the level), INFO.
     uvicorn_error = logging.getLogger("uvicorn.error")
     configured = any(

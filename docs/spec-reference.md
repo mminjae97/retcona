@@ -669,8 +669,10 @@ pipeline & job runner code
   -> LLMClient interface -> Sign in with ChatGPT / Anthropic API / OpenAI-compatible API (local servers too)
 ```
 
-- `QueueClient` exposes only `enqueue(job)` / `dequeue()` / `ack(job_id)` —
-  business logic never knows the concrete implementation.
+- `QueueClient` exposes only `enqueue(job)` / `dequeue()` / `ack(job_id)`,
+  plus `recover()` at startup (§8.4.4) — business logic never knows the
+  concrete implementation. A job is enqueued in the same transaction as the
+  row it works on (a validation run, ...), so neither exists without the other.
 - `StorageClient` stores illustrations etc. in the data folder (§8.1).
 - `InferenceClient` and `LLMClient` pick their implementation from the
   settings (§2.5); the judgment modules (§7.2) call only the interface.

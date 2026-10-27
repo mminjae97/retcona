@@ -1,4 +1,4 @@
-"""One "judge the claim the author picked a card for" job (design doc 7.1.1), as the CPU worker runs it.
+"""One "judge the claim the author picked a card for" job (design doc 7.1.1), as the job runner runs it.
 
 A claim the extraction couldn't tie to one card — a pronoun that fits two
 characters, a name two share — waits on the result screen for the author to
@@ -9,8 +9,9 @@ judges the claim now, against the card picked, the way a run would have
 The claim row carries the job (models/claim.py link_status): pending ->
 queued (the API, which picked the card) -> judging (here) -> none, a claim
 like any other. Steps:
-1. Claim it: queued -> judging, in one conditional UPDATE, so a job delivered
-   twice runs once (10.4.4).
+1. Claim it: queued -> judging, in one conditional UPDATE, so a claim
+   already judged or replaced isn't judged again (10.4.4). Judging too: the app
+   closed in the middle of it, and the queue runs its job again.
 2. Read the claim, its card (the claim as the card's name would have said it),
    and the names of the episode's other subjects.
 3. Judge with no transaction open (NLI, pipeline/judges.judge_appearance).
@@ -64,7 +65,7 @@ def _take(novel_id: uuid.UUID, claim_id: uuid.UUID) -> bool:
     with SessionLocal() as db:
         taken = db.scalar(
             update(Claim)
-            .where(Claim.id == claim_id, Claim.novel_id == novel_id, Claim.link_status == "queued")
+            .where(Claim.id == claim_id, Claim.novel_id == novel_id, Claim.link_status.in_(("queued", "judging")))
             .values(link_status="judging")
             .returning(Claim.id)
         )

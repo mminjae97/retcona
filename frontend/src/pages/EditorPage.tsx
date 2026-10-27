@@ -2,11 +2,12 @@
 // Typing is saved automatically to a local draft (utils/draft.ts, debounced, and flushed when the page is
 // hidden or the editor unmounts); the server only gets the text when the author presses Save (PATCH, doesn't
 // call the AI pipeline). "Run validation" (2.2) saves unsaved text first, then asks the server to validate
-// what's saved; a worker does it in the background while the author keeps writing, and the page polls the run
+// what's saved; the backend's job runner does it while the author keeps writing, and the page polls the run
 // (utils/validationRun.ts) and shows what it found — or that a later save has made it out of date.
 // Editing a submitted episode flips its status back to draft (2.2).
-// The draft is dropped once a save confirms it, so it survives a failed save, a crash or a closed window. Every tab (every page load) keeps its own draft and rewrites only that one; the drafts other tabs
-// or earlier loads left are listed on the page and the author loads whichever one they want.
+// The draft is dropped once a save confirms it, so it survives a failed save, a crash or a closed window.
+// Every tab (every page load) keeps its own draft and rewrites only that one; the drafts other tabs or
+// earlier loads left are listed on the page and the author loads whichever one they want.
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Link, useBlocker, useParams } from "react-router-dom";
 import { describeError } from "../api/client";
@@ -70,6 +71,9 @@ export default function EditorPage() {
   const [episode, setEpisode] = useState<EpisodePublic | null>(null);
   const [content, setContent] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
+  // The load is waiting for a save of this episode pressed earlier (see
+  // saveChains), which is said instead of a bare "loading" that seems stuck.
+  const [waitingForSave, setWaitingForSave] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -375,9 +379,14 @@ export default function EditorPage() {
     // race that PATCH and win, loading pre-edit content over what was just
     // saved — the user would then keep editing from a stale baseline and the
     // next save would silently drop the saved edit.
+    setWaitingForSave(saveChains.has(episodeId));
     saveChainOf(episodeId)
       .catch(() => {})
-      .then(() => (cancelled ? null : getEpisode(novelId, episodeId)))
+      .then(() => {
+        if (cancelled) return null;
+        setWaitingForSave(false);
+        return getEpisode(novelId, episodeId);
+      })
       .then((ep) => {
         if (cancelled || ep === null) return;
         // This load writes to a slot of its own; drafts an earlier load left
@@ -468,7 +477,7 @@ export default function EditorPage() {
   if (!episode) {
     return (
       <div className="editor-page">
-        <p>불러오는 중...</p>
+        <p>{waitingForSave ? "이 화에서 앞서 누른 저장이 끝나기를 기다리는 중..." : "불러오는 중..."}</p>
       </div>
     );
   }
