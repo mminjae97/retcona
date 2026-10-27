@@ -1,14 +1,15 @@
 """The trash against a real database (api/novels.py, pipeline/empty_trash.py).
 
 Opt-in, like tests/test_queue_db.py: set RETCONA_DB_TESTS=1 and DATABASE_URL
-to a migrated database no backend is running against.
+to a migrated database no backend is running against — a throwaway one: the
+tests empty its trash, deleting for good every novel in it past its 30 days.
 
     RETCONA_DB_TESTS=1 DATABASE_URL=postgresql+psycopg://... pytest tests/test_trash_db.py
 """
 
 import os
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -22,7 +23,7 @@ from models.base import Base
 from models.db import SessionLocal
 from models.job import Job
 from models.novel import TRASH_KEPT, Novel
-from pipeline.empty_trash import empty_trash, request_empty_trash
+from pipeline.empty_trash import _purge, empty_trash, request_empty_trash
 
 # Not as a context manager: no lifespan, so no runner of its own.
 client = TestClient(app, base_url="http://localhost:8000", headers={CLIENT_HEADER: "1"})
@@ -38,8 +39,7 @@ def novel():
     yield uuid.UUID(novel_id)
     # Whatever the test left it as, deleted for good, with the run's job (no
     # runner here takes it).
-    _deleted_days_ago(uuid.UUID(novel_id), 31)
-    empty_trash()
+    _delete_for_good(uuid.UUID(novel_id))
     with SessionLocal() as db:
         db.execute(delete(Job).where(Job.target_id == uuid.UUID(run.json()["id"])))
         db.commit()
@@ -57,6 +57,12 @@ def _deleted_days_ago(novel_id: uuid.UUID, days: int) -> None:
             update(Novel).where(Novel.id == novel_id).values(deleted_at=func.now() - timedelta(days=days))
         )
         db.commit()
+
+
+def _delete_for_good(novel_id: uuid.UUID) -> None:
+    """This novel only, not the rest of the database's trash."""
+    _deleted_days_ago(novel_id, 31)
+    _purge(novel_id, datetime.now(UTC) - TRASH_KEPT)
 
 
 def _rows(novel_id: uuid.UUID) -> int:
@@ -99,8 +105,7 @@ def test_emptying_the_trash_deletes_only_novels_past_their_days_with_everything_
     assert client.post(f"/novels/{novel}/restore").status_code == 404
     assert _rows(other) == 1
     assert str(other) in _trash()
-    _deleted_days_ago(other, 31)
-    empty_trash()
+    _delete_for_good(other)
 
 
 def test_a_novel_past_its_days_not_yet_deleted_can_still_be_restored(novel):
@@ -117,18 +122,24 @@ def test_a_novel_not_deleted_is_not_in_the_trash_and_cant_be_restored(novel):
     assert client.post(f"/novels/{novel}/restore").status_code == 404
 
 
-def test_a_pass_is_queued_only_while_none_is_waiting():
-    def waiting() -> set[uuid.UUID]:
+def test_a_pass_is_queued_only_while_none_is_queued_or_running():
+    def passes() -> set[uuid.UUID]:
         with SessionLocal() as db:
-            return set(db.scalars(select(Job.id).where(Job.type == "empty_trash", Job.status == "queued")))
+            return set(db.scalars(select(Job.id).where(Job.type == "empty_trash")))
 
-    before = waiting()
+    before = passes()
     request_empty_trash()
     request_empty_trash()
-    after = waiting()
+    after = passes()
     try:
         assert after == before if before else len(after) == 1
+        # Ours still running (the daily timer fired mid-pass): none more.
+        with SessionLocal() as db:
+            db.execute(update(Job).where(Job.id.in_(after - before)).values(status="running"))
+            db.commit()
+        request_empty_trash()
+        assert passes() == after
     finally:
         with SessionLocal() as db:
-            db.execute(delete(Job).where(Job.id.in_(after - before)))
+            db.execute(delete(Job).where(Job.id.in_(passes() - before)))
             db.commit()

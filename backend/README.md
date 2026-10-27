@@ -43,10 +43,10 @@ The LLM isn't chosen yet (chapter 5). It's used for OOC judgment only, set in `L
 
 ## Trash
 
-Deleting a novel (`DELETE /novels/{id}`) moves it to the trash (`novels.deleted_at`). `GET /novels/trash` lists those, with `purge_after`, 30 days later (`TRASH_KEPT`, `models/novel.py`); `POST /novels/{id}/restore` brings one back until then. The `empty_trash` job (`pipeline/empty_trash.py`) deletes the novels past their 30 days for good, with every row under their `novel_id`, one novel per transaction; the API server queues it right after it starts and then once a day (`api/main.py`) — unless one is still waiting —, so a novel past its 30 days while the app was closed goes at the next start, and can still be restored until then.
+Deleting a novel (`DELETE /novels/{id}`) moves it to the trash (`novels.deleted_at`). `GET /novels/trash` lists those, with `purge_after`, 30 days later (`TRASH_KEPT`, `models/novel.py`); `POST /novels/{id}/restore` brings one back until then. The `empty_trash` job (`pipeline/empty_trash.py`) deletes the novels past their 30 days for good, with every row under their `novel_id`, one novel per transaction; the API server queues it right after it starts and then once a day (`api/main.py`) — unless one is still queued or running —, so a novel past its 30 days while the app was closed goes at the next start, and can still be restored until then.
 
 ## Design principles (must follow)
 
-- Every `models/`, `pipeline/` function takes `novel_id` as a required argument (10.1) — blocks isolation gaps at the code level
+- Every `models/`, `pipeline/` function takes `novel_id` as a required argument (10.1) — blocks isolation gaps at the code level. The one exception is the trash (`pipeline/empty_trash.py`): its pass lists the novels past their days across the app, then deletes each with its own `novel_id` (`_purge`)
 - `pipeline/` and `ai/` hold only business logic; queue/storage/inference/LLM access always goes through `infra/` interfaces (10.4.3)
 - The 3 judgment modules inside `pipeline/` share the same interface (`claims + context_bundle` in → `flags` out) (6.2)

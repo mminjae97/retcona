@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
 
-from infra.queue_client import get_queue_client, job_waiting
+from infra.queue_client import get_queue_client, job_type_pending
 from models.base import Base
 from models.db import SessionLocal
 from models.novel import TRASH_KEPT, Novel
@@ -29,10 +29,12 @@ JOB_TYPE = "empty_trash"
 
 
 def request_empty_trash() -> None:
-    """Queue a pass, unless one is already waiting (the runner busy for a day,
-    or a second backend process on the database): that one does the same."""
+    """Queue a pass, unless one is already queued or running (the runner busy
+    for a day, or a second backend process on the database): that one does the
+    same. Two processes starting together can still both queue one; the second
+    pass finds nothing left to do."""
     with SessionLocal() as db:
-        if db.scalar(select(job_waiting(JOB_TYPE))):
+        if db.scalar(select(job_type_pending(JOB_TYPE))):
             return
         get_queue_client().enqueue(db, JOB_TYPE, None, {})
         db.commit()

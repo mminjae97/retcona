@@ -22,8 +22,10 @@ export default function TrashPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // The novel being restored: one at a time, and a second click sends nothing.
+  // The novel being restored: one at a time, and a second click sends nothing
+  // (the ref blocks it synchronously, before a re-render disables the buttons).
   const [restoring, setRestoring] = useState<string | null>(null);
+  const restoringRef = useRef(false);
   // Ref, as on the novel list: blocks a second load synchronously.
   const loadingRef = useRef(false);
 
@@ -48,7 +50,8 @@ export default function TrashPage() {
   }
 
   async function handleRestore(novel: TrashedNovel) {
-    if (restoring !== null) return;
+    if (restoringRef.current) return;
+    restoringRef.current = true;
     setError(null);
     setNotice(null);
     setRestoring(novel.id);
@@ -65,6 +68,7 @@ export default function TrashPage() {
         setError(describeError(err));
       }
     } finally {
+      restoringRef.current = false;
       setRestoring(null);
     }
   }
