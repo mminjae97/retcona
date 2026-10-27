@@ -43,7 +43,7 @@ The LLM isn't chosen yet (chapter 5). It's used for OOC judgment only, set in `L
 
 ## Trash
 
-Deleting a novel (`DELETE /novels/{id}`) moves it to the trash (`novels.deleted_at`). `GET /novels/trash` lists those, with `purge_after`, 30 days later (`TRASH_KEPT`, `models/novel.py`); `POST /novels/{id}/restore` brings one back until then. The `empty_trash` job (`pipeline/empty_trash.py`) deletes the novels past their 30 days for good, with every row under their `novel_id`, one novel per transaction; the API server queues it right after it starts and then once a day (`api/main.py`), so a novel past its 30 days while the app was closed goes at the next start, and can still be restored until then.
+Deleting a novel (`DELETE /novels/{id}`) moves it to the trash (`novels.deleted_at`). `GET /novels/trash` lists those, with `purge_after`, 30 days later (`TRASH_KEPT`, `models/novel.py`); `POST /novels/{id}/restore` brings one back until then. The `empty_trash` job (`pipeline/empty_trash.py`) deletes the novels past their 30 days for good, with every row under their `novel_id`, one novel per transaction; the API server queues it right after it starts and then once a day (`api/main.py`) — unless one is still waiting —, so a novel past its 30 days while the app was closed goes at the next start, and can still be restored until then.
 
 ## Design principles (must follow)
 

@@ -12,12 +12,6 @@
   font-size: 22px;
 }
 
-.back-link {
-  color: var(--color-text-muted);
-  font-size: 13px;
-  text-decoration: none;
-}
-
 .trash-help {
   margin: 0;
   font-size: 13px;

@@ -74,6 +74,13 @@ select {
   font-size: 13px;
 }
 
+/* The "← ..." link at the top of a page, back to the one above it. */
+.back-link {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  text-decoration: none;
+}
+
 /* Styled like the global <button> above so it matches its siblings,
    while staying a real <a> for middle-click/right-click/screen-reader support. */
 .link-button {

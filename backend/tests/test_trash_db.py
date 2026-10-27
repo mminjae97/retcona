@@ -15,13 +15,14 @@ import pytest
 pytestmark = pytest.mark.skipif(os.environ.get("RETCONA_DB_TESTS") != "1", reason="needs RETCONA_DB_TESTS=1 and a database")
 
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 
 from api.main import CLIENT_HEADER, app
 from models.base import Base
 from models.db import SessionLocal
+from models.job import Job
 from models.novel import TRASH_KEPT, Novel
-from pipeline.empty_trash import empty_trash
+from pipeline.empty_trash import empty_trash, request_empty_trash
 
 # Not as a context manager: no lifespan, so no runner of its own.
 client = TestClient(app, base_url="http://localhost:8000", headers={CLIENT_HEADER: "1"})
@@ -32,11 +33,16 @@ def novel():
     novel_id = client.post("/novels", json={"title": "휴지통 시험"}).json()["id"]
     episode_id = client.post(f"/novels/{novel_id}/episodes", json={"content": "레온은 푸른 눈이었다."}).json()["id"]
     client.post(f"/novels/{novel_id}/characters", json={"name": "레온"})
-    client.post(f"/novels/{novel_id}/episodes/{episode_id}/validations")
+    run = client.post(f"/novels/{novel_id}/episodes/{episode_id}/validations")
+    assert run.status_code == 202, run.text
     yield uuid.UUID(novel_id)
-    # Whatever the test left it as, deleted for good.
+    # Whatever the test left it as, deleted for good, with the run's job (no
+    # runner here takes it).
     _deleted_days_ago(uuid.UUID(novel_id), 31)
     empty_trash()
+    with SessionLocal() as db:
+        db.execute(delete(Job).where(Job.target_id == uuid.UUID(run.json()["id"])))
+        db.commit()
 
 
 def _trash() -> dict[str, dict]:
@@ -109,3 +115,20 @@ def test_a_novel_past_its_days_not_yet_deleted_can_still_be_restored(novel):
 def test_a_novel_not_deleted_is_not_in_the_trash_and_cant_be_restored(novel):
     assert str(novel) not in _trash()
     assert client.post(f"/novels/{novel}/restore").status_code == 404
+
+
+def test_a_pass_is_queued_only_while_none_is_waiting():
+    def waiting() -> set[uuid.UUID]:
+        with SessionLocal() as db:
+            return set(db.scalars(select(Job.id).where(Job.type == "empty_trash", Job.status == "queued")))
+
+    before = waiting()
+    request_empty_trash()
+    request_empty_trash()
+    after = waiting()
+    try:
+        assert after == before if before else len(after) == 1
+    finally:
+        with SessionLocal() as db:
+            db.execute(delete(Job).where(Job.id.in_(after - before)))
+            db.commit()

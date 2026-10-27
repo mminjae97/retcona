@@ -7,12 +7,6 @@
   gap: 16px;
 }
 
-.back-link {
-  color: var(--color-text-muted);
-  font-size: 13px;
-  text-decoration: none;
-}
-
 .episode-list-page .section-header {
   display: flex;
   align-items: center;

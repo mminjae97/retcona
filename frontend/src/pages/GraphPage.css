@@ -7,12 +7,6 @@
   gap: 16px;
 }
 
-.graph-page .back-link {
-  color: var(--color-text-muted);
-  font-size: 13px;
-  text-decoration: none;
-}
-
 .graph-page .section-header {
   display: flex;
   align-items: center;

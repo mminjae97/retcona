@@ -9,7 +9,7 @@ empty_trash job deletes them for good (pipeline/empty_trash.py).
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -141,11 +141,7 @@ def restore_novel(novel_id: uuid.UUID, db: Session = Depends(get_db)) -> Novel:
     # Locked as empty_trash locks it: whichever gets there first wins, and a
     # novel deleted for good meanwhile is a 404. One past its 30 days that
     # hasn't been deleted yet (the app was closed) can still come back.
-    novel = db.scalar(
-        select(Novel).where(Novel.id == novel_id, Novel.deleted_at.is_not(None)).with_for_update()
-    )
-    if novel is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Novel not in the trash")
+    novel = require_novel(db, novel_id, for_update=True, in_trash=True)
     novel.deleted_at = None
     db.commit()
     db.refresh(novel)

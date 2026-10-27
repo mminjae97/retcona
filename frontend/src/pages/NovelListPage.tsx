@@ -33,6 +33,9 @@ export default function NovelListPage() {
   const novelsLoadingRef = useRef(false);
   // How many novels the trash holds; null until known (the link then shows no count).
   const [trashCount, setTrashCount] = useState<number | null>(null);
+  // Numbers the trash-count requests: only the latest one's answer is shown,
+  // so a slow earlier one can't overwrite the count after a delete.
+  const trashCountRequestRef = useRef(0);
 
   function dropNovel(id: string) {
     setNovels((prev) => prev?.filter((n) => n.id !== id) ?? null);
@@ -51,9 +54,14 @@ export default function NovelListPage() {
   }
 
   function loadTrashCount() {
+    const request = ++trashCountRequestRef.current;
     listTrash()
-      .then((trash) => setTrashCount(trash.length))
-      .catch(() => setTrashCount(null));
+      .then((trash) => {
+        if (request === trashCountRequestRef.current) setTrashCount(trash.length);
+      })
+      .catch(() => {
+        if (request === trashCountRequestRef.current) setTrashCount(null);
+      });
   }
 
   useEffect(() => {

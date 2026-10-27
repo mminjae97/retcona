@@ -102,6 +102,12 @@ def job_pending(target_id: Any) -> ColumnElement[bool]:
     return exists().where(Job.target_id == target_id)
 
 
+def job_waiting(type: str) -> ColumnElement[bool]:
+    """SQL: a job of this type is queued and not started yet — for a job with
+    no row of its own (empty_trash), which needs only one waiting at a time."""
+    return exists().where(Job.type == type, Job.status == "queued")
+
+
 # Set when a session that enqueued a job commits, so an idle runner in this
 # process starts it at once instead of at its next look.
 _job_committed = threading.Event()
