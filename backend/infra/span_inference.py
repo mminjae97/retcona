@@ -2,12 +2,15 @@
 model (ml/ner) and the extractive QA model (ml/qa).
 
 The decoding here is the one those directories evaluate with (their
-evaluate.py), so the numbers in their RESULTS.md describe what runs here.
-Torch and transformers are imported where used: the API server never loads
-the models.
+evaluate.py), so the numbers in their RESULTS.md describe what runs here —
+on the models exported to ONNX (ml/export_onnx.py), which give the same
+logits. `model` is an infra.inference_client.OnnxModel: its tokenizer, its
+labels and run().
 """
 
 from dataclasses import dataclass
+
+import numpy as np
 
 NER_MAX_TOKENS = 256
 QA_MAX_TOKENS = 384
@@ -56,43 +59,40 @@ def decode_entities(text: str, offsets: list[list[int]], labels: list[str]) -> l
     return entities
 
 
-def recognize(model, tokenizer, texts: list[str]) -> list[list[NamedEntity]]:
-    import torch
-
+def recognize(model, texts: list[str]) -> list[list[NamedEntity]]:
     results: list[list[NamedEntity]] = []
     for begin in range(0, len(texts), _BATCH_SIZE):
         batch = texts[begin : begin + _BATCH_SIZE]
-        encoded = tokenizer(
+        encoded = model.tokenizer(
             batch,
             truncation=True,
             max_length=NER_MAX_TOKENS,
             padding=True,
+            pad_to_multiple_of=model.pad_to_multiple_of,
             return_offsets_mapping=True,
             return_token_type_ids=False,
-            return_tensors="pt",
+            return_tensors="np",
         )
         offsets = encoded.pop("offset_mapping").tolist()
-        with torch.no_grad():
-            predicted = model(**encoded).logits.argmax(-1).tolist()
+        [logits] = model.run(["logits"], encoded)
+        predicted = logits.argmax(-1).tolist()
         for text, token_offsets, row in zip(batch, offsets, predicted, strict=True):
-            results.append(decode_entities(text, token_offsets, [model.config.id2label[label] for label in row]))
+            results.append(decode_entities(text, token_offsets, [model.id2label[label] for label in row]))
     return results
 
 
-def answer(model, tokenizer, questions: list[tuple[str, str]], null_margin: float) -> list[str]:
+def answer(model, questions: list[tuple[str, str]], null_margin: float) -> list[str]:
     """The answer to each (question, context), "" for none.
 
     The best span (start + end logits) unless "no answer" scores higher by
     more than null_margin: raising it answers less often, a negative one more
     often. A context longer than the model takes is read in overlapping windows.
     """
-    import torch
-
     best: list[tuple[float, str]] = [(float("-inf"), "")] * len(questions)
     null: list[float] = [float("-inf")] * len(questions)
     for begin in range(0, len(questions), _BATCH_SIZE):
         batch = questions[begin : begin + _BATCH_SIZE]
-        encoded = tokenizer(
+        encoded = model.tokenizer(
             [question for question, _ in batch],
             [context for _, context in batch],
             truncation="only_second",
@@ -102,13 +102,12 @@ def answer(model, tokenizer, questions: list[tuple[str, str]], null_margin: floa
             return_offsets_mapping=True,
             return_token_type_ids=False,
             padding=True,
-            return_tensors="pt",
+            pad_to_multiple_of=model.pad_to_multiple_of,
+            return_tensors="np",
         )
         offsets = encoded.pop("offset_mapping").tolist()
         owners = encoded.pop("overflow_to_sample_mapping").tolist()
-        with torch.no_grad():
-            output = model(**encoded)
-        starts, ends = output.start_logits.float(), output.end_logits.float()
+        starts, ends = (logits.astype(np.float32) for logits in model.run(["start_logits", "end_logits"], encoded))
         for window, owner in enumerate(owners):
             index = begin + owner
             context = batch[owner][1]

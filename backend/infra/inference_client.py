@@ -1,11 +1,19 @@
 """InferenceClient interface (design doc 10.4.3).
 
 Wraps NLI/reranker inference and the NER / extractive QA models of claim
-extraction (7.1.1). INFERENCE_BACKEND=cpu|gpu selects the implementation.
-The judgment modules in chapter 7 only call this interface and don't know the actual backend.
+extraction (7.1.1). The judgment modules in chapter 7 only call this
+interface and don't know where the models run.
+
+OnnxInferenceClient runs them with ONNX Runtime (10.3): on the GPU through
+DirectML where there is one that works, otherwise on the CPU, with the same
+results either way. INFERENCE_DEVICE=auto (the default) | gpu | cpu; cpu
+never tries the GPU, and gpu (like auto) falls back to the CPU when the GPU
+fails. The models are the ones trained in ml/ and exported with
+ml/export_onnx.py; there is no PyTorch in the app.
 """
 
 import functools
+import json
 import logging
 import os
 import threading
@@ -13,22 +21,20 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 from infra import span_inference
 from infra.span_inference import NamedEntity
 
 logger = logging.getLogger(__name__)
 
-# The NLI model is the one trained in ml/nli (klue/roberta-base on KorNLI +
-# KLUE-NLI, "mixed" in ml/nli/RESULTS.md), which is kept on the machine that
-# trained it for now: this directory, or wherever NLI_MODEL points (a local
-# directory or a Hugging Face id). Without it, the job runner falls back to a
-# public checkpoint (klue-roberta on KLUE-NLI, downloaded on first use,
-# ~440 MB) that misses about half the contradictions in novel prose.
+# The models trained in ml/ (klue/roberta-base fine-tuned on KorNLI + KLUE-NLI,
+# "mixed" in ml/nli/RESULTS.md; on KLUE-NER; on KLUE-MRC), exported to ONNX
+# (ml/export_onnx.py, into the run's onnx/ directory). They're kept on the
+# machine that trained them for now; NLI_MODEL, NER_MODEL and QA_MODEL point
+# elsewhere: an exported directory (model.onnx), or a run directory with one
+# in its onnx/. There's no public checkpoint to fall back to yet.
 LOCAL_NLI_MODEL = Path(__file__).resolve().parents[2] / "ml" / "nli" / "runs" / "mixed"
-FALLBACK_NLI_MODEL = "Huffon/klue-roberta-base-nli"
-# The NER and QA models of claim extraction (ml/ner, ml/qa: klue/roberta-base on
-# KLUE-NER and KLUE-MRC), also kept on the machine that trained them; NER_MODEL
-# and QA_MODEL point elsewhere. There's no public checkpoint to fall back to.
 LOCAL_NER_MODEL = Path(__file__).resolve().parents[2] / "ml" / "ner" / "runs" / "klue"
 LOCAL_QA_MODEL = Path(__file__).resolve().parents[2] / "ml" / "qa" / "runs" / "klue"
 # How much more "no answer" must score than the best span to be the answer
@@ -38,6 +44,9 @@ DEFAULT_QA_NULL_MARGIN = -10.0
 # Pairs per forward pass: bounds memory on a long episode's many claims.
 _NLI_BATCH_SIZE = 16
 _NLI_MAX_TOKENS = 256
+_GPU_PAD_TO_MULTIPLE = 32
+_DIRECTML = "DmlExecutionProvider"
+_CPU = "CPUExecutionProvider"
 
 
 @dataclass(frozen=True)
@@ -75,74 +84,131 @@ class InferenceClient(ABC):
         doesn't give one — klue-roberta on KLUE-MRC."""
 
 
-class CPUInferenceClient(InferenceClient):
-    """Runs the models in this process with transformers on the CPU (10.4.1:
-    the cost-minimized configuration, 10.5.1). The model is loaded on first
-    use and kept for the life of the process."""
+def _session(path: Path, provider: str):
+    import onnxruntime
 
-    def __init__(self, nli_model: str, ner_model: str | None = None, qa_model: str | None = None) -> None:
-        self._nli_model_name = nli_model
-        self._ner_model_name = ner_model
-        self._qa_model_name = qa_model
-        self._nli = None
-        self._ner = None
-        self._qa = None
+    options = onnxruntime.SessionOptions()
+    if provider == _DIRECTML:
+        # What DirectML requires of a session.
+        options.enable_mem_pattern = False
+        options.execution_mode = onnxruntime.ExecutionMode.ORT_SEQUENTIAL
+        # The fastest GPU of a PC with two (a laptop's integrated one and its own).
+        providers = [(_DIRECTML, {"performance_preference": "high_performance", "device_filter": "gpu"}), _CPU]
+    else:
+        providers = [_CPU]
+    return onnxruntime.InferenceSession(str(path), options, providers=providers)
+
+
+class OnnxModel:
+    """One exported model (ml/export_onnx.py): its tokenizer, labels and an
+    ONNX Runtime session, on the GPU if asked and it works there, else on the
+    CPU. A GPU that fails a run — out of memory, a driver reset — gives way
+    to the CPU for the rest of the process, and the run is done again there."""
+
+    def __init__(self, directory: Path, device: str) -> None:
+        import onnxruntime
+        from transformers import AutoTokenizer
+
+        self.directory = directory
+        self.tokenizer = AutoTokenizer.from_pretrained(directory)
+        config = json.loads((directory / "config.json").read_text(encoding="utf-8"))
+        # Empty for QA, whose two outputs aren't labels.
+        self.id2label = {int(index): label for index, label in config.get("id2label", {}).items()}
+        self._path = directory / "model.onnx"
+        self._lock = threading.Lock()
+        self.on_gpu = False
+        self._session = None
+        if device != "cpu" and _DIRECTML in onnxruntime.get_available_providers():
+            try:
+                self._session = _session(self._path, _DIRECTML)
+                self.on_gpu = _DIRECTML in self._session.get_providers()
+            except Exception:
+                # Any exception: DirectML's errors can come back undecodable
+                # (a UnicodeDecodeError on a non-English Windows).
+                logger.warning("Could not run %s on the GPU; using the CPU", directory, exc_info=True)
+        if not self.on_gpu:
+            if device == "gpu":
+                logger.warning("No GPU ONNX Runtime can use (DirectML); %s runs on the CPU", directory)
+            self._session = _session(self._path, _CPU)
+
+    @property
+    def device(self) -> str:
+        return "GPU (DirectML)" if self.on_gpu else "CPU"
+
+    @property
+    def pad_to_multiple_of(self) -> int | None:
+        """What the tokenizer pads sequences to a multiple of. On the GPU, 32:
+        DirectML prepares each input shape it hasn't seen, which costs more
+        than running a small batch, so fewer shapes run faster (the padding is
+        masked out; the results are the same). On the CPU the padding is only
+        more work."""
+        return _GPU_PAD_TO_MULTIPLE if self.on_gpu else None
+
+    def run(self, outputs: list[str], encoded) -> list[np.ndarray]:
+        feed = {name: np.asarray(encoded[name], dtype=np.int64) for name in ("input_ids", "attention_mask")}
+        with self._lock:
+            session, on_gpu = self._session, self.on_gpu
+        try:
+            return session.run(outputs, feed)
+        except Exception:
+            if not on_gpu:
+                raise
+            logger.warning("%s failed on the GPU; using the CPU from now on", self.directory, exc_info=True)
+            with self._lock:
+                # Unless another run already did.
+                if self._session is session:
+                    self._session = _session(self._path, _CPU)
+                    self.on_gpu = False
+                session = self._session
+            return session.run(outputs, feed)
+
+
+def model_directory(name: str) -> Path:
+    """An exported model's directory, from what NLI_MODEL (...) names or the
+    local default: the directory with model.onnx, or a run directory with one
+    in its onnx/."""
+    path = Path(name)
+    for directory in (path, path / "onnx"):
+        if (directory / "model.onnx").is_file():
+            return directory
+    raise RuntimeError(
+        f"No exported model in {path} or {path / 'onnx'} (train one in ml/, then export it with ml/export_onnx.py)"
+    )
+
+
+class OnnxInferenceClient(InferenceClient):
+    """Runs the models in this process with ONNX Runtime. Each is loaded on
+    first use and kept for the life of the process."""
+
+    def __init__(self, nli_model: str, ner_model: str, qa_model: str, device: str = "auto") -> None:
+        self._names = {"nli": nli_model, "ner": ner_model, "qa": qa_model}
+        self._device = device
+        self._models: dict[str, OnnxModel] = {}
         self._load_lock = threading.Lock()
 
-    def _load_nli(self):
+    def _model(self, kind: str) -> OnnxModel:
         with self._load_lock:
-            if self._nli is None:
-                from transformers import (
-                    AutoModelForSequenceClassification,
-                    AutoTokenizer,
-                )
-
-                tokenizer = AutoTokenizer.from_pretrained(self._nli_model_name)
-                model = AutoModelForSequenceClassification.from_pretrained(self._nli_model_name).eval()
-                # Which output is which label, from the checkpoint's own config.
-                label_index = {label.lower(): int(i) for i, label in model.config.id2label.items()}
-                missing = {"entailment", "neutral", "contradiction"} - label_index.keys()
-                if missing:
-                    raise RuntimeError(f"NLI model {self._nli_model_name} has no {sorted(missing)} label(s)")
-                self._nli = (tokenizer, model, label_index)
-            return self._nli
-
-    def _load_span_model(self, kind: str):
-        # kind: "ner" or "qa"
-        name = self._ner_model_name if kind == "ner" else self._qa_model_name
-        with self._load_lock:
-            if (loaded := getattr(self, f"_{kind}")) is not None:
-                return loaded
-            if name is None:
-                local = LOCAL_NER_MODEL if kind == "ner" else LOCAL_QA_MODEL
-                raise RuntimeError(
-                    f"No trained {kind.upper()} model at {local} and {kind.upper()}_MODEL isn't set "
-                    f"(train one with ml/{kind}, see its README)"
-                )
-            from transformers import (
-                AutoModelForQuestionAnswering,
-                AutoModelForTokenClassification,
-                AutoTokenizer,
-            )
-
-            auto = AutoModelForTokenClassification if kind == "ner" else AutoModelForQuestionAnswering
-            loaded = (AutoTokenizer.from_pretrained(name), auto.from_pretrained(name).eval())
-            setattr(self, f"_{kind}", loaded)
-            return loaded
+            if (model := self._models.get(kind)) is None:
+                model = OnnxModel(model_directory(self._names[kind]), self._device)
+                if kind == "nli":
+                    labels = {label.lower() for label in model.id2label.values()}
+                    if missing := {"entailment", "neutral", "contradiction"} - labels:
+                        raise RuntimeError(f"NLI model {model.directory} has no {sorted(missing)} label(s)")
+                self._models[kind] = model
+            return model
 
     def load(self) -> str:
-        self._load_nli()
-        loaded = [f"NLI {self._nli_model_name}"]
-        # Each on its own: a missing NER or QA model (a machine that hasn't
-        # trained them) is one warning, and doesn't hide the other or NLI. A
-        # run that needs it tries again and fails with the same message.
-        for kind, name in (("ner", self._ner_model_name), ("qa", self._qa_model_name)):
+        # Each on its own: a missing model (a machine that hasn't trained or
+        # exported it) is one warning, and doesn't hide the others. A run that
+        # needs it tries again and fails with the same message.
+        loaded = []
+        for kind in ("nli", "ner", "qa"):
             try:
-                self._load_span_model(kind)
-                loaded.append(f"{kind.upper()} {name}")
+                model = self._model(kind)
+                loaded.append(f"{kind.upper()} {model.directory} on the {model.device}")
             except Exception as exc:  # noqa: BLE001 — whatever the load hit, it's a warning here
                 logger.warning("Could not load the %s model: %s", kind.upper(), exc)
-        return ", ".join(loaded)
+        return ", ".join(loaded) or "no models"
 
     def rerank(self, query: str, candidates: list[str]) -> list[float]:
         raise NotImplementedError
@@ -150,30 +216,30 @@ class CPUInferenceClient(InferenceClient):
     def nli(self, pairs: list[tuple[str, str]]) -> list[NLIScores]:
         if not pairs:
             return []
-        import torch
-
-        tokenizer, model, label_index = self._load_nli()
+        model = self._model("nli")
+        label_index = {label.lower(): index for index, label in model.id2label.items()}
         scores: list[NLIScores] = []
         for start in range(0, len(pairs), _NLI_BATCH_SIZE):
             batch = pairs[start : start + _NLI_BATCH_SIZE]
-            encoded = tokenizer(
+            encoded = model.tokenizer(
                 [premise for premise, _ in batch],
                 [hypothesis for _, hypothesis in batch],
                 padding=True,
+                pad_to_multiple_of=model.pad_to_multiple_of,
                 truncation=True,
                 max_length=_NLI_MAX_TOKENS,
-                return_tensors="pt",
+                return_tensors="np",
                 # RoBERTa has a single token type; the ids the tokenizer would
                 # add for the second sentence are out of its embedding's range.
                 return_token_type_ids=False,
             )
-            with torch.no_grad():
-                probs = model(**encoded).logits.softmax(dim=-1).tolist()
+            [logits] = model.run(["logits"], encoded)
+            probs = _softmax(logits)
             scores.extend(
                 NLIScores(
-                    entailment=row[label_index["entailment"]],
-                    neutral=row[label_index["neutral"]],
-                    contradiction=row[label_index["contradiction"]],
+                    entailment=float(row[label_index["entailment"]]),
+                    neutral=float(row[label_index["neutral"]]),
+                    contradiction=float(row[label_index["contradiction"]]),
                 )
                 for row in probs
             )
@@ -182,63 +248,34 @@ class CPUInferenceClient(InferenceClient):
     def ner(self, texts: list[str]) -> list[list[NamedEntity]]:
         if not texts:
             return []
-        tokenizer, model = self._load_span_model("ner")
-        return span_inference.recognize(model, tokenizer, texts)
+        return span_inference.recognize(self._model("ner"), texts)
 
     def answer(self, questions: list[tuple[str, str]], null_margin: float = DEFAULT_QA_NULL_MARGIN) -> list[str]:
         if not questions:
             return []
-        tokenizer, model = self._load_span_model("qa")
-        return span_inference.answer(model, tokenizer, questions, null_margin)
+        return span_inference.answer(self._model("qa"), questions, null_margin)
 
 
-class GPUInferenceClient(InferenceClient):
-    """Implementation assuming batch serving (e.g. vLLM) (10.4.1)."""
-
-    def rerank(self, query: str, candidates: list[str]) -> list[float]:
-        raise NotImplementedError
-
-    def nli(self, pairs: list[tuple[str, str]]) -> list[NLIScores]:
-        raise NotImplementedError
-
-    def ner(self, texts: list[str]) -> list[list[NamedEntity]]:
-        raise NotImplementedError
-
-    def answer(self, questions: list[tuple[str, str]], null_margin: float = DEFAULT_QA_NULL_MARGIN) -> list[str]:
-        raise NotImplementedError
+def _softmax(logits: np.ndarray) -> np.ndarray:
+    exp = np.exp(logits - logits.max(axis=-1, keepdims=True))
+    return exp / exp.sum(axis=-1, keepdims=True)
 
 
-def _trained_model(env_var: str, local: Path) -> str | None:
-    # Like NLI_MODEL: a directory is best given as an absolute path.
-    if configured := os.environ.get(env_var, "").strip():
-        return configured
-    return str(local) if (local / "config.json").is_file() else None
-
-
-def _nli_model() -> str:
-    # A directory is best given as an absolute path: the backend runs from
-    # backend/, and a relative one that isn't found there reads as a Hugging
-    # Face id.
-    if configured := os.environ.get("NLI_MODEL", "").strip():
-        return configured
-    if (LOCAL_NLI_MODEL / "config.json").is_file():
-        return str(LOCAL_NLI_MODEL)
-    logger.warning(
-        "No trained NLI model at %s and NLI_MODEL isn't set; using %s, which misses more contradictions "
-        "(train one with ml/nli, see its README)",
-        LOCAL_NLI_MODEL,
-        FALLBACK_NLI_MODEL,
-    )
-    return FALLBACK_NLI_MODEL
+def _model_name(env_var: str, local: Path) -> str:
+    # A directory is best given as an absolute path: the backend runs from backend/.
+    return os.environ.get(env_var, "").strip() or str(local)
 
 
 @functools.cache
 def get_inference_client() -> InferenceClient:
-    # One per process: the CPU client holds the loaded model.
-    if os.environ.get("INFERENCE_BACKEND", "cpu") == "gpu":
-        return GPUInferenceClient()
-    return CPUInferenceClient(
-        nli_model=_nli_model(),
-        ner_model=_trained_model("NER_MODEL", LOCAL_NER_MODEL),
-        qa_model=_trained_model("QA_MODEL", LOCAL_QA_MODEL),
+    # One per process: it holds the loaded models.
+    device = os.environ.get("INFERENCE_DEVICE", "auto").strip().lower() or "auto"
+    if device not in ("auto", "gpu", "cpu"):
+        logger.warning("INFERENCE_DEVICE=%r isn't auto, gpu or cpu; using auto", device)
+        device = "auto"
+    return OnnxInferenceClient(
+        nli_model=_model_name("NLI_MODEL", LOCAL_NLI_MODEL),
+        ner_model=_model_name("NER_MODEL", LOCAL_NER_MODEL),
+        qa_model=_model_name("QA_MODEL", LOCAL_QA_MODEL),
+        device=device,
     )

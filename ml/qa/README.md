@@ -31,3 +31,5 @@ python evaluate.py --model runs/klue --errors --latency
 ```
 
 An answer is the best span (start + end logits, at most 30 tokens) unless "no answer" scores higher by more than `--null-margin`; raising it answers less often (a negative margin, more often). `data/` and `runs/` aren't committed.
+
+The backend runs the model with ONNX Runtime: export it with `python ../export_onnx.py qa runs/klue` (into `runs/klue/onnx`; needs `onnx`, `onnxscript` and `onnxruntime` besides `requirements.txt`).
