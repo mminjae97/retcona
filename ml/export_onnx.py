@@ -1,17 +1,19 @@
 """Exports a trained checkpoint to ONNX, for the app's ONNX Runtime
 (design doc 5, 10.3: the app runs no PyTorch).
 
-    python export_onnx.py nli ml/nli/runs/kornli-3ep
-    python export_onnx.py ner ml/ner/runs/klue
-    python export_onnx.py qa ml/qa/runs/klue
+    python ml/export_onnx.py nli ml/nli/runs/mixed
+    python ml/export_onnx.py ner ml/ner/runs/klue
+    python ml/export_onnx.py qa ml/qa/runs/klue
 
 Writes <checkpoint>/onnx/: model.onnx, with the tokenizer and config.json
 (the labels) beside it — the directory the backend loads
-(backend/infra/inference_client.py), on DirectML or the CPU. The model takes input_ids and
-attention_mask, batch and sequence length free; it gives logits (nli, ner)
-or start_logits and end_logits (qa), as the PyTorch model does. Then checks
-ONNX Runtime's outputs against PyTorch's on a few inputs of different
-lengths, and fails if they differ by more than TOLERANCE.
+(backend/infra/inference_client.py), on DirectML or the CPU. The model takes
+input_ids and attention_mask, batch and sequence length free; it gives logits
+(nli, ner) or start_logits and end_logits (qa), as the PyTorch model does.
+Checks ONNX Runtime's outputs against PyTorch's on a few inputs of different
+shapes, and fails if they differ by more than TOLERANCE. The export is built
+beside the directory and replaces it only once checked: a failed one leaves
+the earlier export as it was.
 
 Needs, besides a model directory's requirements.txt: onnx, onnxscript,
 onnxruntime.
@@ -19,6 +21,7 @@ onnxruntime.
 
 import argparse
 import shutil
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -65,11 +68,12 @@ class _Outputs(torch.nn.Module):
         return tuple(getattr(result, name) for name in self.outputs)
 
 
-def _encode(tokenizer, kind: str, framework: str):
+def _encode(tokenizer, kind: str, framework: str, count: int | None = None):
+    # The first count inputs (all by default).
     if kind == "ner":
-        args = (_TEXTS,)
+        args = (_TEXTS[:count],)
     else:
-        args = ([first for first, _ in _PAIRS], [second for _, second in _PAIRS])
+        args = ([first for first, _ in _PAIRS[:count]], [second for _, second in _PAIRS[:count]])
     # As the backend encodes: RoBERTa has one token type, so no token_type_ids.
     return tokenizer(*args, padding=True, return_token_type_ids=False, return_tensors=framework)
 
@@ -81,8 +85,21 @@ def export(kind: str, checkpoint: Path, out: Path) -> None:
     wrapped = _Outputs(model, outputs)
     sample = _encode(tokenizer, kind, "pt")
 
-    _clear(out, checkpoint)
-    out.mkdir(parents=True)
+    _check_replaceable(out, checkpoint)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    building = Path(tempfile.mkdtemp(prefix=f".{out.name}-", dir=out.parent))
+    try:
+        _build(kind, wrapped, tokenizer, sample, building)
+        if out.exists():
+            shutil.rmtree(out)
+        building.rename(out)
+    finally:
+        shutil.rmtree(building, ignore_errors=True)
+    print(f"Wrote {out / 'model.onnx'} ({(out / 'model.onnx').stat().st_size / 2**20:.0f} MB)")
+
+
+def _build(kind: str, wrapped: _Outputs, tokenizer, sample, out: Path) -> None:
+    outputs = wrapped.outputs
     path = out / "model.onnx"
     # The torch.export-based exporter: the older tracing one gets transformers
     # 5's attention masks wrong (logits off by more than 1).
@@ -100,27 +117,31 @@ def export(kind: str, checkpoint: Path, out: Path) -> None:
     program.save(str(path), external_data=False)
     _without_allowzero(path)
     tokenizer.save_pretrained(out)
-    model.config.save_pretrained(out)
+    wrapped.model.config.save_pretrained(out)
 
     session = onnxruntime.InferenceSession(str(path), providers=["CPUExecutionProvider"])
-    # The export's sample, another batch size and length, and one input alone
-    # (the backend often runs one: a revalidated flag, a picked claim).
-    for batch in (sample, _cut(sample, 2, 2), _cut(sample, 1, 0)):
-        with torch.no_grad():
-            expected = wrapped(batch["input_ids"], batch["attention_mask"])
-        got = session.run(outputs, {name: batch[name].numpy() for name in ("input_ids", "attention_mask")})
-        for name, want, have in zip(outputs, expected, got, strict=True):
-            difference = float(np.abs(want.numpy() - have).max())
-            print(f"{kind} {name} {tuple(have.shape)}: largest difference {difference:.2e}")
-            if difference > TOLERANCE:
-                raise SystemExit(f"ONNX Runtime differs from PyTorch by {difference} (> {TOLERANCE})")
-    print(f"Wrote {path} ({path.stat().st_size / 2**20:.0f} MB)")
+    try:
+        # The export's sample, another batch size and length, and one input alone,
+        # unpadded (the backend often runs one: a revalidated flag, a picked claim).
+        for batch in (sample, _cut(sample, 2, 2), _encode(tokenizer, kind, "pt", count=1)):
+            with torch.no_grad():
+                expected = wrapped(batch["input_ids"], batch["attention_mask"])
+            got = session.run(outputs, {name: batch[name].numpy() for name in ("input_ids", "attention_mask")})
+            for name, want, have in zip(outputs, expected, got, strict=True):
+                difference = float(np.abs(want.numpy() - have).max())
+                print(f"{kind} {name} {tuple(have.shape)}: largest difference {difference:.2e}")
+                if difference > TOLERANCE:
+                    raise SystemExit(f"ONNX Runtime differs from PyTorch by {difference} (> {TOLERANCE})")
+    finally:
+        # Closed, failed or not: Windows can't move or delete a directory with a file in it open.
+        del session
 
 
-def _clear(out: Path, checkpoint: Path) -> None:
-    """Removes an earlier export at out, and nothing else: not a directory
-    with no model.onnx, one holding weights or folders (a checkpoint, given as
-    --out by mistake), or the checkpoint or one of its parents."""
+def _check_replaceable(out: Path, checkpoint: Path) -> None:
+    """Fails unless out is free or an earlier export, which the new one may
+    replace: not a directory with no model.onnx, one holding weights or
+    folders (a checkpoint, given as --out by mistake), or the checkpoint or
+    one of its parents."""
     if not out.exists():
         return
     earlier_export = (
@@ -129,8 +150,7 @@ def _clear(out: Path, checkpoint: Path) -> None:
         and not checkpoint.resolve().is_relative_to(out.resolve())
     )
     if not earlier_export:
-        raise SystemExit(f"{out} isn't an earlier export (it has no model.onnx, or holds a checkpoint); not deleting it")
-    shutil.rmtree(out)
+        raise SystemExit(f"{out} isn't an earlier export (it has no model.onnx, or holds a checkpoint); not replacing it")
 
 
 def _constant(node) -> np.ndarray | None:
