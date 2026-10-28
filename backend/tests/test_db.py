@@ -203,7 +203,7 @@ def test_times_are_utc_with_microseconds_and_a_naive_one_is_refused():
         db.commit()
 
 
-def test_two_saves_in_one_second_have_different_times_that_compare_as_written():
+def test_saves_are_timed_to_the_microsecond_and_compare_as_written():
     with SessionLocal() as db:
         novel = Novel(title="저장 시험")
         db.add(novel)
@@ -213,11 +213,19 @@ def test_two_saves_in_one_second_have_different_times_that_compare_as_written():
         db.commit()
         db.refresh(episode)
         first = episode.updated_at
-        time.sleep(0.01)
         episode.content = "두 번째 저장"
         db.commit()
         db.refresh(episode)
         assert episode.updated_at > first
+        # Set to the microsecond, not SQLite's millisecond, which could make
+        # two saves look the same: one of a few saves has digits past it.
+        saved = []
+        for n in range(5):
+            episode.content = f"저장 {n}"
+            db.commit()
+            db.refresh(episode)
+            saved.append(episode.updated_at.microsecond % 1000)
+        assert any(saved)
         # The time read back matches the stored text in SQL (as the validation
         # job checks the content it validated is still the episode's).
         assert db.scalar(select(Episode.id).where(Episode.updated_at == episode.updated_at)) == episode.id
