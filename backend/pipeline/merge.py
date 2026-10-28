@@ -162,8 +162,8 @@ def apply_new_information(
         CharacterStateHistory(novel_id=novel_id, character_id=character_id, episode_index=episode_index, state=state)
         for character_id, state in states.items()
     )
-    # (Deleting a location, once there is a way to, deletes these rows first, as
-    # api/settings.py's delete_character does the character's.)
+    # (Deleting a location, once there is a way to, takes these rows with it:
+    # location_id's foreign key cascades.)
     db.execute(
         delete(LocationStateHistory).where(
             LocationStateHistory.novel_id == novel_id, LocationStateHistory.episode_index == episode_index

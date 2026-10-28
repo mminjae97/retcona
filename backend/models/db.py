@@ -23,6 +23,7 @@ import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from typing import IO
 
 from alembic import command
 from alembic.autogenerate import compare_metadata
@@ -30,11 +31,16 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from alembic.util import CommandError
-from sqlalchemy import Connection, Engine, create_engine, event, make_url
+from sqlalchemy import URL, Connection, Engine, create_engine, event, make_url
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 import models  # every model module, registered on Base.metadata (for _missing_schema)
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +52,11 @@ def _data_dir() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "retcona"
 
 
-DATABASE_URL = os.environ.get("DATABASE_URL") or f"sqlite:///{(_data_dir() / 'retcona.db').as_posix()}"
+# Built, not pasted into a string: a % in the path (a Windows user name can
+# have one) is quoted, not read as an escape.
+DATABASE_URL = os.environ.get("DATABASE_URL") or URL.create(
+    "sqlite", database=(_data_dir() / "retcona.db").as_posix()
+).render_as_string()
 
 # How long a transaction waits for another one's write lock before failing
 # ("database is locked"). Writes are short; a validation run writes its
@@ -58,7 +68,36 @@ def database_path() -> Path:
     url = make_url(DATABASE_URL)
     if url.get_backend_name() != "sqlite" or not url.database or url.database == ":memory:":
         raise RuntimeError(f"DATABASE_URL must name a SQLite file (sqlite:///path/to/file.db), not {DATABASE_URL!r}")
-    return Path(url.database)
+    path = Path(url.database)
+    # Relative, it would be a different file from backend/ (the API server)
+    # than from db/ (alembic).
+    if not path.is_absolute():
+        raise RuntimeError(f"DATABASE_URL must name the SQLite file by its full path, not {url.database!r}")
+    return path
+
+
+def runner_lock_path() -> Path:
+    """The file the one backend process running this database's jobs holds a
+    lock on (infra/queue_client.py), beside the database."""
+    path = database_path()
+    return path.with_name(f"{path.name}.runner-lock")
+
+
+def lock_file(path: Path) -> IO[bytes] | None:
+    """The file opened with an exclusive lock on it, held until it's closed —
+    which the OS does when the process ends, however it ends. None if
+    another holds it."""
+    file = open(path, "a+b")  # noqa: SIM115 (returned open, holding the lock)
+    try:
+        if os.name == "nt":
+            file.seek(0)
+            msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        file.close()
+        return None
+    return file
 
 
 def sqlite_engine(*, foreign_keys: bool = True, **kwargs) -> Engine:
@@ -221,8 +260,11 @@ def upgrade_database() -> None:
     changes nothing (SQLite's schema changes are transactional), and a second
     app starting meanwhile waits, then finds the database upgraded — it
     neither upgrades it again nor copies the upgraded one over the copy. The
-    copy is for an upgrade that succeeded and turns out wrong. A database at a
-    revision this code doesn't know is left for check_schema_is_current."""
+    copy is for an upgrade that succeeded and turns out wrong. Not while
+    another backend process runs on the database (the one holding the runner
+    lock — an older version left open), which would carry on against the
+    tables this rebuilds. A database at a revision this code doesn't know is
+    left for check_schema_is_current."""
     if not _MIGRATIONS_DIR.is_dir():
         return
     script = ScriptDirectory(str(_MIGRATIONS_DIR))
@@ -234,15 +276,23 @@ def upgrade_database() -> None:
             current = set(MigrationContext.configure(connection).get_current_heads())
             if current == expected or _unknown_revisions(script, current):
                 return
-            if current:
-                # Another connection reads it meanwhile, as WAL lets it.
-                logger.info("Upgrading the database from %s; copied it to %s first", sorted(current), _back_up())
-            config = Config()
-            config.set_main_option("script_location", str(_MIGRATIONS_DIR))
-            # env.py migrates on this connection, in its transaction, rather than opening its own.
-            config.attributes["connection"] = connection
-            command.upgrade(config, "head")
-            connection.commit()
+            runner_lock = lock_file(runner_lock_path())
+            if runner_lock is None:
+                raise RuntimeError(
+                    "Another backend process is running on this database: close it, then start this one "
+                    f"again to upgrade the database from {sorted(current)} to {sorted(expected)}."
+                )
+            with runner_lock:
+                if current:
+                    # Another connection reads it meanwhile, as WAL lets it.
+                    backup = _back_up()
+                    logger.info("Upgrading the database from %s; copied it to %s first", sorted(current), backup)
+                config = Config()
+                config.set_main_option("script_location", str(_MIGRATIONS_DIR))
+                # env.py migrates on this connection, in its transaction, rather than opening its own.
+                config.attributes["connection"] = connection
+                command.upgrade(config, "head")
+                connection.commit()
         logger.info("The database is at %s (%s)", sorted(expected), database_path())
     finally:
         migrations.dispose()

@@ -110,10 +110,10 @@ def create_episode(
     # Locks the novel row for the rest of this transaction so two concurrent
     # creates (double-click, two tabs) can't both read the same MAX(episode_index)
     # and insert duplicate indexes — the second request blocks here until the
-    # first commits, by which point the MAX below reflects its new episode.
-    # Relies on the default READ COMMITTED isolation level (models/db.py) to see
-    # that committed episode once unblocked; a higher isolation level would need
-    # a fresh transaction/snapshot here instead.
+    # first commits, by which point the MAX below reflects its new episode. On
+    # SQLite the lock is the database's write lock, taken when the transaction
+    # begins (models/db.py), so the second request's transaction — and its
+    # snapshot — only starts once the first has committed.
     require_novel(db, novel_id, for_update=True)
     next_index = db.scalar(
         select(func.coalesce(func.max(Episode.episode_index), 0)).where(Episode.novel_id == novel_id)

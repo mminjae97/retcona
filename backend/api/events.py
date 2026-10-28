@@ -20,7 +20,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator, model_validator
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from api.deps import require_novel
@@ -215,14 +215,8 @@ def update_event(
 def delete_event(novel_id: uuid.UUID, event_id: uuid.UUID, db: Session = _DB) -> None:
     require_novel(db, novel_id, for_update=True)
     event = _get_event(db, novel_id, event_id)
-    # What hangs off it goes with it: who and where, and the links to and from it.
-    db.execute(delete(EventParticipant).where(EventParticipant.novel_id == novel_id, EventParticipant.event_id == event_id))
-    db.execute(delete(EventLocation).where(EventLocation.novel_id == novel_id, EventLocation.event_id == event_id))
-    db.execute(
-        delete(EventLink).where(
-            EventLink.novel_id == novel_id, or_(EventLink.from_event_id == event_id, EventLink.to_event_id == event_id)
-        )
-    )
+    # What hangs off it goes with it — who and where, and the links to and
+    # from it — by their foreign keys, which cascade (models/base.py).
     db.delete(event)
     db.commit()
 

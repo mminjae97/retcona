@@ -103,7 +103,7 @@ def test_two_apps_starting_together_upgrade_once_and_keep_the_copy_from_before(s
     def start() -> None:
         try:
             models_db.upgrade_database()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 (reported by the assert below)
             errors.append(exc)
 
     apps = [threading.Thread(target=start) for _ in range(2)]
@@ -117,6 +117,32 @@ def test_two_apps_starting_together_upgrade_once_and_keep_the_copy_from_before(s
     with closing(sqlite3.connect(models_db.backup_path())) as copy:
         copied = {name for (name,) in copy.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert "added_later" not in copied
+
+
+def test_no_upgrade_while_another_backend_process_runs_on_the_database(scratch_database):
+    models_db.upgrade_database()
+    before = _state()
+    _add_revision(scratch_database, "added_later")
+    # An older version still open: it holds the runner lock.
+    running = models_db.lock_file(models_db.runner_lock_path())
+    try:
+        with pytest.raises(RuntimeError, match="Another backend process"):
+            models_db.upgrade_database()
+        assert _state() == before
+    finally:
+        running.close()
+    models_db.upgrade_database()
+    assert "added_later" in _state()[1]
+
+
+def test_the_database_is_named_by_its_full_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(models_db, "DATABASE_URL", "sqlite:///retcona.db")
+    with pytest.raises(RuntimeError, match="full path"):
+        models_db.database_path()
+    # A % in the folder's name stays a %.
+    path = tmp_path / "a%20b" / "r.db"
+    monkeypatch.setattr(models_db, "DATABASE_URL", models_db.URL.create("sqlite", database=path.as_posix()).render_as_string())
+    assert models_db.database_path() == path
 
 
 def test_the_folder_is_made_when_the_database_is_first_opened_not_before(tmp_path, monkeypatch):

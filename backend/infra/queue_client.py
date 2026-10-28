@@ -15,7 +15,6 @@ anything (its idempotency record). Only one runner takes jobs from a database
 """
 
 import functools
-import os
 import threading
 import uuid
 from abc import ABC, abstractmethod
@@ -24,13 +23,8 @@ from typing import IO, Any, NamedTuple
 from sqlalchemy import ColumnElement, delete, event, exists, func, select, update
 from sqlalchemy.orm import Session
 
-from models.db import SessionLocal, database_path
+from models.db import SessionLocal, lock_file, runner_lock_path
 from models.job import Job
-
-if os.name == "nt":
-    import msvcrt
-else:
-    import fcntl
 
 
 class QueuedJob(NamedTuple):
@@ -116,20 +110,6 @@ def _forget_enqueued(session: Session) -> None:
     session.info.pop(_ENQUEUED, None)
 
 
-def _try_lock(file: IO[bytes]) -> bool:
-    """An exclusive lock on the file, held until it's closed — which the OS
-    does when the process ends, however it ends. False if another holds it."""
-    try:
-        if os.name == "nt":
-            file.seek(0)
-            msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
-        else:
-            fcntl.flock(file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        return False
-    return True
-
-
 class DatabaseQueueClient(QueueClient):
     def __init__(self) -> None:
         # The lock file beside the database, kept open and locked for the
@@ -170,13 +150,8 @@ class DatabaseQueueClient(QueueClient):
         # A file lock isn't lost while its file is open: once taken, it's held.
         if self._lock_file is not None:
             return True
-        path = database_path()
-        file = open(path.with_name(f"{path.name}.runner-lock"), "a+b")  # noqa: SIM115 (held open for the process)
-        if not _try_lock(file):
-            file.close()
-            return False
-        self._lock_file = file
-        return True
+        self._lock_file = lock_file(runner_lock_path())
+        return self._lock_file is not None
 
     def recover(self) -> int:
         with SessionLocal() as db:
