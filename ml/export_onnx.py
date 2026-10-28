@@ -90,12 +90,30 @@ def export(kind: str, checkpoint: Path, out: Path) -> None:
     building = Path(tempfile.mkdtemp(prefix=f".{out.name}-", dir=out.parent))
     try:
         _build(kind, wrapped, tokenizer, sample, building)
-        if out.exists():
-            shutil.rmtree(out)
-        building.rename(out)
+        _replace(out, building)
     finally:
         shutil.rmtree(building, ignore_errors=True)
     print(f"Wrote {out / 'model.onnx'} ({(out / 'model.onnx').stat().st_size / 2**20:.0f} MB)")
+
+
+def _replace(out: Path, new: Path) -> None:
+    """Puts new at out. An earlier export is moved aside, not deleted, until
+    new is in place: a move that fails (Windows refuses one while a file in
+    the directory is open, as an antivirus scan may hold it) leaves it whole."""
+    if not out.exists():
+        new.rename(out)
+        return
+    # new's name is unique (mkdtemp), so this one is too.
+    earlier = new.with_name(f"{new.name}-earlier")
+    out.rename(earlier)
+    try:
+        new.rename(out)
+    except BaseException:
+        earlier.rename(out)
+        raise
+    shutil.rmtree(earlier, ignore_errors=True)
+    if earlier.exists():
+        print(f"Could not delete the earlier export, moved to {earlier}; delete it by hand")
 
 
 def _build(kind: str, wrapped: _Outputs, tokenizer, sample, out: Path) -> None:
