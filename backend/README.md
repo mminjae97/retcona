@@ -17,7 +17,7 @@ One SQLite file (design doc 10.1): `%LOCALAPPDATA%\Retcona\retcona.db` (elsewher
 
 One write transaction at a time: every transaction begins with `BEGIN IMMEDIATE`, taking the database's write lock at once, and another one waits up to 30 seconds for it rather than failing (`models/db.py`). Every foreign key cascades, so deleting a novel deletes everything under it (the trash). Timestamps are kept in UTC (`models/base.py`, `UtcDateTime`).
 
-At startup, after upgrading, the API server checks the database is at the migrations' head. A database at a revision this code doesn't know (a newer version migrated it, and an older one was installed again), or an install without `db/migrations`, is checked against the models instead: it starts, with a warning, if nothing this code needs is missing (`check_database`, `check_schema_is_current`).
+At startup, after upgrading, the API server checks the database is at the migrations' head. A database at a revision this code doesn't know (a newer version migrated it, and an older one was installed again), or an install without `db/migrations`, is checked against the models instead: it starts, with a warning, if nothing this code needs is missing (`check_database`, `check_schema_is_current`). Without `db/migrations` a new database can't be created at all, so the installer (desktop transition 5/5) has to ship it.
 
 The tests use a database of their own in a temporary folder (`tests/conftest.py`), never the app's.
 

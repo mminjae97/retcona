@@ -60,6 +60,8 @@ def _migrate(connection: Connection) -> None:
         render_item=_render_item,
         transactional_ddl=True,
     )
+    # A transaction of its own, or (the app upgrading at startup) the caller's,
+    # which it commits.
     with context.begin_transaction():
         context.run_migrations()
         # Foreign keys are off while tables are rebuilt; checked before committing.

@@ -62,10 +62,11 @@ def database_path() -> Path:
 
 
 def sqlite_engine(*, foreign_keys: bool = True, **kwargs) -> Engine:
-    """An engine on the database file, with its folder made if missing.
-    foreign_keys off: for migrations only, which rebuild tables (batch mode)
-    and would otherwise cascade the old table's drop to its children."""
-    database_path().parent.mkdir(parents=True, exist_ok=True)
+    """An engine on the database file, whose folder is made if missing when it
+    first connects. foreign_keys off: for migrations only, which rebuild
+    tables (batch mode) and would otherwise cascade the old table's drop to
+    its children."""
+    folder = database_path().parent
     engine = create_engine(
         DATABASE_URL,
         connect_args={"check_same_thread": False, "timeout": BUSY_TIMEOUT_SECONDS},
@@ -73,6 +74,10 @@ def sqlite_engine(*, foreign_keys: bool = True, **kwargs) -> Engine:
         json_serializer=functools.partial(json.dumps, ensure_ascii=False),
         **kwargs,
     )
+
+    @event.listens_for(engine, "do_connect")
+    def _make_folder(*_) -> None:
+        folder.mkdir(parents=True, exist_ok=True)
 
     @event.listens_for(engine, "connect")
     def _configure(dbapi_connection: sqlite3.Connection, _record) -> None:
@@ -163,7 +168,10 @@ def check_schema_is_current(connection: Connection) -> None:
     """
     current = set(MigrationContext.configure(connection).get_current_heads())
     if not current:
-        raise RuntimeError(f"The database has no migrations applied, and {_MIGRATIONS_DIR} has none to apply.")
+        raise RuntimeError(
+            f"The database has no migrations applied, and {_MIGRATIONS_DIR}, which would create its tables, "
+            "isn't there — an install has to ship db/migrations."
+        )
     if not _MIGRATIONS_DIR.is_dir():
         _require_schema(connection, f"{_MIGRATIONS_DIR} not found, so revision {sorted(current)} can't be checked")
         logger.warning(
@@ -208,9 +216,12 @@ def _back_up() -> Path:
 def upgrade_database() -> None:
     """Brings the database up to this code's migrations (10.5.4): creates it on
     the first start, and upgrades it after the app is updated — copying it
-    aside first (backup_path). The upgrade runs in one transaction (SQLite's
-    schema changes are transactional), so one that fails changes nothing; the
-    copy is for one that succeeded and turns out wrong. A database at a
+    aside first (backup_path). All of it in one transaction, holding the
+    write lock from the revision check to the commit: an upgrade that fails
+    changes nothing (SQLite's schema changes are transactional), and a second
+    app starting meanwhile waits, then finds the database upgraded — it
+    neither upgrades it again nor copies the upgraded one over the copy. The
+    copy is for an upgrade that succeeded and turns out wrong. A database at a
     revision this code doesn't know is left for check_schema_is_current."""
     if not _MIGRATIONS_DIR.is_dir():
         return
@@ -219,17 +230,19 @@ def upgrade_database() -> None:
     migrations = sqlite_engine(foreign_keys=False, poolclass=NullPool)
     try:
         with migrations.connect() as connection:
+            # Begins the transaction (BEGIN IMMEDIATE), left open until the commit below.
             current = set(MigrationContext.configure(connection).get_current_heads())
-            connection.commit()
             if current == expected or _unknown_revisions(script, current):
                 return
             if current:
+                # Another connection reads it meanwhile, as WAL lets it.
                 logger.info("Upgrading the database from %s; copied it to %s first", sorted(current), _back_up())
             config = Config()
             config.set_main_option("script_location", str(_MIGRATIONS_DIR))
-            # env.py migrates on this connection rather than opening its own.
+            # env.py migrates on this connection, in its transaction, rather than opening its own.
             config.attributes["connection"] = connection
             command.upgrade(config, "head")
+            connection.commit()
         logger.info("The database is at %s (%s)", sorted(expected), database_path())
     finally:
         migrations.dispose()

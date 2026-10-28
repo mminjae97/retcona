@@ -335,6 +335,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     with op.batch_alter_table('flag_revalidations', schema=None) as batch_op:
+        batch_op.create_index(batch_op.f('ix_flag_revalidations_flag_id'), ['flag_id'], unique=False)
         batch_op.create_index('ix_flag_revalidations_novel_flag_created', ['novel_id', 'flag_id', 'created_at'], unique=False)
         batch_op.create_index(batch_op.f('ix_flag_revalidations_novel_id'), ['novel_id'], unique=False)
 
@@ -344,6 +345,7 @@ def downgrade() -> None:
     with op.batch_alter_table('flag_revalidations', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_flag_revalidations_novel_id'))
         batch_op.drop_index('ix_flag_revalidations_novel_flag_created')
+        batch_op.drop_index(batch_op.f('ix_flag_revalidations_flag_id'))
 
     op.drop_table('flag_revalidations')
     with op.batch_alter_table('contradiction_flags', schema=None) as batch_op:

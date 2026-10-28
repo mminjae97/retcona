@@ -35,7 +35,7 @@ class FlagRevalidation(Base, NovelScopedMixin, TimestampMixin):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     flag_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("contradiction_flags.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("contradiction_flags.id", ondelete="CASCADE"), nullable=False, index=True
     )
     status: Mapped[str] = mapped_column(String, nullable=False, default="queued")  # queued | running | succeeded | failed
     error: Mapped[str | None] = mapped_column(Text)

@@ -95,6 +95,43 @@ def test_an_upgrade_copies_the_database_aside_first(scratch_database):
     assert "novels" in copied and "added_later" not in copied
 
 
+def test_two_apps_starting_together_upgrade_once_and_keep_the_copy_from_before(scratch_database):
+    models_db.upgrade_database()
+    revision = _add_revision(scratch_database, "added_later")
+    errors = []
+
+    def start() -> None:
+        try:
+            models_db.upgrade_database()
+        except Exception as exc:
+            errors.append(exc)
+
+    apps = [threading.Thread(target=start) for _ in range(2)]
+    for app in apps:
+        app.start()
+    for app in apps:
+        app.join(30)
+    assert errors == []
+    assert _state()[0] == {revision}
+    # The second waited for the first's upgrade, and copied nothing over its copy.
+    with closing(sqlite3.connect(models_db.backup_path())) as copy:
+        copied = {name for (name,) in copy.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "added_later" not in copied
+
+
+def test_the_folder_is_made_when_the_database_is_first_opened_not_before(tmp_path, monkeypatch):
+    folder = tmp_path / "not yet"
+    monkeypatch.setattr(models_db, "DATABASE_URL", f"sqlite:///{(folder / 'app.db').as_posix()}")
+    engine = models_db.sqlite_engine()
+    try:
+        assert not folder.exists()
+        with engine.connect():
+            pass
+        assert (folder / "app.db").exists()
+    finally:
+        engine.dispose()
+
+
 def test_an_upgrade_that_fails_changes_nothing(scratch_database):
     models_db.upgrade_database()
     before = _state()
