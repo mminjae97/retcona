@@ -12,8 +12,13 @@ dependencies = [
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
     "rank-bm25>=0.2",       # BM25 hybrid search (chapter 5)
-    "sentence-transformers>=5.2",  # KURE-v1 embedding, bge-reranker (chapter 5); 5.2 is the first to allow transformers 5
-    "transformers>=5.17,<6",  # NLI model (7.2); same major version as ml/nli, which saves it
+    # The models run with ONNX Runtime (infra/inference_client.py), on the GPU
+    # through DirectML on Windows (the app's platform), on the CPU elsewhere.
+    # The two packages are one module, onnxruntime: only one may be installed.
+    "onnxruntime-directml>=1.24; sys_platform == 'win32'",
+    "onnxruntime>=1.24; sys_platform != 'win32'",
+    "numpy",
+    "transformers>=5.17,<6",  # the exported models' tokenizers; same major version as ml/, which saves them
     "kiwipiepy>=0.24,<0.25",  # Korean part-of-speech tags for the extraction rules (Apache-2.0, model included)
 ]
 

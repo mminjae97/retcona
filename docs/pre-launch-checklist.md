@@ -26,16 +26,21 @@ a license scanner over the installer's contents finds nothing unlisted.
 
 ## 2. Models: ONNX export, publishing and attribution
 
-**Now:** the NER, QA and NLI models are PyTorch checkpoints kept only on the
-machine that trained them (`ml/ner/runs/klue`, `ml/qa/runs/klue`,
-`ml/nli/runs/mixed`, not committed). A worker without the NLI model falls
-back to a weaker public checkpoint; without NER or QA, extraction fails.
+**Now:** the NER, QA and NLI models are exported to ONNX
+(`ml/export_onnx.py`) and kept only on the machine that trained them
+(`ml/ner/runs/klue/onnx`, `ml/qa/runs/klue/onnx`, `ml/nli/runs/mixed/onnx`,
+not committed). Without the NLI model nothing is judged; without NER or QA,
+extraction fails.
 
 **To do:**
-- [ ] Export the three to ONNX, and check that the ONNX models score the same
-      as the PyTorch ones on the evaluation sets (`ml/extraction`,
-      `ml/nli/RESULTS.md`), on the CPU and on a GPU. If they're quantized to
-      shrink the download, measure the quantized ones the same way.
+- [x] Export the three to ONNX, and check that the ONNX models score the same
+      as the PyTorch ones on the evaluation sets, on the CPU and on a GPU.
+      Done in desktop transition 4/5: `ml/extraction` gives the same
+      results file byte for byte on DirectML and on the CPU; NLI on KLUE-NLI
+      dev and the novel set differs by at most 1e-5 in probability, with no
+      flag changed, on an NVIDIA GPU, an AMD integrated GPU and the CPU.
+- [ ] If they're quantized to shrink the download, measure the quantized ones
+      the same way.
 - [ ] Publish them in a public Hugging Face repository under CC BY-SA 4.0,
       with model cards that credit the training data: KorNLI (Ham et al.,
       2020, kakaobrain/kor-nlu-datasets) and KLUE (Park et al., 2021,
@@ -98,14 +103,25 @@ Windows 10 and Windows 11 PC; the novels are still there after the update.
 
 ## 5. GPU and CPU
 
-**Now:** development runs PyTorch on the CPU (`torch ...+cpu`).
+**Now:** the models run with ONNX Runtime (`onnxruntime-directml`): on the
+GPU through DirectML, else on the CPU (`INFERENCE_DEVICE`,
+`backend/infra/inference_client.py`).
 
 **To do:**
-- [ ] Before building on it, check the state of DirectML in ONNX Runtime
-      (Microsoft has been moving Windows GPU inference to Windows ML) and
-      pick the execution provider accordingly.
+- [x] Check the state of DirectML in ONNX Runtime and pick the execution
+      provider. DirectML is in maintenance mode (security fixes only; new
+      work goes to Windows ML), but `onnxruntime-directml` still ships
+      (1.24.4, March 2026), runs on every DirectX 12 GPU and is one pip
+      package. Windows ML's Python path (`onnxruntime-windowsml` and its
+      execution provider catalog) was still young, with crashes reported
+      when a catalog provider is selected. Chosen: DirectML, behind the
+      InferenceClient interface, so moving to Windows ML later touches only
+      `infra/inference_client.py`. Look again before the first release.
 - [ ] Test on an NVIDIA GPU, an AMD or Intel GPU, and a PC with no usable GPU:
       the same flags on each, and a fallback to the CPU when the GPU fails.
+      Done on one laptop (RTX 3070 Laptop, its AMD integrated GPU and the
+      CPU: the same NLI flags); the fallback is unit-tested. Still to do on
+      a desktop AMD or Intel GPU and a PC with no GPU.
 - [ ] Measure a typical episode's validation time on the CPU, and say in the
       README what to expect.
 

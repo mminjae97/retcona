@@ -70,8 +70,8 @@ APP_HANDLERS: dict[str, Callable[[], None]] = {
 
 def load_resources() -> None:
     """The models (NLI, NER, QA, and the extraction rules' part-of-speech
-    tagger) now, not inside the first job: loading takes a while (a ~440 MB
-    download, for a Hugging Face checkpoint not cached yet). If it fails, the
+    tagger) now, not inside the first job: loading takes a while (three ~420
+    MB models read and prepared, on the GPU if there is one). If it fails, the
     runner still starts; the first job that needs them tries again."""
     logger.info("Loading the models")
     try:

@@ -33,3 +33,5 @@ python evaluate.py --model runs/klue --errors --latency
 ```
 
 Tokens are labelled from the characters they cover (a token's label is that of its first character). A token that runs a name and a particle together (`스타뎀의`) can only be labelled as a whole, so the name comes back with its particle; about 5% of KLUE-NER dev sentences have such a token. `data/` and `runs/` aren't committed.
+
+The backend runs the model with ONNX Runtime: export it with `python ../export_onnx.py ner runs/klue` (into `runs/klue/onnx`; needs `onnx`, `onnxscript` and `onnxruntime` besides `requirements.txt`).

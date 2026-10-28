@@ -14,7 +14,7 @@ The gold was written by hand, by one person, from the sentences as a reader woul
 
 ## Setup
 
-The backend's environment (`pip install -e backend`) with the NER and QA models trained in `ml/ner` and `ml/qa` (the NLI model isn't needed). No database.
+The backend's environment (`pip install -e backend`) with the NER and QA models trained in `ml/ner` and `ml/qa` and exported to ONNX (`ml/export_onnx.py`, see their READMEs; the NLI model isn't needed). It runs them as the backend does, on the GPU or the CPU (`INFERENCE_DEVICE`), with the same results. No database.
 
 ## Steps
 
