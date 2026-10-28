@@ -29,7 +29,9 @@ queued -> running -> succeeded | failed. Steps:
    kept either way (only empty attributes are filled in).
 
 A failure is recorded on the run as an error code the editor turns into a
-message: episode_missing, empty_manuscript, inference_failed, internal.
+message: episode_missing, empty_manuscript, inference_failed, internal. A novel
+found in the trash at step 2 or 5 isn't a failure: the run is left as it is
+(pipeline/in_trash.py).
 """
 
 import logging
@@ -38,7 +40,6 @@ from datetime import datetime
 from typing import NamedTuple
 
 from sqlalchemy import delete, func, select, update
-from sqlalchemy.orm import Session
 
 from ai.nli_rerank import InferenceError
 from models.character import Character
@@ -46,13 +47,13 @@ from models.claim import Claim, ContradictionFlag
 from models.db import SessionLocal
 from models.episode import Episode
 from models.location import Location
-from models.novel import Novel
 from models.validation_run import ValidationRun
 from pipeline.claim_links import apply_choices, load_choices
 from pipeline.context_bundle import deaths_before, get_context_bundle
 from pipeline.dismissals import dismissal_key, dismissed_keys
 from pipeline.entities import Match, match_and_register, resolve_subjects
 from pipeline.extract_claims import ExtractedClaim, Extraction, extract_claims
+from pipeline.in_trash import NovelInTrash, lock_novel
 from pipeline.judges import Flag, judge_appearance, judge_location, judge_timeline
 from pipeline.merge import apply_new_information, merge_and_dedupe
 
@@ -91,15 +92,6 @@ def _finish_failed(novel_id: uuid.UUID, run_id: uuid.UUID, code: str) -> None:
         db.commit()
 
 
-def _lock_novel(db: Session, novel_id: uuid.UUID) -> None:
-    # A soft-deleted novel's runs have nowhere to show their results.
-    novel = db.scalar(
-        select(Novel.id).where(Novel.id == novel_id, Novel.deleted_at.is_(None)).with_for_update()
-    )
-    if novel is None:
-        raise RunFailed("episode_missing")
-
-
 class _Input(NamedTuple):
     content: str
     content_updated_at: datetime
@@ -112,10 +104,11 @@ class _Input(NamedTuple):
 
 def _read_input(novel_id: uuid.UUID, episode_id: uuid.UUID) -> _Input:
     with SessionLocal() as db:
+        lock_novel(db, novel_id)
         row = db.execute(
-            select(Episode.content, Episode.updated_at, Episode.episode_index)
-            .join(Novel, Novel.id == Episode.novel_id)
-            .where(Episode.id == episode_id, Episode.novel_id == novel_id, Novel.deleted_at.is_(None))
+            select(Episode.content, Episode.updated_at, Episode.episode_index).where(
+                Episode.id == episode_id, Episode.novel_id == novel_id
+            )
         ).one_or_none()
         if row is None:
             raise RunFailed("episode_missing")
@@ -214,7 +207,7 @@ def _store(
     cards: dict[str, dict],
 ) -> None:
     with SessionLocal() as db:
-        _lock_novel(db, novel_id)
+        lock_novel(db, novel_id)
         run = db.scalar(
             select(ValidationRun).where(ValidationRun.id == run_id, ValidationRun.novel_id == novel_id)
         )
@@ -349,6 +342,8 @@ def validate_episode(novel_id: uuid.UUID, run_id: uuid.UUID) -> None:
             run_input.refs,
             cards,
         )
+    except NovelInTrash:
+        logger.info("Validation run %s: its novel is in the trash; left as it is", run_id)
     except RunFailed as exc:
         _finish_failed(novel_id, run_id, exc.code)
     except Exception:

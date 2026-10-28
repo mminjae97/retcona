@@ -41,8 +41,12 @@ Claim extraction (design doc 7.1.1) runs two more models in the same process, th
 
 The LLM isn't chosen yet (chapter 5). It's used for OOC judgment only, set in `LLM_MODEL_JUDGMENT` (`infra/llm_client.py`); claim extraction doesn't use one. Until then `LLM_PROVIDER=mock` (`infra/mock_llm.py`) is a stand-in that judges nothing. Failures are recorded on the run as a code: `abandoned`, `episode_missing`, `empty_manuscript`, `inference_failed` (the NLI, NER or QA model couldn't be downloaded, loaded or run), `internal`.
 
+## Trash
+
+Deleting a novel (`DELETE /novels/{id}`) moves it to the trash (`novels.deleted_at`). `GET /novels/trash` lists those, with `purge_after`, 30 days later (`TRASH_KEPT`, `models/novel.py`); `POST /novels/{id}/restore` brings one back until then. The `empty_trash` job (`pipeline/empty_trash.py`) deletes the novels past their 30 days for good, with every row under their `novel_id`, one novel per transaction; the API server queues it right after it starts and then every hour (`api/main.py`) — unless one is still queued or running —, so a novel past its 30 days while the app was closed goes at the next start, and can still be restored until then. A job that finds its novel in the trash — before it starts or by the time it writes — ends without touching its row (`pipeline/in_trash.py`), so after a restore its run or revalidation reads as `abandoned` — to start again — rather than as failed on a missing episode, and a pick goes back to pending.
+
 ## Design principles (must follow)
 
-- Every `models/`, `pipeline/` function takes `novel_id` as a required argument (10.1) — blocks isolation gaps at the code level
+- Every `models/`, `pipeline/` function takes `novel_id` as a required argument (10.1) — blocks isolation gaps at the code level. The one exception is the trash (`pipeline/empty_trash.py`): its pass lists the novels past their days across the app, then deletes each with its own `novel_id` (`_purge`)
 - `pipeline/` and `ai/` hold only business logic; queue/storage/inference/LLM access always goes through `infra/` interfaces (10.4.3)
 - The 3 judgment modules inside `pipeline/` share the same interface (`claims + context_bundle` in → `flags` out) (6.2)

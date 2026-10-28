@@ -7,7 +7,8 @@ one on the same database runs no jobs).
 """
 
 import asyncio
-from contextlib import asynccontextmanager
+import logging
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Security
 from fastapi.responses import JSONResponse
@@ -23,7 +24,17 @@ from api.relations import router as relations_router
 from api.settings import router as settings_router
 from infra.queue_client import get_queue_client
 from models.db import check_database
+from pipeline.empty_trash import request_empty_trash
 from workers.runner import JobRunner
+
+logger = logging.getLogger(__name__)
+
+# How often the trash is emptied while the app runs (design doc 2.6), the first
+# time right after it starts. Hourly rather than daily: a pass with nothing to
+# delete is one query, none is queued while one is pending, a pass that failed
+# is tried again within the hour, and a timer this short isn't thrown off much
+# by the PC sleeping.
+EMPTY_TRASH_EVERY_SECONDS = 3600.0
 
 # With no accounts, these keep a web page open in the author's browser from
 # using this API (design doc 10.4.2):
@@ -78,8 +89,21 @@ async def lifespan(app: FastAPI):
     runner = JobRunner(get_queue_client())
     await asyncio.to_thread(runner.prepare)
     runner.start()
+    trash = asyncio.create_task(_empty_trash_hourly())
     yield
+    trash.cancel()
+    with suppress(asyncio.CancelledError):
+        await trash
     await asyncio.to_thread(runner.stop)
+
+
+async def _empty_trash_hourly() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(request_empty_trash)
+        except Exception:
+            logger.exception("Could not queue emptying the trash; trying again in %d s", EMPTY_TRASH_EVERY_SECONDS)
+        await asyncio.sleep(EMPTY_TRASH_EVERY_SECONDS)
 
 
 app = FastAPI(title="Retcona API", lifespan=lifespan, dependencies=_CLIENT)

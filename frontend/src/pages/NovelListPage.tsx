@@ -1,11 +1,12 @@
 // Novel list (design doc 2.6): the screen the app opens on. There are no
 // accounts: create, rename, open (episodes · settings · relationship graph ·
-// timeline) and delete the author's novels.
+// timeline) and delete the author's novels — to the trash, linked at the
+// bottom with how many it holds.
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, describeError } from "../api/client";
-import { createNovel, deleteNovel, listNovels, renameNovel } from "../api/novels";
+import { createNovel, deleteNovel, listNovels, listTrash, renameNovel } from "../api/novels";
 import type { NovelPublic } from "../api/novels";
 import "./NovelListPage.css";
 
@@ -30,20 +31,38 @@ export default function NovelListPage() {
   // double-click on "다시 시도"), before a state update could re-render and
   // disable the button.
   const novelsLoadingRef = useRef(false);
+  // How many novels the trash holds; null until known (the link then shows no count).
+  const [trashCount, setTrashCount] = useState<number | null>(null);
+  // Numbers the trash-count requests: only the latest one's answer is shown,
+  // so a slow earlier one can't overwrite the count after a delete.
+  const trashCountRequestRef = useRef(0);
 
   function dropNovel(id: string) {
     setNovels((prev) => prev?.filter((n) => n.id !== id) ?? null);
   }
 
+  // The trash count comes along, so "다시 시도" retries it too.
   function loadNovels() {
     if (novelsLoadingRef.current) return;
     novelsLoadingRef.current = true;
     setNovelsError(null);
+    loadTrashCount();
     listNovels()
       .then(setNovels)
       .catch((err) => setNovelsError(describeError(err)))
       .finally(() => {
         novelsLoadingRef.current = false;
+      });
+  }
+
+  function loadTrashCount() {
+    const request = ++trashCountRequestRef.current;
+    listTrash()
+      .then((trash) => {
+        if (request === trashCountRequestRef.current) setTrashCount(trash.length);
+      })
+      .catch(() => {
+        if (request === trashCountRequestRef.current) setTrashCount(null);
       });
   }
 
@@ -113,7 +132,7 @@ export default function NovelListPage() {
 
   async function handleDelete(novel: NovelPublic) {
     if (deleting !== null) return;
-    if (!window.confirm(`"${novel.title}"을(를) 삭제하시겠습니까?`)) return;
+    if (!window.confirm(`"${novel.title}"을(를) 휴지통으로 옮길까요? 30일 안에는 휴지통에서 되살릴 수 있습니다.`)) return;
     setError(null);
     setDeleting(novel.id);
     try {
@@ -125,6 +144,7 @@ export default function NovelListPage() {
       else setError(describeError(err));
     } finally {
       setDeleting(null);
+      loadTrashCount();
     }
   }
 
@@ -206,6 +226,10 @@ export default function NovelListPage() {
           </ul>
         )}
       </section>
+
+      <Link className="trash-link" to="/trash">
+        휴지통{trashCount !== null && ` (${trashCount})`}
+      </Link>
     </div>
   );
 }

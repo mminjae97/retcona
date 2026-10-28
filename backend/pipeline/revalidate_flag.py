@@ -20,7 +20,8 @@ queued -> running -> succeeded | failed. Steps:
 
 A failure is recorded as an error code the result screen turns into a
 message: flag_missing, flag_handled, card_missing, setting_changed,
-inference_failed, internal.
+inference_failed, internal. A novel found in the trash at step 4 isn't a
+failure: the revalidation is left as it is (pipeline/in_trash.py).
 """
 
 import logging
@@ -36,9 +37,9 @@ from models.claim import Claim, ContradictionFlag
 from models.db import SessionLocal
 from models.flag_revalidation import FlagRevalidation
 from models.location import Location
-from models.novel import Novel
 from pipeline.context_bundle import Card, source_episodes, text_values
 from pipeline.entities import normalize_name
+from pipeline.in_trash import NovelInTrash, lock_novel
 from pipeline.judges import CONTRADICTION_THRESHOLD, rejudge
 
 logger = logging.getLogger(__name__)
@@ -160,9 +161,7 @@ def _judge(novel_id: uuid.UUID, flag_id: uuid.UUID) -> _Judged:
 
 def _store(novel_id: uuid.UUID, revalidation_id: uuid.UUID, judged: _Judged) -> None:
     with SessionLocal() as db:
-        novel = db.scalar(select(Novel.id).where(Novel.id == novel_id, Novel.deleted_at.is_(None)).with_for_update())
-        if novel is None:
-            raise RevalidationFailed("flag_missing")
+        lock_novel(db, novel_id)
         revalidation = db.scalar(
             select(FlagRevalidation).where(
                 FlagRevalidation.id == revalidation_id, FlagRevalidation.novel_id == novel_id
@@ -196,6 +195,8 @@ def revalidate_flag(novel_id: uuid.UUID, revalidation_id: uuid.UUID) -> None:
         return
     try:
         _store(novel_id, revalidation_id, _judge(novel_id, flag_id))
+    except NovelInTrash:
+        logger.info("Revalidation %s: its novel is in the trash; left as it is", revalidation_id)
     except RevalidationFailed as exc:
         _finish_failed(novel_id, revalidation_id, exc.code)
     except Exception:
