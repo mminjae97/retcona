@@ -14,7 +14,7 @@ from infra.span_inference import NamedEntity
 
 
 class InferenceError(Exception):
-    """The model couldn't be loaded (a download on first use) or run."""
+    """The model couldn't be loaded (not exported, or unreadable) or run."""
 
 
 def load_models() -> str:

@@ -103,7 +103,9 @@ class OnnxModel:
     """One exported model (ml/export_onnx.py): its tokenizer, labels and an
     ONNX Runtime session, on the GPU if asked and it works there, else on the
     CPU. A GPU that fails a run — out of memory, a driver reset — gives way
-    to the CPU for the rest of the process, and the run is done again there."""
+    to the CPU for the rest of the process, and the run is done again there;
+    a run that fails on the CPU too was the input's fault, and the GPU stays.
+    One run at a time: a DirectML session can't run on two threads at once."""
 
     def __init__(self, directory: Path, device: str) -> None:
         import onnxruntime
@@ -118,17 +120,23 @@ class OnnxModel:
         self._lock = threading.Lock()
         self.on_gpu = False
         self._session = None
-        if device != "cpu" and _DIRECTML in onnxruntime.get_available_providers():
-            try:
-                self._session = _session(self._path, _DIRECTML)
-                self.on_gpu = _DIRECTML in self._session.get_providers()
-            except Exception:
-                # Any exception: DirectML's errors can come back undecodable
-                # (a UnicodeDecodeError on a non-English Windows).
-                logger.warning("Could not run %s on the GPU; using the CPU", directory, exc_info=True)
-        if not self.on_gpu:
-            if device == "gpu":
-                logger.warning("No GPU ONNX Runtime can use (DirectML); %s runs on the CPU", directory)
+        if device != "cpu":
+            if _DIRECTML not in onnxruntime.get_available_providers():
+                if device == "gpu":
+                    logger.warning("This ONNX Runtime has no DirectML; %s runs on the CPU", directory)
+            else:
+                try:
+                    self._session = _session(self._path, _DIRECTML)
+                except Exception:
+                    # Any exception: DirectML's errors can come back undecodable
+                    # (a UnicodeDecodeError on a non-English Windows).
+                    logger.warning("Could not open %s on the GPU; it runs on the CPU", directory, exc_info=True)
+                else:
+                    # A session DirectML found no GPU for runs on the CPU as it is.
+                    self.on_gpu = _DIRECTML in self._session.get_providers()
+                    if not self.on_gpu:
+                        logger.warning("DirectML found no GPU for %s; it runs on the CPU", directory)
+        if self._session is None:
             self._session = _session(self._path, _CPU)
 
     @property
@@ -147,20 +155,18 @@ class OnnxModel:
     def run(self, outputs: list[str], encoded) -> list[np.ndarray]:
         feed = {name: np.asarray(encoded[name], dtype=np.int64) for name in ("input_ids", "attention_mask")}
         with self._lock:
-            session, on_gpu = self._session, self.on_gpu
-        try:
-            return session.run(outputs, feed)
-        except Exception:
-            if not on_gpu:
-                raise
-            logger.warning("%s failed on the GPU; using the CPU from now on", self.directory, exc_info=True)
-            with self._lock:
-                # Unless another run already did.
-                if self._session is session:
-                    self._session = _session(self._path, _CPU)
-                    self.on_gpu = False
-                session = self._session
-            return session.run(outputs, feed)
+            try:
+                return self._session.run(outputs, feed)
+            except Exception as exc:
+                if not self.on_gpu:
+                    raise
+                gpu_error = exc
+            cpu = _session(self._path, _CPU)
+            # Raised as it is if the CPU fails too: then it's the input, and the GPU stays.
+            result = cpu.run(outputs, feed)
+            logger.warning("%s failed on the GPU; using the CPU from now on", self.directory, exc_info=gpu_error)
+            self._session, self.on_gpu = cpu, False
+            return result
 
 
 def model_directory(name: str) -> Path:
@@ -206,9 +212,11 @@ class OnnxInferenceClient(InferenceClient):
             try:
                 model = self._model(kind)
                 loaded.append(f"{kind.upper()} {model.directory} on the {model.device}")
-            except Exception as exc:  # noqa: BLE001 — whatever the load hit, it's a warning here
-                logger.warning("Could not load the %s model: %s", kind.upper(), exc)
-        return ", ".join(loaded) or "no models"
+            except Exception as exc:  # whatever the load hit, it's a warning here
+                logger.warning("Could not load the %s model: %s", kind.upper(), exc, exc_info=True)
+        if not loaded:
+            raise RuntimeError("Could not load any model (see the warnings above)")
+        return ", ".join(loaded)
 
     def rerank(self, query: str, candidates: list[str]) -> list[float]:
         raise NotImplementedError

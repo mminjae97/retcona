@@ -35,7 +35,9 @@ def model_dir(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _onnxruntime(monkeypatch, *, directml: bool, gpu_session_fails_to_open=False, gpu_runs_fail=False):
+def _onnxruntime(
+    monkeypatch, *, directml: bool, gpu_session_fails_to_open=False, gpu_runs_fail=False, cpu_runs_fail=False, no_gpu_found=False
+):
     import onnxruntime
 
     available = ["DmlExecutionProvider", "CPUExecutionProvider"] if directml else ["CPUExecutionProvider"]
@@ -46,7 +48,11 @@ def _onnxruntime(monkeypatch, *, directml: bool, gpu_session_fails_to_open=False
         opened.append(provider)
         if provider == "DmlExecutionProvider" and gpu_session_fails_to_open:
             raise UnicodeDecodeError("utf-8", b"\xb8", 0, 1, "invalid start byte")
-        return _Session(provider, fails=provider == "DmlExecutionProvider" and gpu_runs_fail)
+        if provider == "DmlExecutionProvider" and no_gpu_found:
+            # DirectML opened the session, with no GPU to put it on.
+            return _Session("CPUExecutionProvider", fails=cpu_runs_fail)
+        gpu = provider == "DmlExecutionProvider"
+        return _Session(provider, fails=gpu_runs_fail if gpu else cpu_runs_fail)
 
     monkeypatch.setattr(inference_client, "_session", session)
     return opened
@@ -75,6 +81,23 @@ def test_a_gpu_that_fails_a_run_gives_way_to_the_cpu_for_good(model_dir, monkeyp
     assert opened == ["DmlExecutionProvider", "CPUExecutionProvider"]
 
 
+def test_a_run_that_fails_on_the_cpu_too_is_the_inputs_fault_and_the_gpu_stays(model_dir, monkeypatch):
+    _onnxruntime(monkeypatch, directml=True, gpu_runs_fail=True, cpu_runs_fail=True)
+    model = OnnxModel(model_dir, "auto")
+    with pytest.raises(UnicodeDecodeError):
+        model.run(["logits"], _FEED)
+    assert model.on_gpu
+
+
+def test_a_session_directml_found_no_gpu_for_is_kept_on_the_cpu(model_dir, monkeypatch):
+    opened = _onnxruntime(monkeypatch, directml=True, no_gpu_found=True)
+    model = OnnxModel(model_dir, "auto")
+    assert not model.on_gpu
+    assert model.run(["logits"], _FEED)[0][0, 0] == 1.0
+    # Not opened a second time.
+    assert opened == ["DmlExecutionProvider"]
+
+
 def test_a_gpu_session_that_wont_open_leaves_the_cpu(model_dir, monkeypatch):
     opened = _onnxruntime(monkeypatch, directml=True, gpu_session_fails_to_open=True)
     for device in ("auto", "gpu"):
@@ -92,11 +115,16 @@ def test_cpu_never_tries_the_gpu_and_no_directml_means_the_cpu(model_dir, monkey
 
 
 def test_a_failure_on_the_cpu_is_raised(model_dir, monkeypatch):
-    _onnxruntime(monkeypatch, directml=False)
+    _onnxruntime(monkeypatch, directml=False, cpu_runs_fail=True)
     model = OnnxModel(model_dir, "auto")
-    model._session.fails = True
     with pytest.raises(UnicodeDecodeError):
         model.run(["logits"], _FEED)
+
+
+def test_loading_no_model_at_all_is_an_error(tmp_path):
+    client = inference_client.OnnxInferenceClient(str(tmp_path), str(tmp_path), str(tmp_path))
+    with pytest.raises(RuntimeError, match="any model"):
+        client.load()
 
 
 def test_a_model_is_its_exported_directory_or_a_run_with_one_in_onnx(tmp_path):
