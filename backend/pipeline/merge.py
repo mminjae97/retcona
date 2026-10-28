@@ -148,7 +148,7 @@ def apply_new_information(
                 if not attrs.get(key) or from_episodes.get(key) == source:
                     attrs[key] = value
                     sources[key] = {"episode_id": source, "evidence": evidence}
-            # Reassigned, not mutated: SQLAlchemy doesn't see changes inside a JSONB value.
+            # Reassigned, not mutated: SQLAlchemy doesn't see changes inside a JSON value.
             setattr(card, attrs_field, attrs)
             card.attr_sources = sources
 

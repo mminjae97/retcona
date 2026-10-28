@@ -1,8 +1,9 @@
 """Embedding wrapper (design doc chapter 5).
 
 Hybrid of KURE-v1 (semantic) + BM25 (keyword matching).
-Narrows down relevant past episode manuscripts/settings via pgvector similarity
-search, then reranks the final Top-K with the cross-encoder in ai/reranker.py.
+Narrows down relevant past episode manuscripts/settings via vector similarity
+search (sqlite-vec), then reranks the final Top-K with the cross-encoder in
+ai/reranker.py.
 """
 
 # TODO: load KURE-v1 via sentence-transformers, build a BM25 index with rank_bm25.BM25Okapi

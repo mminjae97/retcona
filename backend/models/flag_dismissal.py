@@ -19,8 +19,7 @@ question for the author, so the setting is part of it.
 
 import uuid
 
-from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import ForeignKey, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, NovelScopedMixin, TimestampMixin
@@ -34,9 +33,9 @@ class FlagDismissal(Base, NovelScopedMixin, TimestampMixin):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    episode_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("episodes.id"), nullable=False)
-    subject_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    episode_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False, index=True)
+    subject_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     attribute: Mapped[str] = mapped_column(String, nullable=False)
     said: Mapped[str] = mapped_column(Text, nullable=False)
     reference: Mapped[str] = mapped_column(Text, nullable=False)

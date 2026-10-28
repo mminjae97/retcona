@@ -25,21 +25,20 @@ novel_id is in its payload, which the job filters by.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, Integer, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import JSON, Index, Integer, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
-from models.base import Base, TimestampMixin
+from models.base import Base, TimestampMixin, UtcDateTime
 
 
 class Job(Base, TimestampMixin):
     __tablename__ = "jobs"
     __table_args__ = (Index("ix_jobs_status_created", "status", "created_at"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     type: Mapped[str] = mapped_column(String, nullable=False)
-    target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
-    payload: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}", nullable=False)
+    target_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}", nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="queued")  # queued | running
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(UtcDateTime)

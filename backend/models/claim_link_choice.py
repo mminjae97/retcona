@@ -15,8 +15,7 @@ name the claim gave for its subject (none for a bare pronoun).
 
 import uuid
 
-from sqlalchemy import ForeignKey, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import ForeignKey, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, NovelScopedMixin, TimestampMixin
@@ -26,7 +25,7 @@ class ClaimLinkChoice(Base, NovelScopedMixin, TimestampMixin):
     __tablename__ = "claim_link_choices"
     __table_args__ = (UniqueConstraint("episode_id", "said", name="uq_claim_link_choices_key"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    episode_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("episodes.id"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    episode_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False, index=True)
     said: Mapped[str] = mapped_column(Text, nullable=False)
-    subject_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    subject_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)

@@ -11,13 +11,15 @@ Follows the code structure from design doc section 6.2 as-is. Each module's resp
 | `workers/runner.py` | The job runner: runs the queue's jobs ("run validation", revalidation, a pick's judgment) one at a time in a thread of the API server, which starts it. See "Validation runs" below | Sections 2.2, 10.2 |
 | `infra/` | QueueClient (the job queue, a table in the database) · StorageClient · InferenceClient · LLMClient interfaces and implementations | Section 10.4.3 |
 
-## Startup checks
+## The database
 
-The API server refuses to start, with an error saying what to do, when the database is behind the migrations in `db/migrations` (including one with none applied) — run `alembic upgrade head` from `db/`.
+One SQLite file (design doc 10.1): `%LOCALAPPDATA%\Retcona\retcona.db` (elsewhere than Windows, `~/.local/share/retcona/retcona.db`), or the file `DATABASE_URL` names (`sqlite:///C:/path/to/file.db`). Nothing to install or start: the API server creates it on its first start and, when a new version adds migrations (`db/migrations`), upgrades it before serving anything — copying it to `retcona.before-upgrade.db` beside it first, and in one transaction, so an upgrade that fails changes nothing (`models/db.py`, `upgrade_database`). The runner lock (`infra/queue_client.py`) is a lock on `retcona.db.runner-lock` beside it.
 
-A database at a revision this code doesn't know (a newer release migrated it), or an install without `db/migrations`, is checked against the models instead: it starts, with a warning, if nothing this code needs is missing. It runs this through `models/db.py`'s `check_database` (`check_schema_is_current` there).
+One write transaction at a time: every transaction begins with `BEGIN IMMEDIATE`, taking the database's write lock at once, and another one waits up to 30 seconds for it rather than failing (`models/db.py`). Every foreign key cascades, so deleting a novel deletes everything under it (the trash). Timestamps are kept in UTC (`models/base.py`, `UtcDateTime`).
 
-Database connections time out after 10 seconds by default (see `.env.example`).
+At startup, after upgrading, the API server checks the database is at the migrations' head. A database at a revision this code doesn't know (a newer version migrated it, and an older one was installed again), or an install without `db/migrations`, is checked against the models instead: it starts, with a warning, if nothing this code needs is missing (`check_database`, `check_schema_is_current`).
+
+The tests use a database of their own in a temporary folder (`tests/conftest.py`), never the app's.
 
 Logging: the app's own packages (`infra/app_logging.py`) log at uvicorn's `--log-level` (INFO when run without uvicorn), unless a `--log-config` set their level itself. With no logging configured, they print in uvicorn's format through Python's last-resort handler; anything that configures the root logger (a `--log-config`, `logging.basicConfig`, Cloud Logging) takes over completely, with nothing printed twice.
 

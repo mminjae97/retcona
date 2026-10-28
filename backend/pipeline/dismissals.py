@@ -8,7 +8,7 @@ import uuid
 from typing import NamedTuple
 
 from sqlalchemy import delete, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.orm import Session
 
 from models.flag_dismissal import FlagDismissal
@@ -56,7 +56,7 @@ def record_dismissal(db: Session, novel_id: uuid.UUID, episode_id: uuid.UUID, ke
     db.execute(
         insert(FlagDismissal)
         .values(novel_id=novel_id, episode_id=episode_id, **key._asdict())
-        .on_conflict_do_nothing(constraint="uq_flag_dismissals_key")
+        .on_conflict_do_nothing(index_elements=["episode_id", "subject_id", "attribute", "said", "reference"])
     )
 
 

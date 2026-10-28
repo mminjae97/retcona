@@ -9,8 +9,7 @@ attr_sources: which episode each geo_attrs key was filled in from, as on
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, Integer, String
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import JSON, ForeignKey, Index, Integer, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, NovelScopedMixin, TimestampMixin
@@ -26,11 +25,11 @@ STATE_ATTR_KEYS = ("state",)
 class Location(Base, NovelScopedMixin, TimestampMixin):
     __tablename__ = "locations"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String, nullable=False)
     source: Mapped[str] = mapped_column(String, default="manual")
-    geo_attrs: Mapped[dict] = mapped_column(JSONB, default=dict)  # geographic features, distance/connections to other locations
-    attr_sources: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}", nullable=False)
+    geo_attrs: Mapped[dict] = mapped_column(JSON, default=dict)  # geographic features, distance/connections to other locations
+    attr_sources: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}", nullable=False)
 
 
 class LocationStateHistory(Base, NovelScopedMixin, TimestampMixin):
@@ -40,8 +39,8 @@ class LocationStateHistory(Base, NovelScopedMixin, TimestampMixin):
         Index("ix_location_state_history_novel_loc_story_ts", "novel_id", "location_id", "story_timestamp"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    location_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("locations.id"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    location_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("locations.id", ondelete="CASCADE"), nullable=False, index=True)
     episode_index: Mapped[int] = mapped_column(Integer, nullable=False)
     story_timestamp: Mapped[datetime | None] = mapped_column()
-    state: Mapped[dict] = mapped_column(JSONB, default=dict)
+    state: Mapped[dict] = mapped_column(JSON, default=dict)

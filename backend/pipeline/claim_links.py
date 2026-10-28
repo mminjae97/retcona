@@ -11,7 +11,7 @@ it before judging, so the same sentence isn't asked about again.
 import uuid
 
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.orm import Session
 
 from models.claim_link_choice import ClaimLinkChoice
@@ -46,7 +46,7 @@ def record_choice(
     statement = insert(ClaimLinkChoice).values(
         novel_id=novel_id, episode_id=episode_id, said=key, subject_id=subject_id
     )
-    db.execute(statement.on_conflict_do_update(constraint="uq_claim_link_choices_key", set_={"subject_id": subject_id}))
+    db.execute(statement.on_conflict_do_update(index_elements=["episode_id", "said"], set_={"subject_id": subject_id}))
 
 
 def apply_choices(

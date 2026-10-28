@@ -6,42 +6,31 @@ runner (workers/runner.py) needs: hold_runner_lock() and recover() at startup
 while idle. The API and the runner use only this
 interface; DatabaseQueueClient keeps the queue in a table of the app's own
 database (models/job.py), so jobs waiting survive closing the app and no other
-server is needed. It is written for PostgreSQL (the runner lock is an advisory
-lock, the payload JSONB); moving to SQLite (design doc 8.1) means a new
-implementation of this interface, with a lock on a file beside the database
-in place of the advisory lock.
+server is needed.
 
 Delivery is at least once (10.4.4): a job the app closed in the middle of is
 run again, so every job checks its row is still waiting for it before doing
 anything (its idempotency record). Only one runner takes jobs from a database
-(hold_runner_lock). One edge is left: a second backend process on the same
-database that takes the lock after a database restart can run again a job the
-first is still in the middle of; each job writes its results only while its
-row is still waiting for it, under a row lock, so the later one is discarded.
+(hold_runner_lock): the process that holds a lock on a file beside it.
 """
 
 import functools
+import os
 import threading
 import uuid
 from abc import ABC, abstractmethod
-from typing import Any, NamedTuple
+from typing import IO, Any, NamedTuple
 
-from sqlalchemy import (
-    ColumnElement,
-    Connection,
-    delete,
-    event,
-    exists,
-    func,
-    select,
-    text,
-    update,
-)
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import ColumnElement, delete, event, exists, func, select, update
 from sqlalchemy.orm import Session
 
-from models.db import SessionLocal, engine
+from models.db import SessionLocal, database_path
 from models.job import Job
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 
 class QueuedJob(NamedTuple):
@@ -71,8 +60,8 @@ class QueueClient(ABC):
     @abstractmethod
     def hold_runner_lock(self) -> bool:
         """Become (or still be) the one runner of this database, for as long as
-        this process lives; False if another process is, or the lock was lost
-        (the database restarted). Only the holder may recover and take jobs."""
+        this process lives; False if another process is. Only the holder may
+        recover and take jobs."""
 
     @abstractmethod
     def recover(self) -> int:
@@ -104,7 +93,9 @@ def job_pending(target_id: Any) -> ColumnElement[bool]:
 
 def job_type_pending(type: str) -> ColumnElement[bool]:
     """SQL: a job of this type is still queued or running — for a job with no
-    row of its own (empty_trash), which needs only one at a time."""
+    row of its own (empty_trash), which needs only one at a time. Checked and
+    enqueued in one transaction, which no other can write in between
+    (models/db.py), it's queued at most once."""
     return exists().where(Job.type == type)
 
 
@@ -125,22 +116,25 @@ def _forget_enqueued(session: Session) -> None:
     session.info.pop(_ENQUEUED, None)
 
 
-# pg_try_advisory_lock's key: any number no other lock in this database uses.
-_RUNNER_LOCK_KEY = 0x7265_7463  # "retc"
-# Whether this connection still holds it (a single-bigint advisory lock shows
-# in pg_locks as objid = the key's low 32 bits, objsubid = 1).
-_STILL_HELD = text(
-    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid()"
-    " AND classid = 0 AND objid = :key AND objsubid = 1 AND granted)"
-).bindparams(key=_RUNNER_LOCK_KEY)
+def _try_lock(file: IO[bytes]) -> bool:
+    """An exclusive lock on the file, held until it's closed — which the OS
+    does when the process ends, however it ends. False if another holds it."""
+    try:
+        if os.name == "nt":
+            file.seek(0)
+            msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
 
 
 class DatabaseQueueClient(QueueClient):
     def __init__(self) -> None:
-        # The connection holding the runner lock, one of the engine's pool kept
-        # checked out for the process's lifetime: the lock goes with it, also
-        # when the process dies.
-        self._lock_connection: Connection | None = None
+        # The lock file beside the database, kept open and locked for the
+        # process's lifetime once taken.
+        self._lock_file: IO[bytes] | None = None
 
     def enqueue(self, db: Session, type: str, target_id: uuid.UUID | None, payload: dict[str, Any]) -> uuid.UUID:
         job = Job(id=uuid.uuid4(), type=type, target_id=target_id, payload=payload, status="queued")
@@ -173,32 +167,15 @@ class DatabaseQueueClient(QueueClient):
             db.commit()
 
     def hold_runner_lock(self) -> bool:
-        if self._lock_connection is not None:
-            try:
-                held = bool(self._lock_connection.scalar(_STILL_HELD))
-                self._lock_connection.commit()
-                if held:
-                    return True
-            except SQLAlchemyError:
-                # The connection is broken: so is the lock.
-                pass
-            # Gone with its connection (the database restarted): closed for
-            # good rather than returned to the pool, then taken again if free.
-            self._lock_connection.invalidate()
-            self._lock_connection = None
-        connection = engine.connect()
-        try:
-            held = bool(connection.scalar(select(func.pg_try_advisory_lock(_RUNNER_LOCK_KEY))))
-            # Ends the transaction the query opened; the lock is the session's,
-            # and outlasts it.
-            connection.commit()
-        except Exception:
-            connection.close()
-            raise
-        if not held:
-            connection.close()
+        # A file lock isn't lost while its file is open: once taken, it's held.
+        if self._lock_file is not None:
+            return True
+        path = database_path()
+        file = open(path.with_name(f"{path.name}.runner-lock"), "a+b")  # noqa: SIM115 (held open for the process)
+        if not _try_lock(file):
+            file.close()
             return False
-        self._lock_connection = connection
+        self._lock_file = file
         return True
 
     def recover(self) -> int:

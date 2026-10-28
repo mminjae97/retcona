@@ -24,7 +24,10 @@ def require_novel(
     if for_update:
         # Locks the row for the rest of the transaction, re-checking deleted_at
         # under the lock rather than trusting a separate unlocked read — so a
-        # concurrent soft-delete can't race past this check (10.1).
+        # concurrent soft-delete can't race past this check (10.1). On SQLite
+        # the "row lock" is the database's write lock, which the transaction
+        # holds from its start anyway (models/db.py); the code says FOR UPDATE
+        # where it relies on it.
         query = query.with_for_update()
     novel = db.scalar(query)
     if novel is None:

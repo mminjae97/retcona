@@ -14,22 +14,21 @@ whose run is finished already (or was given up on) is skipped.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import JSON, ForeignKey, Index, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
-from models.base import Base, NovelScopedMixin, TimestampMixin
+from models.base import Base, NovelScopedMixin, TimestampMixin, UtcDateTime
 
 
 class ValidationRun(Base, NovelScopedMixin, TimestampMixin):
     __tablename__ = "validation_runs"
     __table_args__ = (Index("ix_validation_runs_novel_episode_created", "novel_id", "episode_id", "created_at"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    episode_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("episodes.id"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    episode_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="queued")  # queued | running | succeeded | failed
     error: Mapped[str | None] = mapped_column(Text)
-    summary: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}", nullable=False)
-    content_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    summary: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}", nullable=False)
+    content_updated_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    started_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
