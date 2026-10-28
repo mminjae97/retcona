@@ -31,13 +31,12 @@ from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from api.deps import require_novel
-from models.character import Character, CharacterStateHistory
+from models.character import Character
 from models.claim import Claim
 from models.claim_link_choice import ClaimLinkChoice
 from models.db import get_db
 from models.flag_dismissal import FlagDismissal
 from models.relation import Relation
-from models.story_event import EventParticipant
 from models.world_setting import WorldSetting
 from pipeline.entities import normalize_name
 
@@ -386,16 +385,9 @@ def delete_character(
     require_novel(db, novel_id, for_update=True)
     character = _get_character(db, novel_id, character_id)
     # What's derived from this character goes with it: its state history and
-    # event participation reference it by foreign key, and relations by id
-    # (no FK, since they point at characters or locations).
-    db.execute(
-        delete(CharacterStateHistory).where(
-            CharacterStateHistory.novel_id == novel_id, CharacterStateHistory.character_id == character_id
-        )
-    )
-    db.execute(
-        delete(EventParticipant).where(EventParticipant.novel_id == novel_id, EventParticipant.character_id == character_id)
-    )
+    # event participation by their foreign keys, which cascade (models/base.py),
+    # and relations here, by id (no FK, since they point at characters or
+    # locations).
     db.execute(
         delete(Relation).where(
             Relation.novel_id == novel_id,

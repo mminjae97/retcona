@@ -718,7 +718,8 @@ pipeline & job runner code
 #### 8.5.4 Schema migrations
 
 - Alembic, as now; the app upgrades the schema at startup after backing up
-  the database file, and restores it if the upgrade fails.
+  the database file, in one transaction, so an upgrade that fails is rolled
+  back as a whole.
 - SQLite's `ALTER TABLE` is limited, so migrations use Alembic's batch mode.
 
 ---

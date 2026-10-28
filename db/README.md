@@ -1,6 +1,6 @@
 # db
 
-Uses Alembic as the schema migration tool (design doc 10.5.4) — adopted from the start so the schema is reproducible anywhere; the desktop app will use it to upgrade the author's database at startup.
+Uses Alembic as the schema migration tool (design doc 10.5.4), on the app's SQLite database (`backend/models/db.py`). The API server applies the migrations itself at startup — it creates the database on the first start, and upgrades it (after copying it aside) when a new version adds migrations — so running them by hand is only needed to write a new one.
 
 ## Usage
 
@@ -11,10 +11,8 @@ alembic revision --autogenerate -m "description"
 alembic upgrade head
 ```
 
-The API server checks at startup that the database is at this directory's head and refuses to start if it's behind (see `backend/README.md`, "Startup checks"), so run `alembic upgrade head` before starting a release that adds a migration.
+The app upgrades its database itself; `alembic upgrade head` by hand doesn't copy it aside first or check that no app is running on it — close the app, and copy `retcona.db` yourself if it holds anything you need.
+
+`alembic` works on the app's database, or the one `DATABASE_URL` names. Migrations are written in batch mode (`render_as_batch`), as SQLite can't alter most of a table in place; a hand-written one uses `op.batch_alter_table` the same way. They run with foreign keys off (a batch rebuild drops and recreates tables, which would otherwise cascade), checked with `PRAGMA foreign_key_check` before the transaction commits. A new foreign key needs `ondelete="CASCADE"` (`tests/test_trash_db.py` checks it).
 
 `env.py` imports `backend/models/__init__.py`, which in turn imports every model module so they're registered on `Base.metadata` before autogenerate runs.
-
-## e2-micro -> Cloud SQL migration (10.5.4)
-
-Migrate using standard `pg_dump`/`pg_restore` (or logical replication). Only the `DATABASE_URL` value needs to change — no application code changes required.

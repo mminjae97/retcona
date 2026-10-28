@@ -14,15 +14,15 @@ Jobs (each takes its row: a job whose row isn't waiting for it is skipped, 10.4.
   good (2.6); enqueued at startup and hourly by api/main.py
 
 At startup the runner takes the database's runner lock — a second backend
-process on the same database runs no jobs (but see infra/queue_client.py on
-a database restart mid-job); the lock is checked again before each job — then queues again the jobs an earlier
-start was in the middle of (10.4.4), and loads the models before taking the
-first job. Taking the lock and recovering are tried once before the API serves
-anything (prepare), so the jobs an earlier start left are queued again before
-any request reads them. A job is acked (leaves the queue) when
-it returns or raises: the jobs record their own failures on their rows, and a
-row a job couldn't record on is failed by the API once no job for it is
-pending (api/episodes.py, abandoned). A job the app closed in the middle of,
+process on the same database runs no jobs; the lock is checked again before
+each job — then queues again the jobs an earlier start was in the middle of
+(10.4.4), and loads the models before taking the first job. Taking the lock
+and recovering are tried once before the API serves anything (prepare), so
+the jobs an earlier start left are queued again before any request reads
+them. A job is acked (leaves the queue) when it returns or raises: the jobs
+record their own failures on their rows, and a row a job couldn't record on
+is failed by the API once no job for it is pending (api/episodes.py,
+abandoned). A job the app closed in the middle of,
 normally or not, is left running and queued again by the next start's
 recovery, which counts it as an attempt: a job that hangs every time is given
 up on after MAX_ATTEMPTS starts however the app was closed, so the jobs behind
@@ -48,7 +48,8 @@ logger = logging.getLogger(__name__)
 # the lock). A job committed in this process wakes it at once
 # (QueueClient.wait_for_job); this is for one another process committed.
 POLL_SECONDS = 5.0
-# How long to wait before trying the queue again after it failed (the database down).
+# How long to wait before trying the queue again after it failed (the database
+# locked past its busy timeout, or unreadable).
 QUEUE_RETRY_SECONDS = 5.0
 # How often a runner without the lock (another backend process has it) tries again.
 LOCK_RETRY_SECONDS = 10.0
@@ -143,8 +144,8 @@ class JobRunner:
         return self._ready
 
     def _still_locked(self) -> bool:
-        # Between jobs: a lock lost with the database (it restarted) may be
-        # another process's now, which then runs the jobs instead.
+        # Between jobs: a QueueClient whose lock can be lost (DatabaseQueueClient's
+        # can't) may find it another process's now, which then runs the jobs instead.
         try:
             if self._queue.hold_runner_lock():
                 return True

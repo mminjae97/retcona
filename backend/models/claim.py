@@ -39,8 +39,7 @@ contradiction_flags: a claim that contradicts the novel's settings (7.2)
 
 import uuid
 
-from sqlalchemy import Float, ForeignKey, Index, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import JSON, Float, ForeignKey, Index, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models.base import Base, NovelScopedMixin, TimestampMixin
@@ -50,24 +49,24 @@ class Claim(Base, NovelScopedMixin, TimestampMixin):
     __tablename__ = "claims"
     __table_args__ = (Index("ix_claims_novel_episode", "novel_id", "episode_id"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    episode_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("episodes.id"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    episode_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False, index=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     claim_type: Mapped[str] = mapped_column(String)  # appearance | behavior (OOC) | location | spacetime
     subject_kind: Mapped[str | None] = mapped_column(String)  # character | location
-    subject_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    subject_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     subject_name: Mapped[str | None] = mapped_column(String)
     evidence_text: Mapped[str | None] = mapped_column(Text)
-    attributes: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}", nullable=False)
-    candidates: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]", nullable=False)
+    attributes: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}", nullable=False)
+    candidates: Mapped[list] = mapped_column(JSON, default=list, server_default="[]", nullable=False)
     link_status: Mapped[str | None] = mapped_column(String)  # None | pending | queued | judging
 
 
 class ContradictionFlag(Base, NovelScopedMixin, TimestampMixin):
     __tablename__ = "contradiction_flags"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    claim_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("claims.id"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    claim_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("claims.id", ondelete="CASCADE"), nullable=False, index=True)
     error_type: Mapped[str] = mapped_column(String, nullable=False)  # appearance | behavior (OOC) | location | spacetime
     attribute: Mapped[str | None] = mapped_column(String)
     confidence: Mapped[float | None] = mapped_column(Float)

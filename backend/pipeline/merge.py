@@ -148,7 +148,7 @@ def apply_new_information(
                 if not attrs.get(key) or from_episodes.get(key) == source:
                     attrs[key] = value
                     sources[key] = {"episode_id": source, "evidence": evidence}
-            # Reassigned, not mutated: SQLAlchemy doesn't see changes inside a JSONB value.
+            # Reassigned, not mutated: SQLAlchemy doesn't see changes inside a JSON value.
             setattr(card, attrs_field, attrs)
             card.attr_sources = sources
 
@@ -162,8 +162,8 @@ def apply_new_information(
         CharacterStateHistory(novel_id=novel_id, character_id=character_id, episode_index=episode_index, state=state)
         for character_id, state in states.items()
     )
-    # (Deleting a location, once there is a way to, deletes these rows first, as
-    # api/settings.py's delete_character does the character's.)
+    # (Deleting a location, once there is a way to, takes these rows with it:
+    # location_id's foreign key cascades.)
     db.execute(
         delete(LocationStateHistory).where(
             LocationStateHistory.novel_id == novel_id, LocationStateHistory.episode_index == episode_index

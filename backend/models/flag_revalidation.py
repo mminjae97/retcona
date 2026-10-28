@@ -23,25 +23,24 @@ revalidations go with them (ON DELETE CASCADE).
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Float, ForeignKey, Index, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
-from models.base import Base, NovelScopedMixin, TimestampMixin
+from models.base import Base, NovelScopedMixin, TimestampMixin, UtcDateTime
 
 
 class FlagRevalidation(Base, NovelScopedMixin, TimestampMixin):
     __tablename__ = "flag_revalidations"
     __table_args__ = (Index("ix_flag_revalidations_novel_flag_created", "novel_id", "flag_id", "created_at"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     flag_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("contradiction_flags.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("contradiction_flags.id", ondelete="CASCADE"), nullable=False, index=True
     )
     status: Mapped[str] = mapped_column(String, nullable=False, default="queued")  # queued | running | succeeded | failed
     error: Mapped[str | None] = mapped_column(Text)
     outcome: Mapped[str | None] = mapped_column(String)  # resolved | contradicts
     setting: Mapped[str | None] = mapped_column(Text)
     confidence: Mapped[float | None] = mapped_column(Float)
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(UtcDateTime)

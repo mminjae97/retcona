@@ -23,7 +23,7 @@ from api.novels import router as novels_router
 from api.relations import router as relations_router
 from api.settings import router as settings_router
 from infra.queue_client import get_queue_client
-from models.db import check_database
+from models.db import check_database, upgrade_database
 from pipeline.empty_trash import request_empty_trash
 from workers.runner import JobRunner
 
@@ -82,7 +82,9 @@ class NoFramingMiddleware:
 async def lifespan(app: FastAPI):
     # Blocking DB work, off the event loop (nothing else is being served yet,
     # but this still shouldn't set the precedent of blocking it from
-    # lifespan).
+    # lifespan). The database is created on the first start, and upgraded
+    # after the app is (10.5.4).
+    await asyncio.to_thread(upgrade_database)
     await asyncio.to_thread(check_database)
     # The job queue's runner (design doc 10.2), in this process. It loads the
     # models in its own thread, so requests are served meanwhile.

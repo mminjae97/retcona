@@ -79,8 +79,8 @@ Code: `backend/infra/llm_client.py`, `backend/ai/llm.py`.
 
 ## 4. Installer, signing and updates
 
-**Now:** no installer; the app runs from the development setup (Docker
-PostgreSQL, `uvicorn`, `vite`).
+**Now:** no installer; the app runs from the development setup (`uvicorn`,
+`vite`; the database is a SQLite file the backend creates).
 
 **To do:**
 - [ ] Code signing. Unsigned, the installer gets a SmartScreen warning that

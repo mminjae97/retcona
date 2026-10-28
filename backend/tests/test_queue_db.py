@@ -1,28 +1,19 @@
-"""The job queue against a real database (infra/queue_client.py, api/episodes.py).
+"""The job queue against the tests' database (infra/queue_client.py,
+api/episodes.py; tests/conftest.py). The tests make their own novel and touch
+only its rows and jobs."""
 
-Opt-in, as nothing else here needs a database: set RETCONA_DB_TESTS=1 and
-DATABASE_URL to a migrated database (`alembic upgrade head` from db/) that no
-backend is running against (it would hold the runner lock and take the jobs).
-The tests make their own novel and touch only its rows and jobs.
-
-    RETCONA_DB_TESTS=1 DATABASE_URL=postgresql+psycopg://... pytest tests/test_queue_db.py
-"""
-
-import os
 import threading
 import time
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
-
-pytestmark = pytest.mark.skipif(os.environ.get("RETCONA_DB_TESTS") != "1", reason="needs RETCONA_DB_TESTS=1 and a database")
-
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import delete, select, update
 
 from api.main import CLIENT_HEADER, app
 from infra.queue_client import DatabaseQueueClient
-from models.db import SessionLocal, engine
+from models.db import SessionLocal, unlock_file
 from models.job import Job
 from pipeline import validate_episode as ve
 
@@ -41,13 +32,13 @@ def episode():
 
 def _drop_jobs(novel_id: uuid.UUID) -> None:
     with SessionLocal() as db:
-        db.execute(delete(Job).where(Job.payload["novel_id"].astext == str(novel_id)))
+        db.execute(delete(Job).where(Job.payload["novel_id"].as_string() == str(novel_id)))
         db.commit()
 
 
 def _jobs(novel_id: uuid.UUID) -> list[Job]:
     with SessionLocal() as db:
-        return list(db.scalars(select(Job).where(Job.payload["novel_id"].astext == str(novel_id))))
+        return list(db.scalars(select(Job).where(Job.payload["novel_id"].as_string() == str(novel_id))))
 
 
 def _validate(novel_id, episode_id) -> dict:
@@ -126,7 +117,7 @@ def test_a_run_whose_job_is_gone_is_abandoned_but_one_still_running_is_not(episo
     ve._claim_run(novel_id, run_id)
     # Running for however long: still pending.
     with SessionLocal() as db:
-        db.execute(text("UPDATE jobs SET started_at = now() - interval '2 hours' WHERE id = :id"), {"id": job.id})
+        db.execute(update(Job).where(Job.id == job.id).values(started_at=datetime.now(UTC) - timedelta(hours=2)))
         db.commit()
     assert _latest(novel_id, episode_id)["status"] == "running"
     queue.ack(job.id)
@@ -134,25 +125,19 @@ def test_a_run_whose_job_is_gone_is_abandoned_but_one_still_running_is_not(episo
     assert (latest["status"], latest["error"]) == ("failed", "abandoned")
 
 
-def test_one_runner_lock_per_database_free_again_when_its_connection_goes():
+def test_one_runner_lock_per_database_free_again_when_its_holder_closes_it():
     first, second = DatabaseQueueClient(), DatabaseQueueClient()
-    assert first.hold_runner_lock()
     try:
-        assert first.hold_runner_lock(), "still held: checked in pg_locks"
+        assert first.hold_runner_lock()
+        assert first.hold_runner_lock(), "still held"
         assert not second.hold_runner_lock()
-        # The database ends the holder's connection (as when it restarts).
-        pid = first._lock_connection.scalar(text("SELECT pg_backend_pid()"))
-        first._lock_connection.commit()
-        with engine.connect() as other:
-            other.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": pid})
-            other.commit()
-        time.sleep(0.2)
+        # The holder lets it go (as the OS does when its process ends).
+        unlock_file(first._lock_file)
         assert second.hold_runner_lock()
-        assert not first.hold_runner_lock(), "noticed it lost the lock"
     finally:
         for each in (first, second):
-            if each._lock_connection is not None:
-                each._lock_connection.invalidate()
+            if each._lock_file is not None and not each._lock_file.closed:
+                unlock_file(each._lock_file)
 
 
 def test_a_committed_job_wakes_an_idle_runner(episode):

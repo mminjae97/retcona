@@ -11,7 +11,7 @@ compare a claim with its card's attributes key by key, so the card is all they
 need. A location's card also carries its latest state before the episode, which
 the location judgment holds the episode's features against.
 
-Narrowing past settings and state history down by similarity (pgvector +
+Narrowing past settings and state history down by similarity (vector search +
 reranker, chapter 5) comes with the modules that read free text: behavior
 (OOC) and spacetime.
 

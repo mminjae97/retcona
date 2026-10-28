@@ -89,9 +89,9 @@ def list_episodes(
         db.scalars(
             select(Episode)
             # This list view only needs the summary fields — defers the Text
-            # content and 1024-dim embedding columns so listing a novel with
-            # many/long episodes doesn't pull its whole manuscript text over
-            # the wire just to discard it during response serialization.
+            # content column so listing a novel with many/long episodes
+            # doesn't read its whole manuscript text just to discard it
+            # during response serialization.
             .options(load_only(Episode.id, Episode.episode_index, Episode.status, Episode.updated_at))
             .where(Episode.novel_id == novel_id)
             .order_by(Episode.episode_index.asc())
@@ -110,10 +110,10 @@ def create_episode(
     # Locks the novel row for the rest of this transaction so two concurrent
     # creates (double-click, two tabs) can't both read the same MAX(episode_index)
     # and insert duplicate indexes — the second request blocks here until the
-    # first commits, by which point the MAX below reflects its new episode.
-    # Relies on the default READ COMMITTED isolation level (models/db.py) to see
-    # that committed episode once unblocked; a higher isolation level would need
-    # a fresh transaction/snapshot here instead.
+    # first commits, by which point the MAX below reflects its new episode. On
+    # SQLite the lock is the database's write lock, taken when the transaction
+    # begins (models/db.py), so the second request's transaction — and its
+    # snapshot — only starts once the first has committed.
     require_novel(db, novel_id, for_update=True)
     next_index = db.scalar(
         select(func.coalesce(func.max(Episode.episode_index), 0)).where(Episode.novel_id == novel_id)
@@ -533,7 +533,7 @@ def _accept(db: Session, novel_id: uuid.UUID, flag: ContradictionFlag, claim: Cl
     current = (getattr(card, attrs_field) or {}).get(flag.attribute)
     if normalize_name(str(current or "")) != normalize_name(flag.reference_text or ""):
         raise HTTPException(status.HTTP_409_CONFLICT, FLAG_SETTING_CHANGED)
-    # Reassigned, not mutated: SQLAlchemy doesn't see changes inside a JSONB value.
+    # Reassigned, not mutated: SQLAlchemy doesn't see changes inside a JSON value.
     setattr(card, attrs_field, {**(getattr(card, attrs_field) or {}), flag.attribute: value})
     # The author chose this value: it's theirs now, not an episode's to
     # replace or clear on a later run (models/character.py). The card's
@@ -633,7 +633,7 @@ def revalidate_flag(
         if normalize_name(str(current or "")) != normalize_name(flag.reference_text or ""):
             raise HTTPException(status.HTTP_409_CONFLICT, FLAG_SETTING_CHANGED)
         if normalize_name(body.setting) != normalize_name(str(current or "")):
-            # Reassigned, not mutated: SQLAlchemy doesn't see changes inside a JSONB value.
+            # Reassigned, not mutated: SQLAlchemy doesn't see changes inside a JSON value.
             setattr(card, attrs_field, {**attrs, flag.attribute: body.setting})
             # The author's value now, not an episode's to replace on a later run.
             card.attr_sources = {

@@ -1,27 +1,17 @@
-"""The trash against a real database (api/novels.py, pipeline/empty_trash.py).
+"""The trash against the tests' database (api/novels.py,
+pipeline/empty_trash.py; tests/conftest.py)."""
 
-Opt-in, like tests/test_queue_db.py: set RETCONA_DB_TESTS=1 and DATABASE_URL
-to a migrated database no backend is running against — a throwaway one: the
-tests empty its trash, deleting for good every novel in it past its 30 days.
-
-    RETCONA_DB_TESTS=1 DATABASE_URL=postgresql+psycopg://... pytest tests/test_trash_db.py
-"""
-
-import os
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
-pytestmark = pytest.mark.skipif(os.environ.get("RETCONA_DB_TESTS") != "1", reason="needs RETCONA_DB_TESTS=1 and a database")
-
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 
 from api.main import CLIENT_HEADER, app
 from infra.queue_client import QueuedJob
 from models.base import Base
-from models.db import SessionLocal
+from models.db import SessionLocal, engine
 from models.job import Job
 from models.novel import TRASH_KEPT, Novel
 from models.validation_run import ValidationRun
@@ -59,7 +49,7 @@ def _trash() -> dict[str, dict]:
 def _deleted_days_ago(novel_id: uuid.UUID, days: int) -> None:
     with SessionLocal() as db:
         db.execute(
-            update(Novel).where(Novel.id == novel_id).values(deleted_at=func.now() - timedelta(days=days))
+            update(Novel).where(Novel.id == novel_id).values(deleted_at=datetime.now(UTC) - timedelta(days=days))
         )
         db.commit()
 
@@ -71,7 +61,8 @@ def _delete_for_good(novel_id: uuid.UUID) -> None:
 
 
 def _rows(novel_id: uuid.UUID) -> int:
-    """The novel's rows, in its own table and every one under it."""
+    """The novel's rows, in its own table and every one under it (every table
+    but jobs has a novel_id: test_every_row_under_a_novel_goes_with_it)."""
     with SessionLocal() as db:
         count = db.scalar(select(func.count()).select_from(Novel).where(Novel.id == novel_id))
         for table in Base.metadata.sorted_tables:
@@ -111,6 +102,21 @@ def test_emptying_the_trash_deletes_only_novels_past_their_days_with_everything_
     assert _rows(other) == 1
     assert str(other) in _trash()
     _delete_for_good(other)
+
+
+def test_every_row_under_a_novel_goes_with_it():
+    """What a purge relies on (pipeline/empty_trash.py): every foreign key in
+    the database cascades, so deleting a novel deletes what's under it, and
+    every table under a novel carries its novel_id (what _rows counts)."""
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
+        tables = [name for (name,) in connection.execute(text("SELECT name FROM sqlite_master WHERE type = 'table'"))]
+        for table in tables:
+            for key in connection.execute(text(f"PRAGMA foreign_key_list('{table}')")).mappings():
+                assert key["on_delete"] == "CASCADE", f"{table}.{key['from']}"
+    for table in Base.metadata.sorted_tables:
+        if table.name not in ("novels", "jobs"):
+            assert "novel_id" in table.c, table.name
 
 
 def test_a_novel_past_its_days_not_yet_deleted_can_still_be_restored(novel):
