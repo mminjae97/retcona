@@ -26,6 +26,7 @@ class ClaimLinkChoice(Base, NovelScopedMixin, TimestampMixin):
     __table_args__ = (UniqueConstraint("episode_id", "said", name="uq_claim_link_choices_key"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    episode_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Indexed by the unique constraint it leads.
+    episode_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False)
     said: Mapped[str] = mapped_column(Text, nullable=False)
     subject_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)

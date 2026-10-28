@@ -34,7 +34,8 @@ class FlagDismissal(Base, NovelScopedMixin, TimestampMixin):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    episode_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Indexed by the unique constraint it leads.
+    episode_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("episodes.id", ondelete="CASCADE"), nullable=False)
     subject_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
     attribute: Mapped[str] = mapped_column(String, nullable=False)
     said: Mapped[str] = mapped_column(Text, nullable=False)

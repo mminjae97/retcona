@@ -7,8 +7,9 @@ Create Date: 2026-10-28 11:34:56.333670
 The whole schema, for SQLite (design doc 10.1), in place of the PostgreSQL
 migrations before it: the app's data starts afresh in its data folder. Every
 foreign key cascades (a novel deleted for good takes everything under it,
-pipeline/empty_trash.py), and every foreign key column is indexed, so a
-cascade doesn't read a whole table per row.
+pipeline/empty_trash.py), and every foreign key column is indexed (by its
+own index, or a unique constraint it leads), so a cascade doesn't read a
+whole table per row.
 Timestamps (UtcDateTime in the models) are text in UTC.
 """
 from alembic import op
@@ -165,7 +166,6 @@ def upgrade() -> None:
     sa.UniqueConstraint('episode_id', 'said', name='uq_claim_link_choices_key')
     )
     with op.batch_alter_table('claim_link_choices', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_claim_link_choices_episode_id'), ['episode_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_claim_link_choices_novel_id'), ['novel_id'], unique=False)
 
     op.create_table('claims',
@@ -258,7 +258,6 @@ def upgrade() -> None:
     sa.UniqueConstraint('episode_id', 'subject_id', 'attribute', 'said', 'reference', name='uq_flag_dismissals_key')
     )
     with op.batch_alter_table('flag_dismissals', schema=None) as batch_op:
-        batch_op.create_index(batch_op.f('ix_flag_dismissals_episode_id'), ['episode_id'], unique=False)
         batch_op.create_index(batch_op.f('ix_flag_dismissals_novel_id'), ['novel_id'], unique=False)
 
     op.create_table('location_state_history',
@@ -368,7 +367,6 @@ def downgrade() -> None:
     op.drop_table('location_state_history')
     with op.batch_alter_table('flag_dismissals', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_flag_dismissals_novel_id'))
-        batch_op.drop_index(batch_op.f('ix_flag_dismissals_episode_id'))
 
     op.drop_table('flag_dismissals')
     with op.batch_alter_table('event_participants', schema=None) as batch_op:
@@ -399,7 +397,6 @@ def downgrade() -> None:
     op.drop_table('claims')
     with op.batch_alter_table('claim_link_choices', schema=None) as batch_op:
         batch_op.drop_index(batch_op.f('ix_claim_link_choices_novel_id'))
-        batch_op.drop_index(batch_op.f('ix_claim_link_choices_episode_id'))
 
     op.drop_table('claim_link_choices')
     with op.batch_alter_table('character_state_history', schema=None) as batch_op:

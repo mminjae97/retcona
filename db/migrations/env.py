@@ -9,6 +9,7 @@ so a migration that fails leaves the database as it was.
 
 import os
 import sys
+from collections import Counter
 from logging.config import fileConfig
 
 from alembic import context
@@ -52,6 +53,12 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
+def _broken_foreign_keys(connection: Connection) -> Counter:
+    """How many rows' foreign keys point at nothing, per (table, parent table):
+    counted, as a rebuilt table's rows get new rowids."""
+    return Counter((table, parent) for table, _, parent, _ in connection.execute(text("PRAGMA foreign_key_check")))
+
+
 def _migrate(connection: Connection) -> None:
     context.configure(
         connection=connection,
@@ -63,10 +70,13 @@ def _migrate(connection: Connection) -> None:
     # A transaction of its own, or (the app upgrading at startup) the caller's,
     # which it commits.
     with context.begin_transaction():
+        # Foreign keys are off while tables are rebuilt; checked before
+        # committing — only for rows the migration broke: one that was already
+        # (put there by another tool) shouldn't stop every upgrade after it.
+        before = _broken_foreign_keys(connection)
         context.run_migrations()
-        # Foreign keys are off while tables are rebuilt; checked before committing.
-        if broken := connection.execute(text("PRAGMA foreign_key_check")).all():
-            raise RuntimeError(f"The migration left rows whose foreign keys point at nothing: {broken[:10]}")
+        if broken := _broken_foreign_keys(connection) - before:
+            raise RuntimeError(f"The migration left rows whose foreign keys point at nothing: {dict(broken)}")
 
 
 def run_migrations_online() -> None:

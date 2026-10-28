@@ -74,6 +74,30 @@ def _state() -> tuple[set[str], set[str]]:
         engine.dispose()
 
 
+def test_a_percent_sign_in_the_install_path_is_just_a_character(tmp_path, monkeypatch):
+    # A Windows user name can have one.
+    migrations = tmp_path / "a%b" / "migrations"
+    shutil.copytree(models_db._MIGRATIONS_DIR, migrations, ignore=shutil.ignore_patterns("__pycache__"))
+    monkeypatch.setattr(models_db, "_MIGRATIONS_DIR", migrations)
+    monkeypatch.setattr(models_db, "DATABASE_URL", f"sqlite:///{(tmp_path / 'app.db').as_posix()}")
+    models_db.upgrade_database()
+    assert _state()[0] == {_head()}
+
+
+def test_a_broken_row_from_before_doesnt_stop_an_upgrade(scratch_database):
+    models_db.upgrade_database()
+    # Put there with foreign keys off (another tool): an episode of no novel.
+    with closing(sqlite3.connect(models_db.database_path())) as raw:
+        raw.execute(
+            "INSERT INTO episodes (id, episode_index, content, status, novel_id) VALUES (?, 1, '', 'draft', ?)",
+            (uuid.uuid4().hex, uuid.uuid4().hex),
+        )
+        raw.commit()
+    revision = _add_revision(scratch_database, "added_later")
+    models_db.upgrade_database()
+    assert _state()[0] == {revision}
+
+
 def test_the_first_start_creates_the_database_with_no_copy(scratch_database):
     models_db.upgrade_database()
     revisions, tables = _state()

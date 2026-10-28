@@ -223,8 +223,8 @@ def check_schema_is_current(connection: Connection) -> None:
     current = set(MigrationContext.configure(connection).get_current_heads())
     if not current:
         raise RuntimeError(
-            f"The database has no migrations applied, and {_MIGRATIONS_DIR}, which would create its tables, "
-            "isn't there — an install has to ship db/migrations."
+            f"The database has no migrations applied, and {_MIGRATIONS_DIR} has none to apply "
+            "— an install has to ship db/migrations with its versions."
         )
     if not _MIGRATIONS_DIR.is_dir():
         _require_schema(connection, f"{_MIGRATIONS_DIR} not found, so revision {sorted(current)} can't be checked")
@@ -303,7 +303,8 @@ def upgrade_database() -> None:
                     backup = _back_up()
                     logger.info("Upgrading the database from %s; copied it to %s first", sorted(current), backup)
                 config = Config()
-                config.set_main_option("script_location", str(_MIGRATIONS_DIR))
+                # A % in the path doubled: alembic's config reads % as interpolation.
+                config.set_main_option("script_location", str(_MIGRATIONS_DIR).replace("%", "%%"))
                 # env.py migrates on this connection, in its transaction, rather than opening its own.
                 config.attributes["connection"] = connection
                 command.upgrade(config, "head")
