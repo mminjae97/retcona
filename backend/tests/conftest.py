@@ -9,9 +9,12 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from sqlalchemy import URL
 
 _DIR = Path(tempfile.mkdtemp(prefix="retcona-tests-"))
-os.environ["DATABASE_URL"] = f"sqlite:///{(_DIR / 'retcona.db').as_posix()}"
+# Built, not pasted into a string, as models/db.py builds its own: a % in the
+# temporary folder's path stays a %.
+os.environ["DATABASE_URL"] = URL.create("sqlite", database=(_DIR / "retcona.db").as_posix()).render_as_string()
 
 
 @pytest.fixture(scope="session", autouse=True)

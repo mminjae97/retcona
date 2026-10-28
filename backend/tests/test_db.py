@@ -130,7 +130,7 @@ def test_no_upgrade_while_another_backend_process_runs_on_the_database(scratch_d
             models_db.upgrade_database()
         assert _state() == before
     finally:
-        running.close()
+        models_db.unlock_file(running)
     models_db.upgrade_database()
     assert "added_later" in _state()[1]
 

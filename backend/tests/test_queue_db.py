@@ -13,7 +13,7 @@ from sqlalchemy import delete, select, update
 
 from api.main import CLIENT_HEADER, app
 from infra.queue_client import DatabaseQueueClient
-from models.db import SessionLocal
+from models.db import SessionLocal, unlock_file
 from models.job import Job
 from pipeline import validate_episode as ve
 
@@ -131,13 +131,13 @@ def test_one_runner_lock_per_database_free_again_when_its_holder_closes_it():
         assert first.hold_runner_lock()
         assert first.hold_runner_lock(), "still held"
         assert not second.hold_runner_lock()
-        # The holder's process ends: the OS closes the file, and the lock goes.
-        first._lock_file.close()
+        # The holder lets it go (as the OS does when its process ends).
+        unlock_file(first._lock_file)
         assert second.hold_runner_lock()
     finally:
         for each in (first, second):
-            if each._lock_file is not None:
-                each._lock_file.close()
+            if each._lock_file is not None and not each._lock_file.closed:
+                unlock_file(each._lock_file)
 
 
 def test_a_committed_job_wakes_an_idle_runner(episode):

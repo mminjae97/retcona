@@ -100,6 +100,21 @@ def lock_file(path: Path) -> IO[bytes] | None:
     return file
 
 
+def unlock_file(file: IO[bytes]) -> None:
+    """Releases a lock_file lock now and closes the file. Unlocked first:
+    Windows may release a lock left to the close a little later, and the
+    process that let it go may want it again straight away (the runner
+    after an upgrade)."""
+    try:
+        if os.name == "nt":
+            file.seek(0)
+            msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(file.fileno(), fcntl.LOCK_UN)
+    finally:
+        file.close()
+
+
 def sqlite_engine(*, foreign_keys: bool = True, **kwargs) -> Engine:
     """An engine on the database file, whose folder is made if missing when it
     first connects. foreign_keys off: for migrations only, which rebuild
@@ -282,7 +297,7 @@ def upgrade_database() -> None:
                     "Another backend process is running on this database: close it, then start this one "
                     f"again to upgrade the database from {sorted(current)} to {sorted(expected)}."
                 )
-            with runner_lock:
+            try:
                 if current:
                     # Another connection reads it meanwhile, as WAL lets it.
                     backup = _back_up()
@@ -293,6 +308,9 @@ def upgrade_database() -> None:
                 config.attributes["connection"] = connection
                 command.upgrade(config, "head")
                 connection.commit()
+            finally:
+                # The runner (api/main.py) takes it next, in this process.
+                unlock_file(runner_lock)
         logger.info("The database is at %s (%s)", sorted(expected), database_path())
     finally:
         migrations.dispose()

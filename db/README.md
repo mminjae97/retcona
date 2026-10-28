@@ -11,6 +11,8 @@ alembic revision --autogenerate -m "description"
 alembic upgrade head
 ```
 
+The app upgrades its database itself; `alembic upgrade head` by hand doesn't copy it aside first or check that no app is running on it — close the app, and copy `retcona.db` yourself if it holds anything you need.
+
 `alembic` works on the app's database, or the one `DATABASE_URL` names. Migrations are written in batch mode (`render_as_batch`), as SQLite can't alter most of a table in place; a hand-written one uses `op.batch_alter_table` the same way. They run with foreign keys off (a batch rebuild drops and recreates tables, which would otherwise cascade), checked with `PRAGMA foreign_key_check` before the transaction commits. A new foreign key needs `ondelete="CASCADE"` (`tests/test_trash_db.py` checks it).
 
 `env.py` imports `backend/models/__init__.py`, which in turn imports every model module so they're registered on `Base.metadata` before autogenerate runs.
